@@ -126,3 +126,183 @@ in APPPATH\Controllers\UserController.php on line 138.
  5 SYSTEMPATH\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
  6 FCPATH\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
  7 SYSTEMPATH\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\public\\index.php')
+ERROR - 2025-02-26 23:22:01 --> Error connecting to the database: TypeError: mysqli::real_connect(): Argument #5 ($port) must be of type ?int, string given in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:201
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\MySQLi\Connection.php(201): mysqli->real_connect('localhost', 'root', Object(SensitiveParameterValue), 'ci4', '3306', '', 0)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#2 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#3 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#4 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#5 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#6 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#7 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#10 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#11 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#12 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#13 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#14 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#15 {main}
+
+Next CodeIgniter\Database\Exceptions\DatabaseException: mysqli::real_connect(): Argument #5 ($port) must be of type ?int, string given in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:246
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#2 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#3 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#4 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#5 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#6 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#7 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#10 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#11 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#12 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#13 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#14 {main}
+ERROR - 2025-02-26 23:22:07 --> Error connecting to the database: TypeError: mysqli::real_connect(): Argument #5 ($port) must be of type ?int, string given in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:201
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\MySQLi\Connection.php(201): mysqli->real_connect('localhost', 'root', Object(SensitiveParameterValue), 'ci4', '3306', '', 0)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#2 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#3 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#4 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#5 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#6 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#7 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#10 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#11 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#12 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#13 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#14 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#15 {main}
+
+Next CodeIgniter\Database\Exceptions\DatabaseException: mysqli::real_connect(): Argument #5 ($port) must be of type ?int, string given in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:246
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#2 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#3 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#4 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#5 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#6 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#7 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#10 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#11 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#12 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#13 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#14 {main}
+ERROR - 2025-02-26 23:22:29 --> Error connecting to the database: mysqli_sql_exception: Unknown database 'ci4' in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:201
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\MySQLi\Connection.php(201): mysqli->real_connect('localhost', 'root', Object(SensitiveParameterValue), 'ci4', 3306, '', 0)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#2 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#3 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#4 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#5 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#6 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#7 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#10 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#11 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#12 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#13 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#14 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#15 {main}
+
+Next CodeIgniter\Database\Exceptions\DatabaseException: Unknown database 'ci4' in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:246
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#2 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#3 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#4 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#5 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#6 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#7 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#10 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#11 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#12 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#13 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#14 {main}
+ERROR - 2025-02-26 23:22:29 --> Error connecting to the database: mysqli_sql_exception: Unknown database 'ci4' in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:201
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\MySQLi\Connection.php(201): mysqli->real_connect('localhost', 'root', Object(SensitiveParameterValue), 'ci4', 3306, '', 0)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#2 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#3 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#4 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#5 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#6 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#7 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#10 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#11 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#12 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#13 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#14 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#15 {main}
+
+Next CodeIgniter\Database\Exceptions\DatabaseException: Unknown database 'ci4' in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:246
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#2 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#3 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#4 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#5 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#6 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#7 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#10 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#11 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#12 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#13 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#14 {main}
+ERROR - 2025-02-26 23:22:43 --> Error connecting to the database: mysqli_sql_exception: Unknown database 'ci4' in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:201
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\MySQLi\Connection.php(201): mysqli->real_connect('localhost', 'root', Object(SensitiveParameterValue), 'ci4', 3306, '', 0)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#2 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#3 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#4 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#5 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#6 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#7 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#10 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#11 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#12 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#13 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#14 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#15 {main}
+
+Next CodeIgniter\Database\Exceptions\DatabaseException: Unknown database 'ci4' in D:\Kerja\BE\be\system\Database\MySQLi\Connection.php:246
+Stack trace:
+#0 D:\Kerja\BE\be\system\Database\BaseConnection.php(421): CodeIgniter\Database\MySQLi\Connection->connect(false)
+#1 D:\Kerja\BE\be\system\Database\BaseConnection.php(620): CodeIgniter\Database\BaseConnection->initialize()
+#2 D:\Kerja\BE\be\system\Database\BaseBuilder.php(2345): CodeIgniter\Database\BaseConnection->query('INSERT INTO `us...', Array, false)
+#3 D:\Kerja\BE\be\system\Model.php(394): CodeIgniter\Database\BaseBuilder->insert()
+#4 D:\Kerja\BE\be\system\BaseModel.php(839): CodeIgniter\Model->doInsert(Array)
+#5 D:\Kerja\BE\be\system\Model.php(800): CodeIgniter\BaseModel->insert(Array, true)
+#6 D:\Kerja\BE\be\app\Controllers\UserController.php(37): CodeIgniter\Model->insert(Array)
+#7 D:\Kerja\BE\be\system\CodeIgniter.php(933): App\Controllers\UserController->create()
+#8 D:\Kerja\BE\be\system\CodeIgniter.php(507): CodeIgniter\CodeIgniter->runController(Object(App\Controllers\UserController))
+#9 D:\Kerja\BE\be\system\CodeIgniter.php(354): CodeIgniter\CodeIgniter->handleRequest(NULL, Object(Config\Cache), false)
+#10 D:\Kerja\BE\be\system\Boot.php(334): CodeIgniter\CodeIgniter->run()
+#11 D:\Kerja\BE\be\system\Boot.php(67): CodeIgniter\Boot::runCodeIgniter(Object(CodeIgniter\CodeIgniter))
+#12 D:\Kerja\BE\be\public\index.php(56): CodeIgniter\Boot::bootWeb(Object(Config\Paths))
+#13 D:\Kerja\BE\be\system\rewrite.php(44): require_once('D:\\Kerja\\BE\\be\\...')
+#14 {main}
