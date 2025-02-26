@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Models\JsonResponse;
+use App\Models\Jwtoken;
 use App\Models\UserModel;
 use CodeIgniter\RESTful\ResourceController;
 use CodeIgniter\HTTP\ResponseInterface;
@@ -16,10 +17,12 @@ class UserController extends ResourceController
      */
     protected $model;
     protected $responses;
+    protected $JWToken;
     public function __construct()
     {
         $this->model = new UserModel();
         $this->responses = new JsonResponse();
+        $this->JWToken = new Jwtoken();
     }
     public function create()
     {
@@ -31,15 +34,21 @@ class UserController extends ResourceController
                 "password" => password_hash($this->request->getVar("password"), PASSWORD_DEFAULT),
                 "access" => $this->request->getVar("access"),
             ];
-            $query = $this->model->save($data);
-            if ($query) {
-                return $this->responses->oneResp("Registrasi Berhasil");
+            if ($this->model->insert($data)) {
+
+                $insertedUserId = $this->model->insertID();
+
+                $data['user_id'] = $insertedUserId;
+                $token = $this->JWToken->generateToken($data);
+                if ($token) {
+                    return $this->responses->oneResp("Registrasi Berhasil", ["token" => $token, "user_id" => $insertedUserId]);
+                }
             } else {
                 return $this->responses->error("Tolong di Cek kembali");
             }
 
         } catch (\Exception $e) {
-            return $this->responses->error($e->getMessage(),400);
+            return $this->responses->error($e->getMessage(), 400);
         }
     }
 
@@ -50,13 +59,17 @@ class UserController extends ResourceController
                 ->first();
 
             if ($query && password_verify($this->request->getVar("password"), $query['password'])) {
-                return $this->responses->oneResp("Login Berhasil");
+                $data["user_id"] = $query["user_id"];
+                $token = $this->JWToken->generateToken($data);
+                if ($token) {
+                    return $this->responses->oneResp("Login Berhasil", ["token" => $token, "user_id" => $query["user_id"]]);
+                }
             } else {
                 return $this->responses->error("Username atau Password Salah", 401);
             }
 
         } catch (\Exception $e) {
-            return $this->responses->error($e->getMessage(),400);
+            return $this->responses->error($e->getMessage(), 400);
         }
     }
 
@@ -82,7 +95,7 @@ class UserController extends ResourceController
             }
 
         } catch (\Exception $e) {
-            return $this->responses->error($e->getMessage(),400);
+            return $this->responses->error($e->getMessage(), 400);
         }
     }
 
@@ -92,14 +105,14 @@ class UserController extends ResourceController
                 $query = $this->model->where("user_id", $id)
                     ->first();
 
-                    if ($query) {
-                        return $this->responses->oneResp("Data Berhasil Dihapus");
-                    } else {
-                        return $this->responses->error("Gagal Dihapus");
-                    }
+                if ($query) {
+                    return $this->responses->oneResp("Data Berhasil Dihapus");
+                } else {
+                    return $this->responses->error("Gagal Dihapus");
+                }
 
             } catch (\Exception $e) {
-                return $this->responses->error($e->getMessage(),400);
+                return $this->responses->error($e->getMessage(), 400);
             }
         }
         ;
@@ -120,7 +133,7 @@ class UserController extends ResourceController
             }
 
         } catch (\Exception $e) {
-            return $this->responses->error($e->getMessage(),400);
+            return $this->responses->error($e->getMessage(), 400);
         }
     }
 }

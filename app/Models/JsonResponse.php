@@ -2,26 +2,26 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
 use CodeIgniter\HTTP\ResponseInterface;
-class JsonResponse extends Model
+
+class JsonResponse
 {
-    public function oneResp($message = "", $data = null, $code = 200)
+    public function oneResp($message = "", $data = null, $code = 200): ResponseInterface
     {
         $res = [
             "status" => "success",
             "message" => $message,
             "data" => $data,
         ];
-        return $this->response($res, $code);
+        return service('response')->setJSON($res)->setStatusCode($code);
     }
 
-    public function error($message = "", $code = 400)
+    public function error($message = "", $code = 400): ResponseInterface
     {
         $res = [
             "status" => "error",
             "message" => $message,
         ];
-        return $this->response($res, $code);
+        return service('response')->setJSON($res)->setStatusCode($code);
     }
 }
