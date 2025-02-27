@@ -119,4 +119,83 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage());
         }
     }
+
+    public function getAllProduct()
+    {
+        try {
+            $sortBy = $this->request->getGet('sortBy') ?? 'product.id';
+            $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+            $namaProduct = $this->request->getGet('namaProduct') ?? '';
+            $namaSeri = $this->request->getGet('namaSeri') ?? '';
+            $namaModel = $this->request->getGet('namaModel') ?? '';
+            $limit = (int) ($this->request->getGet('limit') ?? 10);
+            $limit = $limit > 0 ? $limit : 10;
+            $page = (int) ($this->request->getGet('page') ?? 1);
+            $page = $page > 0 ? $page : 1;
+
+            $offset = ($page - 1) * $limit;
+
+            // Fetching products with filters and pagination
+            $productQuery = $this->productModel
+                ->select('product.*, model_barang.nama_model, seri.seri')
+                ->join('model_barang', 'model_barang.id = product.id_seri_barang')
+                ->join('seri', 'seri.id = product.id_seri_barang')
+                ->orderBy($sortBy, $sortMethod)
+                ->limit($limit, $offset);
+
+            if (!empty($namaProduct)) {
+                $productQuery->like('nama_barang', $namaProduct, 'both');
+            }
+
+            if (!empty($namaModel)) {
+                $productQuery->like('model_barang.nama_model', $namaModel, 'both');
+            }
+
+            if (!empty($namaSeri)) {
+                $productQuery->like('seri.seri', $namaSeri, 'both');
+            }
+
+            $products = $productQuery->get()->getResultArray();
+
+            if (!empty($products)) {
+                $productIds = array_column($products, 'id');
+
+                $stockData = $this->productModel
+                    ->select('stock.id_barang, stock.stock, stock.barang_cacat, toko.toko_name')
+                    ->join('stock', 'stock.id_barang = product.id', 'left')
+                    ->join('toko', 'toko.id = stock.id_toko', 'left')
+                    ->whereIn('product.id', $productIds)
+                    ->get()
+                    ->getResultArray();
+
+                // Map stock data to products
+                $stockMap = [];
+                foreach ($stockData as $stock) {
+                    $stockMap[$stock['id_barang']][] = [
+                        'stock' => $stock['stock'],
+                        'barang_cacat' => $stock['barang_cacat'],
+                        'toko_name' => $stock['toko_name'],
+                    ];
+                }
+
+                foreach ($products as &$product) {
+                    $product['stock'] = $stockMap[$product['id']] ?? [];
+                }
+
+                $total_data = $this->productModel
+                    ->join('model_barang', 'model_barang.id = product.id_seri_barang')
+                    ->join('seri', 'seri.id = product.id_seri_barang')
+                    ->countAllResults();
+
+                $total_page = ceil($total_data / $limit);
+
+                return $this->jsonResponse->multiResp('', $products, $total_data, $total_page, 200);
+            } else {
+                return $this->jsonResponse->multiResp('', [], 0, 0, 200);
+            }
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage());
+        }
+    }
+
 }

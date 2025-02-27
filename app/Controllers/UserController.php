@@ -140,7 +140,7 @@ class UserController extends ResourceController
             $limit = (int) $this->request->getGet('limit') ?? 10;
             $page = (int) $this->request->getGet('page') ?? 1;
 
-            $allowedSortBy = ['id', 'toko_name', 'alamat', 'phone_number', 'email_toko'];
+            $allowedSortBy = ['id', 'toko_name'];
             $allowedSortMethod = ['asc', 'desc'];
 
             $sortBy = in_array($sortBy, $allowedSortBy) ? $sortBy : 'id';
