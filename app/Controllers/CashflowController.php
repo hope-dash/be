@@ -21,17 +21,19 @@ class CashflowController extends ResourceController
     // Create Cashflow
     public function create()
     {
-        $data = $this->request->getPost();
+        $data = $this->request->getJSON(true);
+
+        $data['date_time'] = date('Y-m-d H:i:s');
 
         $validation = \Config\Services::validation();
         $validation->setRules([
             'amount' => 'required|decimal',
-            'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]', 
+            'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
             'type' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
 
-       if (!$this->validate($validation->getRules())) {
+        if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
 
@@ -42,12 +44,12 @@ class CashflowController extends ResourceController
     // Edit Cashflow
     public function edit($id = null)
     {
-        $data = $this->request->getRawInput();
+        $data = $this->request->getVar();
 
         $validation = \Config\Services::validation();
         $validation->setRules([
             'amount' => 'required|decimal',
-            'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]', 
+            'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
             'type' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
@@ -64,4 +66,18 @@ class CashflowController extends ResourceController
         $this->model->update($id, $data);
         return $this->jsonResponse->oneResp('Cashflow updated successfully', ['id' => $id], 200);
     }
+
+    public function listCashflow()
+    {
+
+        $filters = $this->request->getGet();
+        $limit = isset($filters['limit']) ? (int) $filters['limit'] : 10;
+        $offset = isset($filters['offset']) ? (int) $filters['offset'] : 0;
+        $cashflows = $this->model->getCashflow($filters, $limit, $offset);
+        $total_data = $this->model->countCashflow($filters);
+        $total_page = ceil($total_data / $limit);
+
+        return $this->jsonResponse->multiResp('Cashflow retrieved successfully', $cashflows, $total_data, $total_page);
+    }
+
 }

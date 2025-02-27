@@ -16,6 +16,8 @@ $routes->group('api', function ($routes) {
     $routes->get('user/(:num)', 'UserController::userById/$1');
     $routes->post('cashflow', 'CashflowController::create');
     $routes->put('cashflow/(:num)', 'CashflowController::edit/$1');
+    $routes->get('cashflow', 'CashflowController::listCashflow');
+
 });
 
 

@@ -30,6 +30,10 @@ class CreateTransactionTable extends Migration
                 'type' => 'INT',
                 'constraint' => 11,
             ],
+            'date_time' => [
+                'type' => 'DATETIME',
+                'null' => true,
+            ],
         ]);
         $this->forge->addKey('id', true);
         $this->forge->createTable('transaction');
