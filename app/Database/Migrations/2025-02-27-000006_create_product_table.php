@@ -14,10 +14,6 @@ class CreateProductTable extends Migration
                 'constraint' => 5,
                 'auto_increment' => true,
             ],
-            'id_barang' => [
-                'type' => 'VARCHAR',
-                'constraint' => 5,
-            ],
             'nama_barang' => [
                 'type' => 'VARCHAR',
                 'constraint' => '100',

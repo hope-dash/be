@@ -38,6 +38,7 @@ $routes->group('api', function ($routes) {
     $routes->put('seri/(:num)', 'BarangController::updateSeri/$1');
 
     $routes->post('product', 'ProductController::createProduct');
+    $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
 
 });
 

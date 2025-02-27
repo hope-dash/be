@@ -58,7 +58,7 @@ class ProductController extends ResourceController
 
         // Prepare product data
         $productData = [
-            'id_barang' => $productId,
+            // 'id_barang' => $productId,
             'nama_barang' => $data->nama_barang,
             'id_seri_barang' => $data->id_seri_barang,
             'harga_modal' => $data->harga_modal,
@@ -82,5 +82,41 @@ class ProductController extends ResourceController
         // Insert stock data
         $this->stockModel->insertBatch($stockData);
         return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $productId], 201);
+    }
+
+    public function getDetailById($id = null)
+    {
+        try {
+            $product = $this->productModel->find($id);
+            if ($product) {
+                $product = $this->productModel
+                    ->select('product.*, model_barang.nama_model, seri.seri')
+                    ->join('model_barang', 'model_barang.id = product.id_seri_barang')
+                    ->join('seri', 'seri.id = product.id_seri_barang')
+                    ->where('product.id', $id)
+                    ->first();
+
+                if ($product) {
+                    $product = (array) $product;
+                    $stockData = $this->productModel
+                        ->select('stock.id, stock.stock, stock.barang_cacat, toko.toko_name')
+                        ->join('stock', 'stock.id_barang = product.id', 'left')
+                        ->join('toko', 'toko.id = stock.id_toko', 'left')
+                        ->where('product.id', $id)
+                        ->get()
+                        ->getResultArray();
+
+                    $product['stock'] = $stockData;
+
+                    return $this->jsonResponse->oneResp('', $product);
+                } else {
+                    return $this->jsonResponse->error('Product Not Found');
+                }
+            } else {
+                return $this->jsonResponse->error('Product Not Found');
+            }
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage());
+        }
     }
 }
