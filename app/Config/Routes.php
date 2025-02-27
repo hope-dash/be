@@ -12,6 +12,7 @@ $routes->group('api', function ($routes) {
     $routes->post('register', 'UserController::create');
     $routes->post('login', 'UserController::login');
     $routes->get('user/(:num)', 'UserController::userById/$1');
+    $routes->get('user', 'UserController::getAllUser');
     $routes->put('user/(:num)', 'UserController::edit/$1');
     $routes->delete('user/(:num)', 'UserController::delete/$1');
     $routes->post('cashflow', 'CashflowController::create');
