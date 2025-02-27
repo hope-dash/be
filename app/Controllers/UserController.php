@@ -99,41 +99,40 @@ class UserController extends ResourceController
         }
     }
 
-    public function delete($id = null)
-    { {
-            try {
+    public function delete($id=null){
+        {
+            try{
                 $query = $this->model->where("user_id", $id)
-                    ->first();
-
+                                 ->first();
+    
                 if ($query) {
-                    return $this->responses->oneResp("Data Berhasil Dihapus");
+                    $this->model->delete($id);
+                    return $this->responses->oneResp("Data Deleted", "", 200);
                 } else {
-                    return $this->responses->error("Gagal Dihapus");
+                    return $this->responses->error("User Not Found", 401);
                 }
-
-            } catch (\Exception $e) {
-                return $this->responses->error($e->getMessage(), 400);
+    
+            } catch(\Exception $e){
+                return $this->respond([
+                    "status" => "error",
+                    "message" => $this->request->getVar("username")
+                ], 400);
+            }
+        };
+        }
+    
+        public function userById($id=null){
+            try{
+                $user = $this->model->where("user_id", $id);
+                if($user){
+                    $query = $this->model->first();
+                    return $this->responses->oneResp("", $query, 200);
+                } else {
+                    return $this->responses->error("User Not Found", 401);
+                }
+                
+            } catch(\Exception $e){
+                return $this->respond($e->getMessage(), 400);
             }
         }
-        ;
-    }
-
-    public function userById($id = null)
-    {
-        try {
-            $user = $this->model->find($id);
-            if (!$user) {
-                return $this->failNotFound("User with ID $id not found.");
-            }
-            $query = $this->model->where("user_id", $id)->first();
-            if ($query) {
-                return $this->responses->oneResp("", $query);
-            } else {
-                return $this->responses->error("Gagal Dihapus");
-            }
-
-        } catch (\Exception $e) {
-            return $this->responses->error($e->getMessage(), 400);
-        }
-    }
 }

@@ -11,12 +11,18 @@ use CodeIgniter\Router\RouteCollection;
 $routes->group('api', function ($routes) {
     $routes->post('register', 'UserController::create');
     $routes->post('login', 'UserController::login');
-    $routes->put('update/(:num)', 'UserController::edit/$1');
-    $routes->delete('delete/(:num)', 'UserController::delete/$1');
     $routes->get('user/(:num)', 'UserController::userById/$1');
+    $routes->put('user/(:num)', 'UserController::edit/$1');
+    $routes->delete('user/(:num)', 'UserController::delete/$1');
     $routes->post('cashflow', 'CashflowController::create');
     $routes->put('cashflow/(:num)', 'CashflowController::edit/$1');
     $routes->get('cashflow', 'CashflowController::listCashflow');
+
+    //toko
+    $routes->post('toko', 'TokoController::create');
+    $routes->get('toko/(:num)', 'TokoController::getDetailById/$1');
+    $routes->put('toko/(:num)', 'TokoController::update/$1');
+    $routes->delete('toko/(:num)', 'TokoController::delete/$1');
 
     // Model Barang Routes
     $routes->post('model_barang', 'BarangController::createModelBarang');
