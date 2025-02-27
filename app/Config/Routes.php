@@ -21,6 +21,7 @@ $routes->group('api', function ($routes) {
     //toko
     $routes->post('toko', 'TokoController::create');
     $routes->get('toko/(:num)', 'TokoController::getDetailById/$1');
+    $routes->get('toko', 'TokoController::getAllToko');
     $routes->put('toko/(:num)', 'TokoController::update/$1');
     $routes->delete('toko/(:num)', 'TokoController::delete/$1');
 

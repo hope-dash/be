@@ -46,7 +46,7 @@ class TokoController extends BaseController
 
             return $this->jsonResponse->oneResp('Add ' . $data->toko_name . ' successfully', ['id' => $this->modelToko->insertID()], 201);
         } catch (\Exception $e) {
-            return $this->jsonResponse->error($e->getMessage(),400);
+            return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
 
@@ -76,7 +76,7 @@ class TokoController extends BaseController
 
             return $this->jsonResponse->oneResp('Toko updated successfully', ['id' => $id], 201);
         } catch (\Exception $e) {
-            return $this->jsonResponse->error($e->getMessage(),400);
+            return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
 
@@ -108,6 +108,45 @@ class TokoController extends BaseController
                 return $this->jsonResponse->error("Toko Not Found", 401);
             }
 
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    public function getAllToko()
+    {
+        try {
+            $sortBy = $this->request->getGet('sortBy') ?? 'id';
+            $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+            $namaToko = $this->request->getGet('toko_name') ?? '';
+            $limit = (int) $this->request->getGet('limit') ?? 10;
+            $page = (int) $this->request->getGet('page') ?? 1;
+
+            $allowedSortBy = ['id', 'toko_name', 'alamat', 'phone_number', 'email_toko'];
+            $allowedSortMethod = ['asc', 'desc'];
+
+            $sortBy = in_array($sortBy, $allowedSortBy) ? $sortBy : 'id';
+            $sortMethod = in_array($sortMethod, $allowedSortMethod) ? $sortMethod : 'asc';
+
+            $offset = ($page - 1) * $limit;
+
+            $result = $this->modelToko->orderBy($sortBy, $sortMethod)
+                ->limit($limit, $offset);
+
+            if (!empty($namaToko)) {
+                $result = $result->like('toko_name', $namaToko, 'both');
+            }
+
+            $result = $result->get()->getResult();
+
+            if (!$result) {
+                return $this->jsonResponse->multiResp('', [], 0, 0, 200);
+            }
+
+            $total_data = count($result);
+            $total_page = ceil($total_data / $limit);
+
+            return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
