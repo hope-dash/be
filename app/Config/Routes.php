@@ -18,6 +18,16 @@ $routes->group('api', function ($routes) {
     $routes->put('cashflow/(:num)', 'CashflowController::edit/$1');
     $routes->get('cashflow', 'CashflowController::listCashflow');
 
+    // Model Barang Routes
+    $routes->post('model_barang', 'BarangController::createModelBarang');
+    $routes->get('model_barang', 'BarangController::listModelBarang');
+    $routes->put('model_barang/(:num)', 'BarangController::updateModelBarang/$1');
+
+
+    // Seri Routes
+    $routes->post('seri', 'BarangController::createSeri');
+    $routes->get('seri', 'BarangController::listSeri');
+    $routes->put('seri/(:num)', 'BarangController::updateSeri/$1');
 });
 
 

@@ -31,6 +31,7 @@ class JsonResponse
     public function error($message = "", $code = 400): ResponseInterface
     {
         $res = [
+            "code" => $code,
             "status" => "error",
             "message" => $message,
         ];
