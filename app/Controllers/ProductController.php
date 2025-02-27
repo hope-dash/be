@@ -128,74 +128,88 @@ class ProductController extends ResourceController
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $namaSeri = $this->request->getGet('namaSeri') ?? '';
             $namaModel = $this->request->getGet('namaModel') ?? '';
-            $limit = (int) ($this->request->getGet('limit') ?? 10);
-            $limit = $limit > 0 ? $limit : 10;
-            $page = (int) ($this->request->getGet('page') ?? 1);
-            $page = $page > 0 ? $page : 1;
+            $limit = max((int) ($this->request->getGet('limit') ?? 10), 1);
+            $page = max((int) ($this->request->getGet('page') ?? 1), 1);
 
             $offset = ($page - 1) * $limit;
 
-            // Fetching products with filters and pagination
-            $productQuery = $this->productModel
-                ->select('product.*, model_barang.nama_model, seri.seri')
-                ->join('model_barang', 'model_barang.id = product.id_seri_barang')
-                ->join('seri', 'seri.id = product.id_seri_barang')
+            // Fetching products and stock in a single optimized query
+            $products = $this->productModel
+                ->select('
+                product.id, product.nama_barang, product.harga_modal, product.harga_jual,
+                model_barang.nama_model, seri.seri,
+                stock.stock, stock.barang_cacat, toko.toko_name
+            ')
+                ->join('model_barang', 'model_barang.id = product.id_seri_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->join('stock', 'stock.id_barang = product.id', 'left')
+                ->join('toko', 'toko.id = stock.id_toko', 'left')
                 ->orderBy($sortBy, $sortMethod)
                 ->limit($limit, $offset);
 
+            // Applying filters
             if (!empty($namaProduct)) {
-                $productQuery->like('nama_barang', $namaProduct, 'both');
+                $products->like('product.nama_barang', $namaProduct, 'both');
             }
 
             if (!empty($namaModel)) {
-                $productQuery->like('model_barang.nama_model', $namaModel, 'both');
+                $products->like('model_barang.nama_model', $namaModel, 'both');
             }
 
             if (!empty($namaSeri)) {
-                $productQuery->like('seri.seri', $namaSeri, 'both');
+                $products->like('seri.seri', $namaSeri, 'both');
             }
 
-            $products = $productQuery->get()->getResultArray();
+            $productData = $products->get()->getResultArray();
 
-            if (!empty($products)) {
-                $productIds = array_column($products, 'id');
+            if (!empty($productData)) {
+                // Reformatting data to group stock data under the respective product
+                $formattedProducts = [];
+                foreach ($productData as $item) {
+                    $productId = $item['id'];
 
-                $stockData = $this->productModel
-                    ->select('stock.id_barang, stock.stock, stock.barang_cacat, toko.toko_name')
-                    ->join('stock', 'stock.id_barang = product.id', 'left')
-                    ->join('toko', 'toko.id = stock.id_toko', 'left')
-                    ->whereIn('product.id', $productIds)
-                    ->get()
-                    ->getResultArray();
+                    // Initialize product data if not already set
+                    if (!isset($formattedProducts[$productId])) {
+                        $formattedProducts[$productId] = [
+                            'id' => $item['id'],
+                            'nama_barang' => $item['nama_barang'],
+                            'harga_modal' => $item['harga_modal'],
+                            'harga_jual' => $item['harga_jual'],
+                            'nama_model' => $item['nama_model'],
+                            'seri' => $item['seri'],
+                            'stock' => []
+                        ];
+                    }
 
-                // Map stock data to products
-                $stockMap = [];
-                foreach ($stockData as $stock) {
-                    $stockMap[$stock['id_barang']][] = [
-                        'stock' => $stock['stock'],
-                        'barang_cacat' => $stock['barang_cacat'],
-                        'toko_name' => $stock['toko_name'],
-                    ];
+                    // Append stock information only if available
+                    if ($item['toko_name'] !== null) {
+                        $formattedProducts[$productId]['stock'][] = [
+                            'stock' => $item['stock'],
+                            'barang_cacat' => $item['barang_cacat'],
+                            'toko_name' => $item['toko_name']
+                        ];
+                    }
                 }
 
-                foreach ($products as &$product) {
-                    $product['stock'] = $stockMap[$product['id']] ?? [];
-                }
+                $formattedProducts = array_values($formattedProducts);
 
+                // Fetch total data count without limit for pagination
                 $total_data = $this->productModel
-                    ->join('model_barang', 'model_barang.id = product.id_seri_barang')
-                    ->join('seri', 'seri.id = product.id_seri_barang')
+                    ->join('model_barang', 'model_barang.id = product.id_seri_barang', 'left')
+                    ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                     ->countAllResults();
 
                 $total_page = ceil($total_data / $limit);
 
-                return $this->jsonResponse->multiResp('', $products, $total_data, $total_page, 200);
+                return $this->jsonResponse->multiResp('', $formattedProducts, $total_data, $total_page, 200);
             } else {
                 return $this->jsonResponse->multiResp('', [], 0, 0, 200);
             }
+
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage());
         }
     }
+
 
 }
