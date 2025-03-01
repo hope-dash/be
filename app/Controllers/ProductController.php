@@ -84,6 +84,49 @@ class ProductController extends ResourceController
         return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $productId], 201);
     }
 
+    public function updateProduct($id = null)
+    {
+        $data = $this->request->getJSON();
+
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'id_model' => 'required',
+            'nama_barang' => 'required',
+            'id_seri_barang' => 'required',
+            'harga_modal' => 'required',
+            'harga_jual' => 'required',
+        ]);
+
+        if (!$this->validate($validation->getRules())) {
+            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+        }
+
+        $model = $this->modelBarangModel->find($data->id_model);
+        if (!$model) {
+            return $this->jsonResponse->error("Type not Valid", 400);
+        }
+
+        $productData = [
+            'nama_barang' => $data->nama_barang,
+            'id_seri_barang' => $data->id_seri_barang,
+            'harga_modal' => $data->harga_modal,
+            'harga_jual' => $data->harga_jual,
+        ];
+
+        $this->productModel->update($id, row: $productData);
+
+        foreach ($data->stock as $toko) {
+
+            $stockData = [
+                'stock' => $toko->stock,
+                'barang_cacat' => $toko->barang_cacat,
+            ];
+            $this->stockModel->update($toko->id_toko ,$stockData);
+        }
+
+        return $this->jsonResponse->oneResp('Update '.$data->nama_barang.' successfully', ['id' => $id], 201);
+    }
+
     public function getDetailById($id = null)
     {
         try {
