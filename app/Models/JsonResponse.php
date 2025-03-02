@@ -9,7 +9,7 @@ class JsonResponse
     public function oneResp($message = "", $data = null, $code = 200): ResponseInterface
     {
         $res = [
-            "status" => "success",
+            "status" => true,
             "message" => $message,
             "data" => $data,
         ];
@@ -19,7 +19,7 @@ class JsonResponse
     public function multiResp($message = "", $data = null, $total_data = 0, $total_page = 0, $code = 200): ResponseInterface
     {
         $res = [
-            "status" => "success",
+            "status" => true,
             "message" => $message,
             "total_data" => $total_data,
             "total_page" => $total_page,
@@ -32,7 +32,7 @@ class JsonResponse
     {
         $res = [
             "code" => $code,
-            "status" => "error",
+            "status" => false,
             "message" => $message,
         ];
         return service('response')->setJSON($res)->setStatusCode($code);
