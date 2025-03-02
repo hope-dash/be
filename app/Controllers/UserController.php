@@ -27,12 +27,26 @@ class UserController extends ResourceController
     public function create()
     {
         try {
+            $data = $this->request->getJSON();
+
+            $validation = \Config\Services::validation();
+            $validation->setRules([
+                "name" => 'required',
+                "username" => 'required|is_unique[users.username]',
+                "email" => 'required|valid_email|is_unique[users.email]',
+                "password" => 'required',
+                "access" => 'required',
+            ]);
+
+            if (!$this->validate($validation->getRules())) {
+                return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+            }
             $data = [
-                "name" => $this->request->getVar("name"),
-                "username" => $this->request->getVar("username"),
-                "email" => $this->request->getVar("email"),
-                "password" => password_hash($this->request->getVar("password"), PASSWORD_DEFAULT),
-                "access" => $this->request->getVar("access"),
+                "name" => $data->name,
+                "username" => $data->username,
+                "email" => $data->email,
+                "password" => $data->password,
+                "access" => $data->access,
             ];
             if ($this->model->insert($data)) {
                 return $this->jsonResponse->oneResp("User Created Successfully");
@@ -70,15 +84,26 @@ class UserController extends ResourceController
     {
         try {
             $user = $this->model->find($id);
+
+            $data = $this->request->getJson();
+
             if (!$user) {
                 return $this->failNotFound("User with ID $id not found.");
             }
+            $validation = \Config\Services::validation();
+            $validation->setRules([
+                "name" => 'required',
+                "username" => 'required|is_unique[users.username]',
+                "email" => 'required|valid_email|is_unique[users.email]',
+                "password" => 'required|min_length[8]',
+                "access" => 'required',
+            ]);
             $data = [
-                "name" => $this->request->getVar("name"),
-                "username" => $this->request->getVar("username"),
-                "email" => $this->request->getVar("email"),
-                "password" => password_hash($this->request->getVar("password"), PASSWORD_DEFAULT),
-                "access" => $this->request->getVar("access"),
+                "name" => $data->name,
+                "username" => $data->username,
+                "email" => $data->email,
+                "password" => $data->password,
+                "access" => $data->access,
             ];
             $query = $this->model->update($id, $data);
             if ($query) {
