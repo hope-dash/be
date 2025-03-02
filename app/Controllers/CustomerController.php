@@ -71,7 +71,7 @@ class CustomerController extends BaseController
                 'no_hp_customer' => $data->no_hp_customer,
             ];
 
-            $query = $this->customer->update($id,$customerData);
+            $query = $this->customer->update($id, $customerData);
 
             if ($query) {
                 return $this->jsonResponse->oneResp('Customer Updated', ['customer_id' => $id]);
@@ -124,36 +124,38 @@ class CustomerController extends BaseController
             $sortBy = $this->request->getGet('sortBy') ?? 'id';
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaUser = $this->request->getGet('nama_customer') ?? '';
-            $limit = (int) $this->request->getGet('limit') ?? 10;
-            $page = (int) $this->request->getGet('page') ?? 1;
+            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+            $offset = ($page - 1) * $limit;
 
-            $allowedSortBy = ['nama_customer'];
+            $allowedSortBy = ['id', 'nama_customer'];
             $allowedSortMethod = ['asc', 'desc'];
 
             $sortBy = in_array($sortBy, $allowedSortBy) ? $sortBy : 'id';
             $sortMethod = in_array($sortMethod, $allowedSortMethod) ? $sortMethod : 'asc';
 
-            $offset = ($page - 1) * $limit;
-
-            $result = $this->customer->orderBy($sortBy, $sortMethod)
-                ->limit($limit, $offset);
+            // Base query for filtering
+            $builder = $this->customer;
 
             if (!empty($namaUser)) {
-                $result = $result->like('nama_customer', $namaUser, 'both');
+                $builder->like('nama_customer', $namaUser, 'both');
             }
 
-            $result = $result->get()->getResult();
-
-            if (!$result) {
-                return $this->jsonResponse->multiResp('', [], 0, 0, 200);
-            }
-
-            $total_data = count($result);
+            // Count total data before applying limit
+            $total_data = $builder->countAllResults(false);
             $total_page = ceil($total_data / $limit);
 
-            return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, 200);
+            // Fetch paginated data
+            $result = $builder
+                ->orderBy($sortBy, $sortMethod)
+                ->limit($limit, $offset)
+                ->get()
+                ->getResult();
+
+            return $this->jsonResponse->multiResp('', $result ?: [], $total_data, $total_page, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
 }
