@@ -45,7 +45,7 @@ class UserController extends ResourceController
                 "name" => $data->name,
                 "username" => $data->username,
                 "email" => $data->email,
-                "password" => $data->password,
+                "password" => password_hash($data->password, PASSWORD_DEFAULT),
                 "access" => $data->access,
             ];
             if ($this->model->insert($data)) {
@@ -62,14 +62,16 @@ class UserController extends ResourceController
     public function login()
     {
         try {
-            $query = $this->model->where("username", $this->request->getVar("username"))
-                ->first();
+            $data = $this->request->getJSON();
+            $query = $this->model->where("username", $data->umail)->orWhere("email", $data->umail)->first();
 
-            if ($query && password_verify($this->request->getVar("password"), $query['password'])) {
-                $data["user_id"] = $query["user_id"];
-                $token = $this->JWToken->generateToken($data);
+            if ($query && password_verify($data->password, $query['password'])) {
+                $userData = [
+                    "user_id" => $query['user_id'],
+                ];
+                $token = $this->JWToken->generateToken($userData);
                 if ($token) {
-                    return $this->jsonResponse->oneResp("Login Berhasil", ["token" => $token, "user_id" => $query["user_id"]]);
+                    return $this->jsonResponse->oneResp("Login Berhasil", ["token" => $token, "user_id" => $query['user_id']]);
                 }
             } else {
                 return $this->jsonResponse->error("Username atau Password Salah", 401);
@@ -102,7 +104,7 @@ class UserController extends ResourceController
                 "name" => $data->name,
                 "username" => $data->username,
                 "email" => $data->email,
-                "password" => $data->password,
+                "password" => password_hash($data->password, PASSWORD_DEFAULT),
                 "access" => $data->access,
             ];
             $query = $this->model->update($id, $data);
