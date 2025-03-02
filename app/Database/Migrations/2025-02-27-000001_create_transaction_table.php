@@ -18,6 +18,15 @@ class CreateTransactionTable extends Migration
                 'type' => 'DECIMAL',
                 'constraint' => '10,2',
             ],
+            'customer_name' => [
+                'type' => 'VARCHAR',
+                'constraint' => '100',
+            ],
+            'customer_id' => [
+                'type' => 'VARCHAR',
+                'constraint' => '5',
+                'null' => true,
+            ],
             'status' => [
                 'type' => 'VARCHAR',
                 'constraint' => '50',
