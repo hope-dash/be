@@ -188,7 +188,7 @@ class UserController extends ResourceController
                 ->get()
                 ->getResult();
 
-            return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, 200);
+            return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }

@@ -16,13 +16,17 @@ class JsonResponse
         return service('response')->setJSON($res)->setStatusCode($code);
     }
 
-    public function multiResp($message = "", $data = null, $total_data = 0, $total_page = 0, $code = 200): ResponseInterface
+    public function multiResp($message = "", $data = null, $total_data = 0, $total_page = 0, $curent_page=1, $limit_data = 10,$code = 200): ResponseInterface
     {
         $res = [
             "status" => true,
             "message" => $message,
-            "total_data" => $total_data,
-            "total_page" => $total_page,
+            "page" => [
+                "total_data" => $total_data,
+                "total_page" => $total_page,
+                "curent_page" => $curent_page,
+                "limit_data" => $limit_data,
+            ],
             "data" => $data,
         ];
         return service('response')->setJSON($res)->setStatusCode($code);
