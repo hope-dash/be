@@ -12,12 +12,23 @@ $routes->options('api/(:any)', function () {
 
 
 $routes->group('api',function ($routes) {
+
+    //user
     $routes->post('register', 'UserController::create');
     $routes->post('login', 'UserController::login');
     $routes->get('user/(:num)', 'UserController::userById/$1');
     $routes->get('user', 'UserController::getAllUser');
     $routes->put('user/(:num)', 'UserController::edit/$1');
     $routes->delete('user/(:num)', 'UserController::delete/$1');
+
+    //customer
+    $routes->post('customer', 'CustomerController::createCustomer');
+    $routes->get('customer/(:num)', 'CustomerController::getByIdCustomer/$1');
+    $routes->get('customer', 'CustomerController::getAllCustomer');
+    $routes->put('customer/(:num)', 'CustomerController::updateCustomer/$1');
+    $routes->delete('customer/(:num)', 'CustomerController::deleteCustomer/$1');
+
+    //cashflow
     $routes->post('cashflow', 'CashflowController::create');
     $routes->put('cashflow/(:num)', 'CashflowController::edit/$1');
     $routes->get('cashflow', 'CashflowController::listCashflow');

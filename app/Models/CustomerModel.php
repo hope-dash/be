@@ -6,12 +6,18 @@ use CodeIgniter\Model;
 
 class CustomerModel extends Model
 {
-    protected $table            = 'customers';
+    protected $table            = 'customer';
     protected $primaryKey       = 'id';
     protected $useAutoIncrement = true;
     protected $returnType       = 'array';
-    protected $useSoftDeletes   = false;
+    protected $useSoftDeletes   = true;
     protected $protectFields    = true;
     protected $allowedFields    = ['nama_customer', 'no_hp_customer'];
+
+    protected $useTimestamps = true;
+    protected $dateFormat    = 'datetime';
+    protected $createdField  = 'created_at';
+    protected $updatedField  = 'updated_at';
+    protected $deletedField  = 'deleted_at';
 
 }

@@ -120,26 +120,25 @@ class UserController extends ResourceController
     }
 
     public function delete($id = null)
-    { {
-            try {
-                $query = $this->model->where("user_id", $id)
-                    ->first();
+    {
+        try {
+            $query = $this->model->where("user_id", $id)
+                ->first();
 
-                if ($query) {
-                    $this->model->delete($id);
-                    return $this->jsonResponse->oneResp("Data Deleted", "", 200);
-                } else {
-                    return $this->jsonResponse->error("User Not Found", 401);
-                }
-
-            } catch (\Exception $e) {
-                return $this->respond([
-                    "status" => "error",
-                    "message" => $this->request->getVar("username")
-                ], 400);
+            if ($query) {
+                $this->model->delete($id);
+                return $this->jsonResponse->oneResp("Data Deleted", "", 200);
+            } else {
+                return $this->jsonResponse->error("User Not Found", 401);
             }
+
+        } catch (\Exception $e) {
+            return $this->respond([
+                "status" => "error",
+                "message" => $this->request->getVar("username")
+            ], 400);
         }
-        ;
+
     }
 
     public function userById($id = null)
@@ -154,14 +153,14 @@ class UserController extends ResourceController
             }
 
         } catch (\Exception $e) {
-            return $this->respond($e->getMessage(), 400);
+            return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
 
     public function getAllUser()
     {
         try {
-            $sortBy = $this->request->getGet('sortBy') ?? 'id';
+            $sortBy = $this->request->getGet('sortBy') ?? 'user_id';
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaUser = $this->request->getGet('username') ?? '';
             $limit = (int) $this->request->getGet('limit') ?? 10;
@@ -170,7 +169,7 @@ class UserController extends ResourceController
             $allowedSortBy = ['id', 'toko_name'];
             $allowedSortMethod = ['asc', 'desc'];
 
-            $sortBy = in_array($sortBy, $allowedSortBy) ? $sortBy : 'id';
+            $sortBy = in_array($sortBy, $allowedSortBy) ? $sortBy : 'user_id';
             $sortMethod = in_array($sortMethod, $allowedSortMethod) ? $sortMethod : 'asc';
 
             $offset = ($page - 1) * $limit;
