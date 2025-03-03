@@ -10,17 +10,17 @@ $routes->options('api/(:any)', function () {
     return service('response')->setStatusCode(200);
 });
 
+$routes->post('api/login', 'UserController::login');
 
-$routes->group('api', function ($routes) {
-
+$routes->group('api',  ['filter' => 'jwtAuth'],function ($routes) {
     //user
     $routes->post('register', 'UserController::create');
-    $routes->post('login', 'UserController::login');
     $routes->get('user/(:num)', 'UserController::userById/$1');
     $routes->get('user', 'UserController::getAllUser');
     $routes->put('user/(:num)', 'UserController::edit/$1');
     $routes->delete('user/(:num)', 'UserController::delete/$1');
-
+    $routes->get('user/detail', 'UserController::userByToken');
+    
     //customer
     $routes->post('customer', 'CustomerController::createCustomer');
     $routes->get('customer/(:num)', 'CustomerController::getByIdCustomer/$1');

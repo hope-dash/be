@@ -13,7 +13,7 @@ class Jwtoken
         $this->secretKey = getenv("JWT_KEY");
     }
 
-    public function generateToken($data, $expiry = 3600) {
+    public function generateToken($data, $expiry = 86400) {
         $iat = time();
         $exp = time() + $expiry;
         $payload = [

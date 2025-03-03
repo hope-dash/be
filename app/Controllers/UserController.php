@@ -71,7 +71,7 @@ class UserController extends ResourceController
                 ];
                 $token = $this->JWToken->generateToken($userData);
                 if ($token) {
-                    return $this->jsonResponse->oneResp("Login Berhasil", ["token" => $token, "user_id" => $query['user_id']]);
+                    return $this->jsonResponse->oneResp("Login Berhasil", ["token" => $token]);
                 }
             } else {
                 return $this->jsonResponse->error("Username atau Password Salah", 401);
@@ -146,7 +146,7 @@ class UserController extends ResourceController
         try {
             $user = $this->model->where("user_id", $id);
             if ($user) {
-                $query = $this->model->first();
+                $query = $this->model->select('user_id, name,name, email, access,created_at,updated_at,deleted_at')->first();
                 return $this->jsonResponse->oneResp("", $query, 200);
             } else {
                 return $this->jsonResponse->error("User Not Found", 401);
@@ -155,6 +155,12 @@ class UserController extends ResourceController
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
+    }
+
+    public function userByToken()
+    {
+        $user = $this->request->user;
+        return $this->jsonResponse->oneResp('', $user, 200);
     }
 
     public function getAllUser()
