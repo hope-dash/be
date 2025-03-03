@@ -171,4 +171,44 @@ class BarangController extends ResourceController
         }
 
     }
+
+    public function dropdownSeri()
+    {
+        try {
+
+            $result = $this->seriModel->select('id, seri')->get()->getResult();
+
+
+            $formattedResult = array_map(function ($row) {
+                return [
+                    'label' => $row->seri,
+                    'value' => $row->id
+                ];
+            }, $result);
+            return $this->jsonResponse->oneResp('', $formattedResult, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+
+    public function dropdownModel()
+    {
+        try {
+
+            $result = $this->modelBarangModel->select('id, nama_model')->get()->getResult();
+
+
+            $formattedResult = array_map(function ($row) {
+                return [
+                    'label' => $row->nama_model,
+                    'value' => $row->id
+                ];
+            }, $result);
+            return $this->jsonResponse->oneResp('', $formattedResult, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
 }

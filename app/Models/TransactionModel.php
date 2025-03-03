@@ -10,6 +10,19 @@ class TransactionModel extends Model
     protected $primaryKey = 'id';
     protected $allowedFields = ['amount', 'status','notes', 'type', 'id_toko', 'date_time'];
 
+    protected $statuses = [
+        'SUCCESS' => 'Success',
+        'WAITING_PAYMENT' => 'Waiting for Payment',
+        'FAILED' => 'Failed',
+        'CANCEL' => 'Cancelled',
+        'REFUNDED' => 'Refunded',
+    ];
+
+    public function getStatuses()
+    {
+        return $this->statuses;
+    }
+
     public function getCashflow($filters = [], $limit = 10, $offset = 0)
     {
 

@@ -31,6 +31,29 @@ class TransactionController extends BaseController
         $this->ProductModel = new ProductModel();
     }
 
+    public function dropdownStatusTransaction()
+    {
+        try {
+            // Ambil status dari model
+           
+            $statuses = $this->transactions->getStatuses();
+    
+            // Ubah format ke label-value
+            $formattedStatuses = [];
+            foreach ($statuses as $key => $label) {
+                $formattedStatuses[] = [
+                    'label' => $label,
+                    'value' => $key
+                ];
+            }
+    
+            return $this->jsonResponse->oneResp('', $formattedStatuses, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+    
+
     public function createTransaction()
     {
         $data = $this->request->getJSON();

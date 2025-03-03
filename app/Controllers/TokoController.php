@@ -136,7 +136,7 @@ class TokoController extends BaseController
                 $builder = $builder->like('toko_name', $namaToko, 'both');
             }
 
-            $total_data = $builder->countAllResults(false); 
+            $total_data = $builder->countAllResults(false);
             $total_page = ceil($total_data / $limit);
 
             // Get paginated results
@@ -146,6 +146,25 @@ class TokoController extends BaseController
                 ->getResult();
 
             return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    public function dropdownToko()
+    {
+        try {
+
+            $result = $this->modelToko->select('id, toko_name')->get()->getResult();
+
+
+            $formattedResult = array_map(function ($row) {
+                return [
+                    'label' => $row->toko_name,
+                    'value' => $row->id
+                ];
+            }, $result);
+            return $this->jsonResponse->oneResp('', $formattedResult, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }

@@ -39,18 +39,22 @@ $routes->group('api', function ($routes) {
     $routes->get('toko', 'TokoController::getAllToko');
     $routes->put('toko/(:num)', 'TokoController::update/$1');
     $routes->delete('toko/(:num)', 'TokoController::delete/$1');
+    $routes->get('dropdown/toko', 'TokoController::dropdownToko');
+
 
     // Model Barang Routes
     $routes->post('model_barang', 'BarangController::createModelBarang');
     $routes->get('model_barang', 'BarangController::listModelBarang');
     $routes->put('model_barang/(:num)', 'BarangController::updateModelBarang/$1');
     $routes->delete('model_barang/(:num)', 'BarangController::deleteModel/$1');
+    $routes->get('dropdown/model_barang', 'BarangController::dropdownModel');
 
     // Seri Routes
     $routes->post('seri', 'BarangController::createSeri');
     $routes->get('seri', 'BarangController::listSeri');
     $routes->put('seri/(:num)', 'BarangController::updateSeri/$1');
     $routes->delete('seri/(:num)', 'BarangController::deleteSeri/$1');
+    $routes->get('dropdown/seri', 'BarangController::dropdownSeri');
 
     $routes->post('product', 'ProductController::createProduct');
     $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
@@ -60,6 +64,8 @@ $routes->group('api', function ($routes) {
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');
     $routes->get('transaction', 'TransactionController::getListTransaction');
+    $routes->get('dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
+    
 
 });
 
