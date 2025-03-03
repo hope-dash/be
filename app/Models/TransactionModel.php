@@ -8,7 +8,7 @@ class TransactionModel extends Model
 {
     protected $table = 'transaction';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['amount', 'status', 'type', 'id_toko', 'date_time'];
+    protected $allowedFields = ['amount', 'status','notes', 'type', 'id_toko', 'date_time'];
 
     public function getCashflow($filters = [], $limit = 10, $offset = 0)
     {

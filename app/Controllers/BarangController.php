@@ -50,6 +50,7 @@ class BarangController extends ResourceController
         $offset = ($page - 1) * $limit;
         $builder = $this->modelBarangModel;
 
+
         if (!empty($search)) {
             $builder = $builder->like('nama_model', $search, 'both');
         }

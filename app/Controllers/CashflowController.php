@@ -28,6 +28,7 @@ class CashflowController extends ResourceController
         $validation = \Config\Services::validation();
         $validation->setRules([
             'amount' => 'required|decimal',
+            'notes' => 'required',
             'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
             'type' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
@@ -49,6 +50,7 @@ class CashflowController extends ResourceController
         $validation = \Config\Services::validation();
         $validation->setRules([
             'amount' => 'required|decimal',
+            'notes' => 'required',
             'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
             'type' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
@@ -69,15 +71,52 @@ class CashflowController extends ResourceController
 
     public function listCashflow()
     {
+        $sortBy = $this->request->getGet('sortBy') ?? 'id';
+        $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+        $limit = (int) $this->request->getGet('limit') ?: 10;
+        $page = (int) $this->request->getGet('page') ?: 1;
 
-        $filters = $this->request->getGet();
-        $limit = isset($filters['limit']) ? (int) $filters['limit'] : 10;
-        $offset = isset($filters['offset']) ? (int) $filters['offset'] : 0;
-        $cashflows = $this->model->getCashflow($filters, $limit, $offset);
-        $total_data = $this->model->countCashflow($filters);
+        $status = $this->request->getGet('status') ?: '';
+        $type = $this->request->getGet('type') ?: '';
+        $id_toko = $this->request->getGet('id_toko') ?: '';
+        $start_date = $this->request->getGet('start_date') ?: ''; // Tambah start_date
+        $end_date = $this->request->getGet('end_date') ?: ''; // Tambah end_date
+
+        $offset = ($page - 1) * $limit;
+        $builder = $this->model;
+
+        if (!empty($type)) {
+            $builder = $builder->like('type', (string) $type, 'both');
+        }
+
+        if (!empty($status)) {
+            $builder = $builder->like('status', (string) $status, 'both');
+        }
+
+        if (!empty($id_toko)) {
+            $builder = $builder->like('id_toko', (string) $id_toko, 'both');
+        }
+
+        if (!empty($start_date) && !empty($end_date)) {
+            $builder = $builder->where('date_time >=', $start_date)
+                ->where('date_time <=', $end_date);
+        } elseif (!empty($start_date)) {
+            $builder = $builder->where('date_time >=', $start_date);
+        } elseif (!empty($end_date)) {
+            $builder = $builder->where('date_time <=', $end_date);
+        }
+
+        // Perbaiki `countAllResults(false)`
+        $total_data = $builder->countAllResults(false);
         $total_page = ceil($total_data / $limit);
 
-        return $this->jsonResponse->multiResp('Cashflow retrieved successfully', $cashflows, $total_data, $total_page);
+        $result = $builder->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+        return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+
     }
 
 }
