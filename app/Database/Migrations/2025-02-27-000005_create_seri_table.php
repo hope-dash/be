@@ -19,6 +19,11 @@ class CreateSeriTable extends Migration
                 'constraint' => '100',
                 'unique' => true,
             ],
+            'deleted_at' => [
+                'type' => 'TIMESTAMP',
+                'null' => true,
+                'default' => null
+            ]
         ]);
         $this->forge->addKey('id', true);
         $this->forge->createTable('seri');

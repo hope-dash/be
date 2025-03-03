@@ -41,9 +41,28 @@ class BarangController extends ResourceController
     // Read All Model Barang
     public function listModelBarang()
     {
-        $data = $this->modelBarangModel->findAll();
+        $sortBy = $this->request->getGet('sortBy') ?? 'id';
+        $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+        $search = $this->request->getGet('search') ?? '';
+        $limit = (int) $this->request->getGet('limit') ?: 10;
+        $page = (int) $this->request->getGet('page') ?: 1;
 
-        return $this->jsonResponse->oneResp('', $data, 200);
+        $offset = ($page - 1) * $limit;
+        $builder = $this->modelBarangModel;
+
+        if (!empty($search)) {
+            $builder = $builder->like('nama_model', $search, 'both');
+        }
+
+        $total_data = $builder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        $result = $builder->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+        return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
 
     }
 
@@ -66,8 +85,30 @@ class BarangController extends ResourceController
     // Read All Seri
     public function listSeri()
     {
-        $data = $this->seriModel->findAll();
-        return $this->jsonResponse->oneResp('', $data, 200);
+        $sortBy = $this->request->getGet('sortBy') ?? 'id';
+        $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+        $search = $this->request->getGet('search') ?? '';
+        $limit = (int) $this->request->getGet('limit') ?: 10;
+        $page = (int) $this->request->getGet('page') ?: 1;
+
+        $offset = ($page - 1) * $limit;
+        $builder = $this->seriModel;
+
+        if (!empty($search)) {
+            $builder = $builder->like('nama_model', $search, 'both');
+        }
+
+        $total_data = $builder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        $result = $builder->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+        return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+
+
     }
 
     // Update Model Barang
@@ -84,5 +125,49 @@ class BarangController extends ResourceController
         $data = $this->request->getJSON();
         $this->seriModel->update($id, $data);
         return $this->jsonResponse->oneResp('Update ' . $data->seri . ' successfully', [], 200);
+    }
+
+    public function deleteModel($id = null)
+    {
+        try {
+            $query = $this->modelBarangModel->where("id", $id)
+                ->first();
+
+            if ($query) {
+                $this->modelBarangModel->delete($id);
+                return $this->jsonResponse->oneResp("Data Deleted", "", 200);
+            } else {
+                return $this->jsonResponse->error("Data Not Found", 401);
+            }
+
+        } catch (\Exception $e) {
+            return $this->respond([
+                "status" => "error",
+                "message" => $this->request->getVar("id")
+            ], 400);
+        }
+
+    }
+
+    public function deleteSeri($id = null)
+    {
+        try {
+            $query = $this->seriModel->where("id", $id)
+                ->first();
+
+            if ($query) {
+                $this->seriModel->delete($id);
+                return $this->jsonResponse->oneResp("Data Deleted", "", 200);
+            } else {
+                return $this->jsonResponse->error("Data Not Found", 401);
+            }
+
+        } catch (\Exception $e) {
+            return $this->respond([
+                "status" => "error",
+                "message" => $this->request->getVar("id")
+            ], 400);
+        }
+
     }
 }

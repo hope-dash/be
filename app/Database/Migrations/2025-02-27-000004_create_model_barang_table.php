@@ -23,6 +23,11 @@ class CreateModelBarangTable extends Migration
                 'type' => 'VARCHAR',
                 'constraint' => '100',
             ],
+            'deleted_at' => [
+                'type' => 'TIMESTAMP',
+                'null' => true,
+                'default' => null
+            ]
         ]);
         $this->forge->addKey('id', true);
         $this->forge->createTable('model_barang');
