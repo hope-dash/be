@@ -192,7 +192,7 @@ class ProductController extends ResourceController
             // Now, fetch paginated data
             $products = $builder
                 ->select('
-                product.id, product.nama_barang, product.harga_modal, product.harga_jual,
+                product.id,product.id_barang, product.nama_barang, product.harga_modal, product.harga_jual,
                 model_barang.nama_model, seri.seri,
                 stock.stock, stock.barang_cacat, toko.toko_name
             ')
@@ -211,6 +211,7 @@ class ProductController extends ResourceController
                 if (!isset($formattedProducts[$productId])) {
                     $formattedProducts[$productId] = [
                         'id' => $item['id'],
+                        'kode_barang' => $item['id_barang'],
                         'nama_barang' => $item['nama_barang'],
                         'harga_modal' => $item['harga_modal'],
                         'harga_jual' => $item['harga_jual'],
@@ -229,7 +230,7 @@ class ProductController extends ResourceController
                 }
             }
 
-            return $this->jsonResponse->multiResp('', array_values($formattedProducts), $total_data, $total_page,$page,$limit, 200);
+            return $this->jsonResponse->multiResp('', array_values($formattedProducts), $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }

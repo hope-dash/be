@@ -58,7 +58,9 @@ $routes->group('api', function ($routes) {
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
 
     //transaction
-    $routes->post('transaction', 'TransactionController::creteTransaction');
+    $routes->post('transaction', 'TransactionController::createTransaction');
+    $routes->get('transaction', 'TransactionController::getListTransaction');
+
 });
 
 
