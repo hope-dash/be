@@ -14,7 +14,11 @@ class CreateTransactionTable extends Migration
                 'constraint' => 11,
                 'auto_increment' => true,
             ],
-            'amount' => [
+            'debit' => [
+                'type' => 'DECIMAL',
+                'constraint' => '10,2',
+            ],
+            'credit' => [
                 'type' => 'DECIMAL',
                 'constraint' => '10,2',
             ],

@@ -176,7 +176,7 @@ class BarangController extends ResourceController
     {
         try {
 
-            $result = $this->seriModel->select('id, seri')->get()->getResult();
+            $result = $this->seriModel->select('id, seri')->where('deleted_at', NULL)->get()->getResult();
 
 
             $formattedResult = array_map(function ($row) {
@@ -196,7 +196,7 @@ class BarangController extends ResourceController
     {
         try {
 
-            $result = $this->modelBarangModel->select('id, nama_model')->get()->getResult();
+            $result = $this->modelBarangModel->select('id, nama_model')->where('deleted_at', NULL)->get()->getResult();
 
 
             $formattedResult = array_map(function ($row) {

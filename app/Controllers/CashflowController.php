@@ -30,9 +30,16 @@ class CashflowController extends ResourceController
             'amount' => 'required|decimal',
             'notes' => 'required',
             'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
-            'type' => 'required|in_list[credit,debit]',
+            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja]',
+            'transaction' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
+
+        if ($data['transaction'] === "credit") {
+            $data['credit'] = $data['amount'];
+        } else if ($data['transaction'] === "debit") {
+            $data['debit'] = $data['amount'];
+        }
 
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
@@ -52,7 +59,8 @@ class CashflowController extends ResourceController
             'amount' => 'required|decimal',
             'notes' => 'required',
             'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
-            'type' => 'required|in_list[credit,debit]',
+            'type' => 'required|in_list[penjualan,operational,gaji,sewa,belanja]',
+            'transaction' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
 
@@ -78,12 +86,24 @@ class CashflowController extends ResourceController
 
         $status = $this->request->getGet('status') ?: '';
         $type = $this->request->getGet('type') ?: '';
+        $transaction = $this->request->getGet('transaction') ?: '';
         $id_toko = $this->request->getGet('id_toko') ?: '';
         $start_date = $this->request->getGet('start_date') ?: ''; // Tambah start_date
         $end_date = $this->request->getGet('end_date') ?: ''; // Tambah end_date
 
         $offset = ($page - 1) * $limit;
         $builder = $this->model;
+        $builder = $builder->join('toko', 'toko.id = transaction.id_toko', 'left')
+                           ->select('transaction.*, toko.toko_name'); // Select fields from both tables
+    
+        if (!empty($transaction)) {
+            if ($transaction == "credit") {
+                $builder = $builder->where('credit !=', 0);
+            } else if ($transaction == "debit") {
+                $builder = $builder->where('debit !=', 0);
+            }
+        }
+
 
         if (!empty($type)) {
             $builder = $builder->like('type', (string) $type, 'both');

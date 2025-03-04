@@ -208,27 +208,46 @@ class ProductController extends ResourceController
             foreach ($products as $item) {
                 $productId = $item['id'];
 
+                // Inisialisasi produk jika belum ada
                 if (!isset($formattedProducts[$productId])) {
                     $formattedProducts[$productId] = [
-                        'id' => $item['id'],
+                        'id' => $productId,
                         'kode_barang' => $item['id_barang'],
                         'nama_barang' => $item['nama_barang'],
                         'harga_modal' => $item['harga_modal'],
                         'harga_jual' => $item['harga_jual'],
                         'nama_model' => $item['nama_model'],
                         'seri' => $item['seri'],
-                        'stock' => []
+                        'stock' => [],
+                        'total_stock' => 0,
+                        'total_cacat' => 0,
+                        'stock_string' => ''
                     ];
                 }
 
+                // Jika toko memiliki stok, tambahkan ke daftar stok
                 if ($item['toko_name'] !== null) {
                     $formattedProducts[$productId]['stock'][] = [
-                        'stock' => $item['stock'],
-                        'barang_cacat' => $item['barang_cacat'],
+                        'stock' => (int) $item['stock'],
+                        'barang_cacat' => (int) $item['barang_cacat'],
                         'toko_name' => $item['toko_name']
                     ];
+
+                    // Tambahkan ke total stock & barang cacat
+                    $formattedProducts[$productId]['total_stock'] += (int) $item['stock'];
+                    $formattedProducts[$productId]['total_cacat'] += (int) $item['barang_cacat'];
                 }
             }
+
+            // Konversi stock menjadi string
+            foreach ($formattedProducts as &$product) {
+                if (!empty($product['stock'])) {
+                    $product['stock_string'] = implode("\n", array_map(function ($item) {
+                        return "{$item['toko_name']}={$item['stock']}";
+                    }, $product['stock']));
+                }
+            }
+
 
             return $this->jsonResponse->multiResp('', array_values($formattedProducts), $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {

@@ -81,33 +81,54 @@ class UserController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function edit($id = null)
     {
         try {
             $user = $this->model->find($id);
-
             $data = $this->request->getJson();
 
             if (!$user) {
                 return $this->failNotFound("User with ID $id not found.");
             }
+
             $validation = \Config\Services::validation();
-            $validation->setRules([
+            $rules = [
                 "name" => 'required',
-                "username" => 'required|is_unique[users.username]',
-                "email" => 'required|valid_email|is_unique[users.email]',
-                "password" => 'required|min_length[8]',
+                "username" => 'required', // Menghindari konflik dengan username yang sama
+                "email" => 'required|valid_email', // Menghindari konflik dengan email yang sama
                 "access" => 'required',
-            ]);
-            $data = [
-                "name" => $data->name,
-                "username" => $data->username,
-                "email" => $data->email,
-                "password" => password_hash($data->password, PASSWORD_DEFAULT),
-                "access" => $data->access,
             ];
-            $query = $this->model->update($id, $data);
+
+            // Cek apakah password diisi dan tambahkan aturan validasi jika ada
+            if (!empty($data->password)) {
+                $rules["password"] = 'min_length[8]'; // Validasi panjang password
+            }
+
+            $validation->setRules($rules);
+
+            // Konversi stdClass ke array
+            $dataArray = (array) $data;
+
+            // Validasi data
+            if (!$validation->run($dataArray)) {
+                return $this->jsonResponse->error($validation->getErrors(), 400);
+            }
+
+            // Siapkan data untuk diperbarui
+            $updateData = [
+                "name" => $dataArray['name'],
+                "username" => $dataArray['username'],
+                "email" => $dataArray['email'],
+                "access" => $dataArray['access'],
+            ];
+
+            // Cek apakah password diisi
+            if (!empty($dataArray['password'])) {
+                $updateData["password"] = password_hash($dataArray['password'], PASSWORD_DEFAULT);
+            }
+
+            // Lakukan pembaruan
+            $query = $this->model->update($id, $updateData);
             if ($query) {
                 return $this->jsonResponse->oneResp("Akun Berhasil Diperbaharui");
             } else {
@@ -118,6 +139,9 @@ class UserController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
+
+
 
     public function delete($id = null)
     {
@@ -144,9 +168,16 @@ class UserController extends ResourceController
     public function userById($id = null)
     {
         try {
-            $user = $this->model->where("user_id", $id);
+            $user = $this->model->where("user_id", $id)->first();
             if ($user) {
-                $query = $this->model->select('user_id, name,name, email, access,created_at,updated_at,deleted_at')->first();
+
+                $query = $this->model->select('user_id, username, name, email, access, created_at, updated_at, deleted_at')->first();
+
+
+                if (!empty($query['access'])) {
+                    $query['access'] = json_decode($query['access'], true);
+                }
+
                 return $this->jsonResponse->oneResp("", $query, 200);
             } else {
                 return $this->jsonResponse->error("User Not Found", 401);
@@ -156,6 +187,7 @@ class UserController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
 
     public function userByToken()
     {
