@@ -60,7 +60,9 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('product', 'ProductController::createProduct');
     $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
     $routes->get('product', 'ProductController::getAllProduct');
+    $routes->post('product-stock', 'ProductController::getProductStock');
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
+    
 
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');
@@ -74,9 +76,11 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/top-customers', 'TransactionController::topCustomers');
     $routes->get('reporting/top-products', 'TransactionController::topSoldProducts');
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
+
+    $routes->resource('suplier', ['controller' => 'SuplierController']);
+    $routes->get('dropdown/suplier', 'SuplierController::dropdownSuplier');
     
-    
-    
+
 });
 
 

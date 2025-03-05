@@ -168,11 +168,9 @@ class UserController extends ResourceController
     public function userById($id = null)
     {
         try {
-            $user = $this->model->where("user_id", $id)->first();
-            if ($user) {
 
-                $query = $this->model->select('user_id, username, name, email, access, created_at, updated_at, deleted_at')->first();
-
+            $query = $this->model->select('user_id, username, name, email, access, created_at, updated_at, deleted_at')->where("user_id", $id)->first();
+            if ($query) {
 
                 if (!empty($query['access'])) {
                     $query['access'] = json_decode($query['access'], true);

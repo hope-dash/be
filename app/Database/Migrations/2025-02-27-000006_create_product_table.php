@@ -22,9 +22,13 @@ class CreateProductTable extends Migration
                 'type' => 'VARCHAR',
                 'constraint' => '100',
             ],
+            'id_model_barang' => [
+                'type' => 'INT',
+                'constraint' => 3,
+            ],
             'id_seri_barang' => [
                 'type' => 'INT',
-                'constraint' => 11,
+                'constraint' => 3,
             ],
             'harga_modal' => [
                 'type' => 'DECIMAL',
@@ -33,6 +37,18 @@ class CreateProductTable extends Migration
             'harga_jual' => [
                 'type' => 'DECIMAL',
                 'constraint' => '10,2',
+            ],
+            'suplier' => [
+                'type' => 'INT',
+                'constraint' => 3,
+            ],
+            'created_at' => [
+                'type' => 'DATETIME',
+                'null' => true,
+            ],
+            'updated_at' => [
+                'type' => 'DATETIME',
+                'null' => true,
             ],
         ]);
         $this->forge->addKey('id', true);

@@ -9,14 +9,14 @@ class UserTable extends Migration
     public function up()
     {
         $this->forge->addField([
-           'user_id' => [
-                'type'           => 'INT',
-                'constraint'     => 5,
-                'unsigned'       => true,
+            'user_id' => [
+                'type' => 'INT',
+                'constraint' => 5,
+                'unsigned' => true,
                 'auto_increment' => true,
             ],
             'name' => [
-                'type'       => 'VARCHAR',
+                'type' => 'VARCHAR',
                 'constraint' => '100',
             ],
             'username' => [
@@ -32,8 +32,7 @@ class UserTable extends Migration
                 'constraint' => '100'
             ],
             'access' => [
-                'type' => 'VARCHAR',
-                'constraint' => '50'
+                'type' => 'TEXT'
             ],
             'created_at' => [
                 'type' => 'DATETIME',
@@ -48,7 +47,7 @@ class UserTable extends Migration
                 'null' => true
             ]
         ]);
-        $this->forge->addKey("user_id", primary:true);
+        $this->forge->addKey("user_id", primary: true);
         $this->forge->createTable("users");
     }
 
