@@ -109,14 +109,27 @@ class ProductController extends ResourceController
         $this->productModel->update($id, row: $productData);
 
         foreach ($data->stock as $toko) {
+            if (isset($toko->id) && $this->stockModel->find($toko->id)) {
+                // Update existing stock
+                $stockData = [
+                    'stock' => $toko->stock,
+                    'barang_cacat' => $toko->barang_cacat,
+                ];
 
-            $stockData = [
-                'stock' => $toko->stock,
-                'barang_cacat' => $toko->barang_cacat,
-            ];
-            $this->stockModel->update($toko->id_toko, $stockData);
+                $this->stockModel->update($toko->id, $stockData);
+            } else {
+                // Prepare data for new stock entry
+                $newStockData = [
+                    'id_barang' => $data->id_barang,
+                    'id_toko' => $toko->id_toko,
+                    'stock' => $toko->stock,
+                    'barang_cacat' => $toko->barang_cacat,
+                ];
+
+                // Create new stock entry
+                $this->stockModel->insert($newStockData);
+            }
         }
-
         return $this->jsonResponse->oneResp('Update ' . $data->nama_barang . ' successfully', ['id' => $id], 201);
     }
 
@@ -126,7 +139,7 @@ class ProductController extends ResourceController
             $product = $this->productModel->find($id);
             if ($product) {
                 $product = $this->productModel
-                    ->select('product.*, model_barang.nama_model, seri.seri')
+                    ->select('product.*, product.id_model_barang as id_model,  model_barang.nama_model, seri.seri')
                     ->join('model_barang', 'model_barang.id = product.id_seri_barang')
                     ->join('seri', 'seri.id = product.id_seri_barang')
                     ->where('product.id', $id)
@@ -135,7 +148,7 @@ class ProductController extends ResourceController
                 if ($product) {
                     $product = (array) $product;
                     $stockData = $this->productModel
-                        ->select('stock.id, stock.stock, stock.barang_cacat, toko.toko_name')
+                        ->select('stock.id, stock.stock,stock.id_toko, stock.barang_cacat, toko.toko_name')
                         ->join('stock', 'stock.id_barang = product.id_barang', 'left')
                         ->join('toko', 'toko.id = stock.id_toko', 'left')
                         ->where('product.id', $id)

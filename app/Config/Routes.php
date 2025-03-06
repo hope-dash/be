@@ -66,7 +66,13 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');
     $routes->get('transaction', 'TransactionController::getListTransaction');
+    $routes->get('transaction/(:num)', 'TransactionController::getTransactionDetailById/$1');
     $routes->get('dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
+
+    $routes->post('transaction/refund/(:num)', 'TransactionController::updateTransactionStatusToRefunded/$1');
+    $routes->post('transaction/cancel/(:num)', 'TransactionController::updateTransactionStatusToCancel/$1');
+    $routes->post('transaction/dp/(:num)', 'TransactionController::updateTransactionStatusToPartiallyPaid/$1');
+    $routes->post('transaction/paid/(:num)', 'TransactionController::updateTransactionStatusToFullyPaid/$1');
 
     //reporting
     $routes->get('reporting/revenue-profit', 'TransactionController::calculateRevenueAndProfit');
@@ -78,7 +84,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
     $routes->get('dropdown/suplier', 'SuplierController::dropdownSuplier');
-    
+
 
 });
 

@@ -121,9 +121,10 @@ class TransactionController extends BaseController
 
                 $product = $productMap[$item->kode_barang];
                 $jumlah = $item->jumlah;
+                $harga_final_satuan = $item->harga_jual;
                 $harga_modal = $product['harga_modal'];
                 $harga_jual = $product['harga_jual'];
-                $total = $harga_jual * $jumlah;
+                $total = $harga_final_satuan * $jumlah;
                 $total_modal = $harga_modal * $jumlah;
                 $margin = $total - $total_modal;
                 $totalAmount += $total;
@@ -285,6 +286,57 @@ class TransactionController extends BaseController
             $limit,
             200
         );
+    }
+
+    public function getTransactionDetailById($id = null)
+    {
+        $db = \Config\Database::connect();
+        $builder = $db->table('transaction t')
+            ->select("
+            t.id AS transaction_id,
+            t.invoice AS invoice_number,
+            t.amount,
+            t.total_payment,
+            t.status,
+            t.id_toko,
+            t.date_time,
+            toko.toko_name,
+            COALESCE(c.nama_customer, tm_name.value) AS customer_name,
+            c.no_hp_customer AS customer_phone
+        ")
+            ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
+            ->join('customer c', 'tm_cust.value = c.id', 'left')
+            ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
+            ->join('toko', 't.id_toko = toko.id', 'left')
+            ->where('t.id', $id);
+
+        $transaction = $builder->get()->getRowArray();
+
+        if (!$transaction) {
+            return $this->jsonResponse->oneResp('Transaction not found', null, 404);
+        }
+
+        // Fetch products for the transaction
+        $productBuilder = $db->table('sales_product sp')
+            ->select("
+            sp.kode_barang,
+            sp.jumlah,
+            sp.harga_jual as harga_satuan,
+            sp.total,
+            sp.modal_system as harga_modal,
+            sp.total_modal,
+            sp.margin,
+            p.nama_barang
+        ")
+            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->where('sp.id_transaction', $id);
+
+        $products = $productBuilder->get()->getResultArray();
+
+        // Add products to the transaction data
+        $transaction['products'] = $products;
+
+        return $this->jsonResponse->oneResp('Success', $transaction, 200);
     }
 
 
@@ -529,6 +581,329 @@ class TransactionController extends BaseController
         }
     }
 
+    public function updateTransactionStatusToRefunded($transactionId)
+    {
+        $db = \Config\Database::connect();
 
+        // Start a transaction
+        $db->transBegin();
+
+        // Retrieve the transaction
+        $transaction = $db->table('transaction')
+            ->where('id', $transactionId)
+            ->where('status', 'cancel')
+            ->get()
+            ->getRowArray();
+
+        if (!$transaction) {
+            return $this->jsonResponse->oneResp('Transaction not found or not in cancel status', null, 404);
+        }
+
+        // Insert into cashflow
+        $cashflowData = [
+            'debit' => 0,
+            'credit' => $transaction['total_payment'],
+            'noted' => "Refund Transaksi " . $transaction['invoice'],
+            'type' => 'Transaction',
+            'status' => 'SUCCESS',
+            'date_time' => date('Y-m-d H:i:s'),
+            'id_toko' => $transaction['id_toko']
+        ];
+
+        $db->table('cashflow')->insert($cashflowData);
+        $cashflowId = $db->insertID();
+
+        // Update transaction status to refunded
+        $db->table('transaction')
+            ->where('id', $transactionId)
+            ->update(['status' => 'REFUNDED']);
+
+        // Update transaction_meta for refunded_at and oneResp
+        $metaData = [
+            [
+                'transaction_id' => $transactionId,
+                'key' => 'refunded_at',
+                'value' => date('Y-m-d H:i:s')
+            ],
+            [
+                'transaction_id' => $transactionId,
+                'key' => 'cashflow_id',
+                'value' => (string) $cashflowId
+            ]
+        ];
+
+        foreach ($metaData as $data) {
+            $db->table('transaction_meta')->insert($data);
+        }
+
+        // Commit the transaction
+        if ($db->transStatus() === false) {
+            $db->transRollback();
+            return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
+        } else {
+            $db->transCommit();
+            return $this->jsonResponse->oneResp('Transaction status updated to refunded', null, 200);
+        }
+    }
+
+    public function updateTransactionStatusToCancel($transactionId)
+    {
+        $db = \Config\Database::connect();
+
+        // Start a transaction
+        $db->transBegin();
+
+        // Retrieve the transaction
+        $transaction = $db->table('transaction')
+            ->where('id', $transactionId)
+            ->whereIn('status', ['SUCCESS', 'WAITING_PAYMENT', 'PARTIALLY_PAID'])
+            ->get()
+            ->getRowArray();
+
+        if (!$transaction) {
+            return $this->jsonResponse->oneResp('Transaction not found or not eligible for cancellation', null, 404);
+        }
+
+        // Update transaction status to CANCEL
+        $db->table('transaction')
+            ->where('id', $transactionId)
+            ->update(['status' => 'CANCEL']);
+
+        // Retrieve associated products
+        $products = $db->table('sales_product')
+            ->where('id_transaction', $transactionId)
+            ->get()
+            ->getResultArray();
+
+        // Update stock for each product
+        foreach ($products as $product) {
+            $db->table('stock')
+                ->where('id_barang', $product['kode_barang'])
+                ->where('id_toko', $transaction['id_toko'])
+                ->set('stock', 'stock + ' . $product['jumlah'], false) // Increment stock
+                ->update();
+        }
+
+        $data = $this->request->getJSON();
+
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'cancel_reason' => 'required',
+        ]);
+
+        if (!$this->validate($validation->getRules())) {
+            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+        }
+
+        $cancelReason = $data->cancel_reason;
+
+
+        $metaData = [
+            [
+                'transaction_id' => $transactionId,
+                'key' => 'cancel_at',
+                'value' => date('Y-m-d H:i:s')
+            ],
+            [
+                'transaction_id' => $transactionId,
+                'key' => 'cancel_reason',
+                'value' => $cancelReason
+            ]
+        ];
+
+        foreach ($metaData as $data) {
+            $db->table('transaction_meta')->insert($data);
+        }
+
+        // Commit the transaction
+        if ($db->transStatus() === false) {
+            $db->transRollback();
+            return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
+        } else {
+            $db->transCommit();
+            return $this->jsonResponse->oneResp('Transaction status updated to cancel', null, 200);
+        }
+    }
+
+    public function updateTransactionStatusToPartiallyPaid($transactionId)
+    {
+        $db = \Config\Database::connect();
+
+        // Start a transaction
+        $db->transBegin();
+
+        // Retrieve the transaction
+        $transaction = $db->table('transaction')
+            ->where('id', $transactionId)
+            ->where('status', 'WAITING_PAYMENT')
+            ->get()
+            ->getRowArray();
+
+        if (!$transaction) {
+            return $this->jsonResponse->error('Transaction not found or not in waiting payment status', 404);
+        }
+
+        $data = $this->request->getJSON();
+
+        // Validasi input
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'amount' => 'required',
+        ]);
+
+        if (!$this->validate($validation->getRules())) {
+            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+        }
+
+        $amount = $data->amount;
+
+        // Update transaction total_payment
+        $newTotalPayment = $transaction['total_payment'] + $amount;
+
+        if ((float) $amount > (float) (90 * $transaction['amount'] / 100)) {
+            return $this->jsonResponse->oneResp('Transaction amount not valid', null, 400);
+        }
+
+        $db->table('transaction')
+            ->where('id', $transactionId)
+            ->update(['status' => 'PARTIALLY_PAID', 'total_payment' => $newTotalPayment]);
+
+        // Insert into cashflow
+        $cashflowData = [
+            'debit' => $amount,
+            'credit' => 0,
+            'noted' => "DP Transaksi " . $transaction['invoice'],
+            'type' => 'Transaction',
+            'status' => 'SUCCESS',
+            'date_time' => date('Y-m-d H:i:s'),
+            'id_toko' => $transaction['id_toko']
+        ];
+
+        $db->table('cashflow')->insert($cashflowData);
+        $cashflowId = $db->insertID();
+
+        // Update transaction_meta for partialy_paid_at and cashflow_id
+        $metaData = [
+            [
+                'transaction_id' => (string) $transactionId, // Ensure this is a string
+                'key' => 'partialy_paid_at',
+                'value' => date('Y-m-d H:i:s')
+            ],
+            [
+                'transaction_id' => (string) $transactionId, // Ensure this is a string
+                'key' => 'cashflow_id',
+                'value' => (string) $cashflowId // Ensure this is a string
+            ]
+        ];
+
+        foreach ($metaData as $data) {
+            // Ensure keys and values are strings
+            $data['key'] = (string) $data['key'];
+            $data['value'] = (string) $data['value'];
+
+            $db->table('transaction_meta')->insert($data);
+        }
+
+        // Commit the transaction
+        if ($db->transStatus() === false) {
+            $db->transRollback();
+            return $this->jsonResponse->error('Failed to update transaction', 500);
+        } else {
+            $db->transCommit();
+            return $this->jsonResponse->oneResp('Transaction status updated to partially paid', null, 200);
+        }
+    }
+
+
+    public function updateTransactionStatusToFullyPaid($transactionId)
+    {
+        $db = \Config\Database::connect();
+
+        // Start a transaction
+        $db->transBegin();
+
+        // Retrieve the transaction
+        $transaction = $db->table('transaction')
+            ->where('id', $transactionId)
+            ->whereIn('status', ['WAITING_PAYMENT', 'PARTIALLY_PAID'])
+            ->get()
+            ->getRowArray();
+
+        if (!$transaction) {
+            return $this->jsonResponse->error('Transaction not found or not eligible for full payment', 404);
+        }
+
+        $data = $this->request->getJSON();
+
+        // Validasi input
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'amount' => 'required',
+        ]);
+
+        if (!$this->validate($validation->getRules())) {
+            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+        }
+
+        $amount = $data->amount;
+
+
+        // Calculate the new total payment
+        $newTotalPayment = $transaction['total_payment'] + $amount;
+
+        if ((float) $newTotalPayment !== (float) $transaction['amount']) {
+            return $this->jsonResponse->oneResp('Transaction amount not valid', null, 400);
+        }
+
+        $db->table('transaction')
+            ->where('id', $transactionId)
+            ->update(['status' => 'SUCCESS', 'total_payment' => $newTotalPayment]);
+
+        // Insert into cashflow
+        $cashflowData = [
+            'debit' => $amount,
+            'credit' => 0,
+            'noted' => "Pembayaran Lunas Transaksi " . $transaction['invoice'],
+            'type' => 'Transaction',
+            'status' => 'SUCCESS',
+            'date_time' => date('Y-m-d H:i:s'),
+            'id_toko' => $transaction['id_toko']
+        ];
+
+        $db->table('cashflow')->insert($cashflowData);
+        $cashflowId = $db->insertID();
+
+        // Update transaction_meta for paid_date
+        $metaData = [
+            [
+                'transaction_id' => (string) $transactionId,
+                'key' => 'paid_at',
+                'value' => date('Y-m-d H:i:s')
+            ],
+            [
+                'transaction_id' => (string) $transactionId,
+                'key' => 'cashflow_id',
+                'value' => (string) $cashflowId
+            ]
+        ];
+
+        foreach ($metaData as $data) {
+            // Ensure keys and values are strings
+            $data['key'] = (string) $data['key'];
+            $data['value'] = (string) $data['value'];
+
+            $db->table('transaction_meta')->insert($data);
+        }
+
+
+        // Commit the transaction
+        if ($db->transStatus() === false) {
+            $db->transRollback();
+            return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
+        } else {
+            $db->transCommit();
+            return $this->jsonResponse->oneResp('Transaction status updated to fully paid', null, 200);
+        }
+    }
 
 }
