@@ -290,7 +290,9 @@ class ProductController extends ResourceController
                 ->select([
                     'stock.id_toko',
                     'stock.stock',
-                    'product.id_barang',
+                    'product.id_barang as kode_barang',
+                    "product.harga_jual",
+                    "product.harga_modal",
                     "CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) AS nama_lengkap_barang"
                 ]);
 

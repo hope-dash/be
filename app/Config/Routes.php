@@ -62,7 +62,6 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('product', 'ProductController::getAllProduct');
     $routes->post('product-stock', 'ProductController::getProductStock');
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
-    
 
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');

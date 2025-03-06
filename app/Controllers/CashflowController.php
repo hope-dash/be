@@ -8,7 +8,7 @@ use App\Models\JsonResponse;
 
 class CashflowController extends ResourceController
 {
-    protected $modelName = 'App\Models\TransactionModel';
+    protected $modelName = 'App\Models\CashflowModel';
     protected $format = 'json';
     protected $jsonResponse;
 
@@ -28,8 +28,8 @@ class CashflowController extends ResourceController
         $validation = \Config\Services::validation();
         $validation->setRules([
             'amount' => 'required|decimal',
-            'notes' => 'required',
-            'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
+            'noted' => 'required',
+            'status' => 'required|in_list[SUCCESS,CANCEL,PENDING]',
             'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja]',
             'transaction' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
@@ -93,9 +93,9 @@ class CashflowController extends ResourceController
 
         $offset = ($page - 1) * $limit;
         $builder = $this->model;
-        $builder = $builder->join('toko', 'toko.id = transaction.id_toko', 'left')
-                           ->select('transaction.*, toko.toko_name'); // Select fields from both tables
-    
+        $builder = $builder->join('toko', 'toko.id = cashflow.id_toko', 'left')
+            ->select('cashflow.*, toko.toko_name'); // Select fields from both tables
+
         if (!empty($transaction)) {
             if ($transaction == "credit") {
                 $builder = $builder->where('credit !=', 0);

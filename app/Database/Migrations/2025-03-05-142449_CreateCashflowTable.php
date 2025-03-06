@@ -4,47 +4,56 @@ namespace App\Database\Migrations;
 
 use CodeIgniter\Database\Migration;
 
-class CreateTransactionTable extends Migration
+class CreateCashflowTable extends Migration
 {
     public function up()
     {
         $this->forge->addField([
             'id' => [
                 'type' => 'INT',
-                'constraint' => 11,
+                'constraint' => 5,
+                'unsigned' => true,
                 'auto_increment' => true,
             ],
-            'amount' => [
+            'debit' => [
                 'type' => 'DECIMAL',
-                'constraint' => '10,2',
+                'constraint' => '15,2',
+                'null' => false,
             ],
-            'total_payment' => [
+            'credit' => [
                 'type' => 'DECIMAL',
-                'constraint' => '10,2',
+                'constraint' => '15,2',
+                'null' => false,
             ],
-            'invoice' => [
+            'noted' => [
+                'type' => 'TEXT',
+                'null' => true,
+            ],
+            'type' => [
                 'type' => 'VARCHAR',
-                'constraint' => '200',
+                'constraint' => '50',
             ],
             'status' => [
                 'type' => 'VARCHAR',
                 'constraint' => '50',
             ],
+            'date_time' => [
+                'type' => 'DATETIME',
+                'null' => false,
+            ],
             'id_toko' => [
                 'type' => 'INT',
                 'constraint' => 11,
-            ],
-            'date_time' => [
-                'type' => 'DATETIME',
-                'null' => true,
+                'unsigned' => true,
             ],
         ]);
+
         $this->forge->addKey('id', true);
-        $this->forge->createTable('transaction');
+        $this->forge->createTable('cashflow');
     }
 
     public function down()
     {
-        $this->forge->dropTable('transaction');
+        $this->forge->dropTable('cashflow');
     }
 }
