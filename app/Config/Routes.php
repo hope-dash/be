@@ -57,11 +57,13 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->delete('seri/(:num)', 'BarangController::deleteSeri/$1');
     $routes->get('dropdown/seri', 'BarangController::dropdownSeri');
 
+    //products
     $routes->post('product', 'ProductController::createProduct');
     $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
     $routes->get('product', 'ProductController::getAllProduct');
     $routes->post('product-stock', 'ProductController::getProductStock');
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
+    $routes->delete('product/(:num)', 'ProductController::deleteByProductId/$1');
 
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');

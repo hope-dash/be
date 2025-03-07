@@ -5,8 +5,10 @@ namespace App\Controllers;
 use App\Models\JsonResponse;
 use App\Models\Jwtoken;
 use App\Models\UserModel;
+use App\Controllers\TokoController;
 use CodeIgniter\RESTful\ResourceController;
 use CodeIgniter\HTTP\ResponseInterface;
+
 
 class UserController extends ResourceController
 {
@@ -18,9 +20,11 @@ class UserController extends ResourceController
     protected $model;
     protected $jsonResponse;
     protected $JWToken;
+    protected $tokoController;
     public function __construct()
     {
         $this->model = new UserModel();
+        $this->tokoController = new TokoController();
         $this->jsonResponse = new JsonResponse();
         $this->JWToken = new Jwtoken();
     }
@@ -190,9 +194,38 @@ class UserController extends ResourceController
     public function userByToken()
     {
         $user = $this->request->user;
-        return $this->jsonResponse->oneResp('', $user, 200);
-    }
+    
+        $accessArray = json_decode($user['access'], true);
+    
+        $tokoDetails = [];
+    
+        foreach ($accessArray as $id) {
+            $response = $this->tokoController->getDetailById($id);
 
+            // Memeriksa apakah respons berhasil
+            if ($response->getStatusCode() === 200) {
+                $data = json_decode($response->getBody(), true); // Mengambil body sebagai array
+                
+               
+               $tokoDetails[] = [
+                   'label' => $data['data']['toko_name'], // Sesuaikan dengan struktur data
+                   'value' => $data['data']['id'], // Sesuaikan dengan struktur data
+               ];
+            }
+        }
+        $result = [
+            'user_id' => $user['user_id'],
+            'name' => $user['name'],
+            'email' => $user['email'],
+            'access' => $accessArray,
+            'toko' => $tokoDetails,
+        ];
+    
+        // Mengembalikan response dalam format JSON
+        return $this->jsonResponse->oneResp('', $result, 200);
+    }
+    
+   
     public function getAllUser()
     {
         try {

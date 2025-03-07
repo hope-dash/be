@@ -14,6 +14,7 @@ class ProductController extends ResourceController
     protected $productModel;
     protected $stockModel;
     protected $jsonResponse;
+    protected $db;
 
 
     public function __construct()
@@ -22,6 +23,7 @@ class ProductController extends ResourceController
         $this->productModel = new ProductModel();
         $this->stockModel = new StockModel();
         $this->jsonResponse = new JsonResponse();
+        $this->db = \Config\Database::connect();
     }
 
     public function createProduct()
@@ -65,15 +67,17 @@ class ProductController extends ResourceController
 
         $stockData = [];
         foreach ($data->stock as $toko) {
-            $stockData[] = [
-                'id_barang' => $productId,
-                'id_toko' => $toko->id_toko,
-                'stock' => $toko->stock,
-                'barang_cacat' => $toko->barang_cacat,
-            ];
+            if (isset($toko->id_toko) && $toko->id_toko !== "" && $toko->id_toko !== "0") {
+                $stockData[] = [
+                    'id_barang' => $productId,
+                    'id_toko' => $toko->id_toko,
+                    'stock' => $toko->stock,
+                    'barang_cacat' => $toko->barang_cacat,
+                ];
+            }
         }
 
-        // Insert stock data
+
         $this->stockModel->insertBatch($stockData);
         return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $productId], 201);
     }
@@ -353,6 +357,31 @@ class ProductController extends ResourceController
     }
 
 
+    public function deleteByProductId($id)
+    {
+        // Start a database transaction
+        $this->db->transStart();
+        $query = $this->productModel->where("id", $id)
+            ->first();
+
+        if ($query) {
+            $stockDeleted = $this->stockModel->delete(['id_barang' => $query['id_barang']]);
+            $productDeleted = $this->productModel->delete($id);
+
+
+            if ($stockDeleted && $productDeleted) {
+                $this->db->transComplete();
+                return $this->jsonResponse->oneResp("Data Deleted", "", 200);
+            } else {
+
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Failed to delete data", 500);
+            }
+        } else {
+            return $this->jsonResponse->error("Product Not Found", 404);
+        }
+
+    }
 
 
 }
