@@ -181,6 +181,7 @@ class ProductController extends ResourceController
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
+            $suplier = $this->request->getGet('suplier') ?? '';
             $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
@@ -188,9 +189,12 @@ class ProductController extends ResourceController
             $builder = $this->productModel
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->join('suplier', 'suplier.id = product.suplier', 'left') // Join with suplier table
                 ->select([
                     'product.id',
                     'product.id_barang',
+                    'product.suplier',
+                    'suplier.suplier_name', // Select supplier name
                     'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", seri.seri) as nama_lengkap_barang',
                     'product.harga_modal',
                     'product.harga_jual',
@@ -209,6 +213,9 @@ class ProductController extends ResourceController
             }
             if (!empty($model)) {
                 $builder->like('product.id_model_barang', $model, 'both');
+            }
+            if (!empty($suplier)) {
+                $builder->like('product.suplier', $suplier, 'both');
             }
 
             // Hitung total data
@@ -231,6 +238,7 @@ class ProductController extends ResourceController
                     $formattedProducts[$productId] = [
                         'id' => $productId,
                         'kode_barang' => $item['id_barang'],
+                        'suplier' => $item['suplier_name'], // Use supplier name from the join
                         'nama_barang' => $item['nama_lengkap_barang'],
                         'harga_modal' => $item['harga_modal'],
                         'harga_jual' => $item['harga_jual'],
@@ -283,6 +291,7 @@ class ProductController extends ResourceController
     }
 
 
+
     public function getProductStock()
     {
         try {
@@ -298,8 +307,6 @@ class ProductController extends ResourceController
             $requestData = $this->request->getJSON(true);
             $kode_exclude = $requestData['kode_exclude'] ?? [];
 
-
-            // Menggunakan Query Builder dari Database Connection
             $builder = $this->stockModel
                 ->join('product', 'stock.id_barang = product.id_barang', 'left')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id', 'left')
@@ -311,14 +318,15 @@ class ProductController extends ResourceController
                     "product.harga_jual",
                     "product.harga_modal",
                     "CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) AS nama_lengkap_barang"
-                ]);
+                ])
+                ->where('stock.stock >', 0);
 
-            // Filter berdasarkan id_toko jika ada
+
             if (!empty($id_toko)) {
                 $builder->where('stock.id_toko', $id_toko);
             }
 
-            // Filter berdasarkan nama produk
+
             if (!empty($namaProduct)) {
                 $builder->groupStart()
                     ->like("product.nama_barang", $namaProduct)

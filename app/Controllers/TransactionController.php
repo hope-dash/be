@@ -152,9 +152,14 @@ class TransactionController extends BaseController
                 ];
             }
 
+            if (empty($data->ppn)) {
+                $ppn = 0;
+            } else {
+                $ppn = $data->ppn * $totalAmount / 100;
+            }
             // Simpan transaksi
             $transactionData = [
-                'amount' => $totalAmount,
+                'amount' => $totalAmount + $ppn,
                 'status' => 'WAITING_PAYMENT',
                 'id_toko' => $data->id_toko,
                 'date_time' => date('Y-m-d H:i:s')
@@ -176,28 +181,40 @@ class TransactionController extends BaseController
                 throw new \Exception("Failed to update invoice number.");
             }
 
+            $metaData = [
+                ['transaction_id' => $insertID, 'key' => 'ppn', 'value' => $ppn],
+                ['transaction_id' => $insertID, 'key' => 'grand_total', 'value' => $totalAmount],
+            ];
+
             if (empty($customerId)) {
-                $metaData[] = ['transaction_id' => $insertID, 'key' => 'customer_name', 'value' => $data->customer_name];
+                $metaData[] = [
+                    'transaction_id' => $insertID,
+                    'key' => 'customer_name',
+                    'value' => $data->customer_name
+                ];
             } else {
-                $metaData[] = ['transaction_id' => $insertID, 'key' => 'customer_id', 'value' => $customerId];
+                $metaData[] = [
+                    'transaction_id' => $insertID,
+                    'key' => 'customer_id',
+                    'value' => $customerId
+                ];
             }
 
             if (!$this->transactionMeta->insertBatch($metaData)) {
                 throw new \Exception("Failed to save transaction metadata.");
             }
 
-            // Tambahkan id_transaction ke setiap item di salesData
             foreach ($salesData as &$item) {
                 $item['id_transaction'] = $insertID;
             }
             unset($item);
 
-            // Simpan data penjualan dalam batch
+
             if (!$this->SalesProductModel->insertBatch($salesData)) {
                 throw new \Exception("Failed to save sales data.");
             }
 
-            $db->transComplete(); // Commit transaksi jika tidak ada error
+            $db->transComplete();
 
             if ($db->transStatus() === false) {
                 throw new \Exception("An error occurred while saving the transaction.");
@@ -206,6 +223,57 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction successfully processed', $invoice, 201);
         } catch (\Exception $e) {
             $db->transRollback(); // Rollback transaksi jika ada error
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+
+    public function countTransaction()
+    {
+        $data = $this->request->getJSON();
+
+        try {
+            $kodeBarangList = array_column($data->item, 'kode_barang');
+            $products = $this->ProductModel->whereIn('id_barang', $kodeBarangList)->findAll();
+
+            if (empty($products)) {
+                throw new \Exception("No products found for the given IDs.");
+            }
+
+            $productMap = [];
+            foreach ($products as $product) {
+                $productMap[$product['id_barang']] = $product;
+            }
+
+            $totalAmount = 0;
+
+            foreach ($data->item as $item) {
+                if (!isset($productMap[$item->kode_barang])) {
+                    throw new \Exception("Product {$item->kode_barang} not found.");
+                }
+
+                $product = $productMap[$item->kode_barang];
+                $jumlah = $item->jumlah;
+                $harga_final_satuan = $item->harga_jual;
+                $total = $harga_final_satuan * $jumlah;
+                $totalAmount += $total;
+            }
+            if (empty($data->ppn)) {
+                $ppn = 0;
+            } else {
+                $ppn = $data->ppn * $totalAmount / 100;
+            }
+
+            // Simpan transaksi
+            $transactionData = [
+                'sub_total' => $totalAmount,
+                'ppn' => $ppn,
+                'grand_total' => $totalAmount + $ppn,
+
+            ];
+
+            return $this->jsonResponse->oneResp('Transaction successfully processed', $transactionData, 201);
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -293,22 +361,46 @@ class TransactionController extends BaseController
         $db = \Config\Database::connect();
         $builder = $db->table('transaction t')
             ->select("
-            t.id AS transaction_id,
-            t.invoice AS invoice_number,
-            t.amount,
-            t.total_payment,
-            t.status,
-            t.id_toko,
-            t.date_time,
-            toko.toko_name,
-            COALESCE(c.nama_customer, tm_name.value) AS customer_name,
-            c.no_hp_customer AS customer_phone
-        ")
+        t.id AS transaction_id,
+        t.invoice AS invoice_number,
+        t.amount,
+        t.total_payment,
+        t.status,
+        t.id_toko,
+        t.date_time,
+        toko.toko_name,
+        toko.alamat as alamat_toko,
+        toko.phone_number as nomer_toko,
+        COALESCE(c.nama_customer, tm_name.value) AS customer_name,
+        c.no_hp_customer AS customer_phone,
+        tm_partial.value AS partially_paid_at,
+        tm_dp.value AS metode_pembayaran_dp,
+        tm_paid.value AS paid_at,
+        tm_ppn.value AS ppn,
+        tm_grand_total.value AS grand_total,
+        tm_pelunasan.value AS metode_pembayaran_pelunasan,
+        tm_cancel.value AS cancel_at,
+        tm_reason.value AS cancel_reason,
+        tm_refunded.value AS refunded_at,
+        tm_total_dp.value AS total_dp
+        
+    ")
             ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
             ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
             ->join('toko', 't.id_toko = toko.id', 'left')
+            ->join('transaction_meta tm_partial', 't.id = tm_partial.transaction_id AND tm_partial.key = "partialy_paid_at"', 'left')
+            ->join('transaction_meta tm_dp', 't.id = tm_dp.transaction_id AND tm_dp.key = "metode_pembayaran_dp"', 'left')
+            ->join('transaction_meta tm_paid', 't.id = tm_paid.transaction_id AND tm_paid.key = "paid_at"', 'left')
+            ->join('transaction_meta tm_ppn', 't.id = tm_ppn.transaction_id AND tm_ppn.key = "ppn"', 'left') // Corrected join
+            ->join('transaction_meta tm_total_dp', 't.id = tm_total_dp.transaction_id AND tm_total_dp.key = "total_dp"', 'left') // Corrected join
+            ->join('transaction_meta tm_grand_total', 't.id = tm_grand_total.transaction_id AND tm_grand_total.key = "grand_total"', 'left') // Corrected join
+            ->join('transaction_meta tm_pelunasan', 't.id = tm_pelunasan.transaction_id AND tm_pelunasan.key = "metode_pembayaran_pelunasan"', 'left')
+            ->join('transaction_meta tm_cancel', 't.id = tm_cancel.transaction_id AND tm_cancel.key = "cancel_at"', 'left')
+            ->join('transaction_meta tm_reason', 't.id = tm_reason.transaction_id AND tm_reason.key = "cancel_reason"', 'left')
+            ->join('transaction_meta tm_refunded', 't.id = tm_refunded.transaction_id AND tm_refunded.key = "refunded_at"', 'left')
             ->where('t.id', $id);
+
 
         $transaction = $builder->get()->getRowArray();
 
@@ -332,9 +424,30 @@ class TransactionController extends BaseController
             ->where('sp.id_transaction', $id);
 
         $products = $productBuilder->get()->getResultArray();
-
-        // Add products to the transaction data
         $transaction['products'] = $products;
+
+        $cashflowBuilder = $db->table('transaction_meta tm')
+            ->select('tm.value AS cashflow_id')
+            ->where('tm.transaction_id', $id)
+            ->where('tm.key', 'cashflow_id');
+
+        $cashflowMeta = $cashflowBuilder->get()->getResultArray();
+        $cashflowRecords = [];
+
+        foreach ($cashflowMeta as $meta) {
+            $cashflowId = $meta['cashflow_id'];
+
+            $cashflowDetails = $db->table('cashflow')
+                ->select('*')
+                ->where('id', $cashflowId)
+                ->orderBy('date_time', 'ASC')
+                ->get()
+                ->getResultArray();
+            $cashflowRecords = array_merge($cashflowRecords, $cashflowDetails);
+        }
+
+        $transaction['cashflow_records'] = $cashflowRecords;
+
 
         return $this->jsonResponse->oneResp('Success', $transaction, 200);
     }
@@ -379,6 +492,8 @@ class TransactionController extends BaseController
         $date_end = $this->request->getGet('date_end');
         $id_toko = $this->request->getGet('id_toko');
         $type = $this->request->getGet('type');
+        $transaction = $this->request->getGet('transaction') ?: '';
+
         try {
             // Query untuk menghitung total debit dan kredit
             $query = $this->db->table('cashflow')
@@ -393,6 +508,14 @@ class TransactionController extends BaseController
 
             if ($type) {
                 $query->where('type', $type);
+            }
+
+            if (!empty($transaction)) {
+                if ($transaction == "credit") {
+                    $query->where('credit !=', 0);
+                } else if ($transaction == "debit") {
+                    $query->where('debit !=', 0);
+                }
             }
 
             $result = $query->get()->getRow();
@@ -728,11 +851,8 @@ class TransactionController extends BaseController
     public function updateTransactionStatusToPartiallyPaid($transactionId)
     {
         $db = \Config\Database::connect();
-
-        // Start a transaction
         $db->transBegin();
 
-        // Retrieve the transaction
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
             ->where('status', 'WAITING_PAYMENT')
@@ -749,6 +869,7 @@ class TransactionController extends BaseController
         $validation = \Config\Services::validation();
         $validation->setRules([
             'amount' => 'required',
+            'metode_pembayaran' => 'required',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -756,8 +877,6 @@ class TransactionController extends BaseController
         }
 
         $amount = $data->amount;
-
-        // Update transaction total_payment
         $newTotalPayment = $transaction['total_payment'] + $amount;
 
         if ((float) $amount > (float) (90 * $transaction['amount'] / 100)) {
@@ -768,7 +887,6 @@ class TransactionController extends BaseController
             ->where('id', $transactionId)
             ->update(['status' => 'PARTIALLY_PAID', 'total_payment' => $newTotalPayment]);
 
-        // Insert into cashflow
         $cashflowData = [
             'debit' => $amount,
             'credit' => 0,
@@ -782,29 +900,38 @@ class TransactionController extends BaseController
         $db->table('cashflow')->insert($cashflowData);
         $cashflowId = $db->insertID();
 
-        // Update transaction_meta for partialy_paid_at and cashflow_id
+
         $metaData = [
             [
-                'transaction_id' => (string) $transactionId, // Ensure this is a string
+                'transaction_id' => (string) $transactionId,
                 'key' => 'partialy_paid_at',
                 'value' => date('Y-m-d H:i:s')
             ],
             [
-                'transaction_id' => (string) $transactionId, // Ensure this is a string
+                'transaction_id' => (string) $transactionId,
                 'key' => 'cashflow_id',
-                'value' => (string) $cashflowId // Ensure this is a string
+                'value' => (string) $cashflowId
+            ],
+            [
+                'transaction_id' => (string) $transactionId,
+                'key' => 'metode_pembayaran_dp',
+                'value' => (string) $data->metode_pembayaran
+            ],
+            [
+                'transaction_id' => (string) $transactionId,
+                'key' => 'total_dp',
+                'value' => (string) $amount
             ]
         ];
 
         foreach ($metaData as $data) {
-            // Ensure keys and values are strings
             $data['key'] = (string) $data['key'];
             $data['value'] = (string) $data['value'];
 
             $db->table('transaction_meta')->insert($data);
         }
 
-        // Commit the transaction
+
         if ($db->transStatus() === false) {
             $db->transRollback();
             return $this->jsonResponse->error('Failed to update transaction', 500);
@@ -818,11 +945,8 @@ class TransactionController extends BaseController
     public function updateTransactionStatusToFullyPaid($transactionId)
     {
         $db = \Config\Database::connect();
-
-        // Start a transaction
         $db->transBegin();
 
-        // Retrieve the transaction
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
             ->whereIn('status', ['WAITING_PAYMENT', 'PARTIALLY_PAID'])
@@ -834,11 +958,10 @@ class TransactionController extends BaseController
         }
 
         $data = $this->request->getJSON();
-
-        // Validasi input
         $validation = \Config\Services::validation();
         $validation->setRules([
             'amount' => 'required',
+            'metode_pembayaran' => 'required',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -846,9 +969,6 @@ class TransactionController extends BaseController
         }
 
         $amount = $data->amount;
-
-
-        // Calculate the new total payment
         $newTotalPayment = $transaction['total_payment'] + $amount;
 
         if ((float) $newTotalPayment !== (float) $transaction['amount']) {
@@ -859,7 +979,6 @@ class TransactionController extends BaseController
             ->where('id', $transactionId)
             ->update(['status' => 'SUCCESS', 'total_payment' => $newTotalPayment]);
 
-        // Insert into cashflow
         $cashflowData = [
             'debit' => $amount,
             'credit' => 0,
@@ -873,7 +992,6 @@ class TransactionController extends BaseController
         $db->table('cashflow')->insert($cashflowData);
         $cashflowId = $db->insertID();
 
-        // Update transaction_meta for paid_date
         $metaData = [
             [
                 'transaction_id' => (string) $transactionId,
@@ -884,19 +1002,22 @@ class TransactionController extends BaseController
                 'transaction_id' => (string) $transactionId,
                 'key' => 'cashflow_id',
                 'value' => (string) $cashflowId
+            ],
+            [
+                'transaction_id' => (string) $transactionId,
+                'key' => 'metode_pembayaran_pelunasan',
+                'value' => (string) $data->metode_pembayaran
             ]
         ];
 
         foreach ($metaData as $data) {
-            // Ensure keys and values are strings
+
             $data['key'] = (string) $data['key'];
             $data['value'] = (string) $data['value'];
 
             $db->table('transaction_meta')->insert($data);
         }
 
-
-        // Commit the transaction
         if ($db->transStatus() === false) {
             $db->transRollback();
             return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);

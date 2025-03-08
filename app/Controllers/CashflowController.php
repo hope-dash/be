@@ -30,7 +30,7 @@ class CashflowController extends ResourceController
             'amount' => 'required|decimal',
             'noted' => 'required',
             'status' => 'required|in_list[SUCCESS,CANCEL,PENDING]',
-            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja]',
+            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja|Transaction]',
             'transaction' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
@@ -59,7 +59,7 @@ class CashflowController extends ResourceController
             'amount' => 'required|decimal',
             'notes' => 'required',
             'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
-            'type' => 'required|in_list[penjualan,operational,gaji,sewa,belanja]',
+            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja|Transaction]',
             'transaction' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
@@ -88,8 +88,8 @@ class CashflowController extends ResourceController
         $type = $this->request->getGet('type') ?: '';
         $transaction = $this->request->getGet('transaction') ?: '';
         $id_toko = $this->request->getGet('id_toko') ?: '';
-        $start_date = $this->request->getGet('start_date') ?: ''; // Tambah start_date
-        $end_date = $this->request->getGet('end_date') ?: ''; // Tambah end_date
+        $start_date = $this->request->getGet('date_start') ?: ''; // Tambah start_date
+        $end_date = $this->request->getGet('date_end') ?: ''; // Tambah end_date
 
         $offset = ($page - 1) * $limit;
         $builder = $this->model;

@@ -194,23 +194,21 @@ class UserController extends ResourceController
     public function userByToken()
     {
         $user = $this->request->user;
-    
+
         $accessArray = json_decode($user['access'], true);
-    
+
         $tokoDetails = [];
-    
+
         foreach ($accessArray as $id) {
             $response = $this->tokoController->getDetailById($id);
 
-            // Memeriksa apakah respons berhasil
             if ($response->getStatusCode() === 200) {
-                $data = json_decode($response->getBody(), true); // Mengambil body sebagai array
-                
-               
-               $tokoDetails[] = [
-                   'label' => $data['data']['toko_name'], // Sesuaikan dengan struktur data
-                   'value' => $data['data']['id'], // Sesuaikan dengan struktur data
-               ];
+                $data = json_decode($response->getBody(), true);
+
+                $tokoDetails[] = [
+                    'label' => $data['data']['toko_name'],
+                    'value' => $data['data']['id'],
+                ];
             }
         }
         $result = [
@@ -220,12 +218,12 @@ class UserController extends ResourceController
             'access' => $accessArray,
             'toko' => $tokoDetails,
         ];
-    
+
         // Mengembalikan response dalam format JSON
         return $this->jsonResponse->oneResp('', $result, 200);
     }
-    
-   
+
+
     public function getAllUser()
     {
         try {
@@ -257,10 +255,34 @@ class UserController extends ResourceController
                 ->get()
                 ->getResult();
 
+            // Process each user to convert access string to array and get toko_name
+            foreach ($result as &$user) {
+                // Decode the access string to an array
+                $user->access = json_decode($user->access, true);
+
+                // Retrieve toko_name for each access id
+                $tokoNames = [];
+                foreach ($user->access as $id) {
+                    if ($id == "0") {
+                        $tokoNames[] = "Admin";
+                    } else {
+                        $response = $this->tokoController->getDetailById($id);
+                        if ($response->getStatusCode() === 200) {
+                            $data = json_decode($response->getBody(), true);
+
+                            $tokoNames[] = $data['data']['toko_name'];
+                        }
+                    }
+
+                }
+                $user->toko_names = $tokoNames;
+            }
+
             return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
-
     }
+
+
 }

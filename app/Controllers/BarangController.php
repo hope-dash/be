@@ -96,7 +96,8 @@ class BarangController extends ResourceController
         $builder = $this->seriModel;
 
         if (!empty($search)) {
-            $builder = $builder->like('nama_model', $search, 'both');
+            $builder = $builder->like('seri
+            ', $search, 'both');
         }
 
         $total_data = $builder->countAllResults(false);
