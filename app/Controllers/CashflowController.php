@@ -30,7 +30,7 @@ class CashflowController extends ResourceController
             'amount' => 'required|decimal',
             'noted' => 'required',
             'status' => 'required|in_list[SUCCESS,CANCEL,PENDING]',
-            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja|Transaction]',
+            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja,Transaction]',
             'transaction' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
@@ -59,7 +59,7 @@ class CashflowController extends ResourceController
             'amount' => 'required|decimal',
             'notes' => 'required',
             'status' => 'required|in_list[success,pending,waiting_payment,failed,canceled,refunded]',
-            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja|Transaction]',
+            'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja,Transaction]',
             'transaction' => 'required|in_list[credit,debit]',
             'id_toko' => 'required|integer',
         ]);
