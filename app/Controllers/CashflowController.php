@@ -32,6 +32,7 @@ class CashflowController extends ResourceController
             'status' => 'required|in_list[SUCCESS,CANCEL,PENDING]',
             'type' => 'required|in_list[Penjualan,Operational,Gaji,Sewa,Belanja,Transaction]',
             'transaction' => 'required|in_list[credit,debit]',
+            'metode' => 'required|in_list[Transfer,Cash]',
             'id_toko' => 'required|integer',
         ]);
 
@@ -94,7 +95,8 @@ class CashflowController extends ResourceController
         $offset = ($page - 1) * $limit;
         $builder = $this->model;
         $builder = $builder->join('toko', 'toko.id = cashflow.id_toko', 'left')
-            ->select('cashflow.*, toko.toko_name'); // Select fields from both tables
+            ->select('cashflow.*, toko.toko_name')
+            ->orderBy('cashflow.date_time', 'DESC');
 
         if (!empty($transaction)) {
             if ($transaction == "credit") {
@@ -104,11 +106,10 @@ class CashflowController extends ResourceController
             }
         }
 
-
         if (!empty($type)) {
-            $builder = $builder->like('type', (string) $type, 'both');
+            $types = explode(',', $type);
+            $builder = $builder->whereIn('type', array_map('trim', $types));
         }
-
         if (!empty($status)) {
             $builder = $builder->like('status', (string) $status, 'both');
         }

@@ -97,7 +97,7 @@ class TransactionController extends BaseController
                 }
             }
 
-            // Ambil semua produk yang dibutuhkan dalam satu query
+
             $kodeBarangList = array_column($data->item, 'kode_barang');
             $products = $this->ProductModel->whereIn('id_barang', $kodeBarangList)->findAll();
 
@@ -110,7 +110,7 @@ class TransactionController extends BaseController
                 $productMap[$product['id_barang']] = $product;
             }
 
-            // Hitung total transaksi dan persiapkan data penjualan
+
             $salesData = [];
             $totalAmount = 0;
 
@@ -220,7 +220,7 @@ class TransactionController extends BaseController
                 throw new \Exception("An error occurred while saving the transaction.");
             }
 
-            return $this->jsonResponse->oneResp('Transaction successfully processed', $invoice, 201);
+            return $this->jsonResponse->oneResp('Transaction successfully processed', $insertID, 201);
         } catch (\Exception $e) {
             $db->transRollback(); // Rollback transaksi jika ada error
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -298,7 +298,8 @@ class TransactionController extends BaseController
             ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
             ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
-            ->join('toko', 't.id_toko = toko.id', 'left');
+            ->join('toko', 't.id_toko = toko.id', 'left')
+            ->orderBy('t.date_time', 'DESC');
 
         // **FILTERS**
         $status = $this->request->getGet('status');
@@ -506,8 +507,9 @@ class TransactionController extends BaseController
                 $query->where('id_toko', $id_toko);
             }
 
-            if ($type) {
-                $query->where('type', $type);
+            if (!empty($type)) {
+                $types = explode(',', $type);
+                $query = $query->whereIn('type', array_map('trim', $types));
             }
 
             if (!empty($transaction)) {
@@ -540,6 +542,7 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $id_toko = $this->request->getGet('id_toko');
+        $type = $this->request->getGet('type');
 
         try {
             $query = $this->db->table('cashflow')
@@ -551,6 +554,11 @@ class TransactionController extends BaseController
 
             if ($id_toko) {
                 $query->where('id_toko', $id_toko);
+            }
+
+            if (!empty($type)) {
+                $types = explode(',', $type);
+                $query = $query->whereIn('type', array_map('trim', $types));
             }
 
             $results = $query->get()->getResult();
@@ -797,17 +805,25 @@ class TransactionController extends BaseController
             ->where('id_transaction', $transactionId)
             ->get()
             ->getResultArray();
-
-        // Update stock for each product
-        foreach ($products as $product) {
-            $db->table('stock')
-                ->where('id_barang', $product['kode_barang'])
-                ->where('id_toko', $transaction['id_toko'])
-                ->set('stock', 'stock + ' . $product['jumlah'], false) // Increment stock
-                ->update();
-        }
-
         $data = $this->request->getJSON();
+
+        if ($data->barang_cacat === true) {
+            foreach ($products as $product) {
+                $db->table('stock')
+                    ->where('id_barang', $product['kode_barang'])
+                    ->where('id_toko', $transaction['id_toko'])
+                    ->set('barang_cacat', 'barang_cacat + ' . $product['jumlah'], false) // Increment stock
+                    ->update();
+            }
+        } else {
+            foreach ($products as $product) {
+                $db->table('stock')
+                    ->where('id_barang', $product['kode_barang'])
+                    ->where('id_toko', $transaction['id_toko'])
+                    ->set('stock', 'stock + ' . $product['jumlah'], false) // Increment stock
+                    ->update();
+            }
+        }
 
         $validation = \Config\Services::validation();
         $validation->setRules([
@@ -880,7 +896,7 @@ class TransactionController extends BaseController
         $newTotalPayment = $transaction['total_payment'] + $amount;
 
         if ((float) $amount > (float) (90 * $transaction['amount'] / 100)) {
-            return $this->jsonResponse->oneResp('Transaction amount not valid', null, 400);
+            return $this->jsonResponse->oneResp('Jumlah Pembayaran tidak valid', null, 400);
         }
 
         $db->table('transaction')
@@ -894,7 +910,8 @@ class TransactionController extends BaseController
             'type' => 'Transaction',
             'status' => 'SUCCESS',
             'date_time' => date('Y-m-d H:i:s'),
-            'id_toko' => $transaction['id_toko']
+            'id_toko' => $transaction['id_toko'],
+            'metode' => $data->metode_pembayaran
         ];
 
         $db->table('cashflow')->insert($cashflowData);
@@ -954,13 +971,13 @@ class TransactionController extends BaseController
             ->getRowArray();
 
         if (!$transaction) {
-            return $this->jsonResponse->error('Transaction not found or not eligible for full payment', 404);
+            return $this->jsonResponse->error('Transaksi tidak ditemukan / tidak dapat diproses', 404);
         }
 
         $data = $this->request->getJSON();
         $validation = \Config\Services::validation();
         $validation->setRules([
-            'amount' => 'required',
+
             'metode_pembayaran' => 'required',
         ]);
 
@@ -968,25 +985,21 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
 
-        $amount = $data->amount;
-        $newTotalPayment = $transaction['total_payment'] + $amount;
-
-        if ((float) $newTotalPayment !== (float) $transaction['amount']) {
-            return $this->jsonResponse->oneResp('Transaction amount not valid', null, 400);
-        }
+        $newTotalPayment = $transaction['amount'] - $transaction['total_payment'];
 
         $db->table('transaction')
             ->where('id', $transactionId)
-            ->update(['status' => 'SUCCESS', 'total_payment' => $newTotalPayment]);
+            ->update(['status' => 'SUCCESS', 'total_payment' => $newTotalPayment + $transaction['amount']]);
 
         $cashflowData = [
-            'debit' => $amount,
+            'debit' => $newTotalPayment,
             'credit' => 0,
             'noted' => "Pembayaran Lunas Transaksi " . $transaction['invoice'],
             'type' => 'Transaction',
             'status' => 'SUCCESS',
             'date_time' => date('Y-m-d H:i:s'),
-            'id_toko' => $transaction['id_toko']
+            'id_toko' => $transaction['id_toko'],
+            'metode' => $data->metode_pembayaran
         ];
 
         $db->table('cashflow')->insert($cashflowData);
