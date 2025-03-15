@@ -806,8 +806,15 @@ class TransactionController extends BaseController
             ->get()
             ->getResultArray();
         $data = $this->request->getJSON();
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'cancel_reason' => 'required',
+            'barang_cacat' => 'required',
+        ]);
+        $cancelReason = $data->cancel_reason;
+        $barangCacat = $data->barang_cacat;
 
-        if ($data->barang_cacat === true) {
+        if ($barangCacat === "true") {
             foreach ($products as $product) {
                 $db->table('stock')
                     ->where('id_barang', $product['kode_barang'])
@@ -825,17 +832,9 @@ class TransactionController extends BaseController
             }
         }
 
-        $validation = \Config\Services::validation();
-        $validation->setRules([
-            'cancel_reason' => 'required',
-        ]);
-
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
-
-        $cancelReason = $data->cancel_reason;
-
 
         $metaData = [
             [

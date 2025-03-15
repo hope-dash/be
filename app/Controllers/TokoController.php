@@ -22,6 +22,7 @@ class TokoController extends BaseController
     public function create()
     {
         try {
+            $token = $this->request->user;
             $data = $this->request->getJSON();
 
             $validation = \Config\Services::validation();
@@ -40,6 +41,7 @@ class TokoController extends BaseController
                 "alamat" => $data->alamat,
                 "phone_number" => $data->phone_number,
                 "email_toko" => $data->email_toko,
+                "created_by" => $token['user_id'],
             ];
 
             $this->modelToko->insert($tokoData);
@@ -53,6 +55,7 @@ class TokoController extends BaseController
     public function update($id = null)
     {
         try {
+            $token = $this->request->user;
             $data = $this->request->getJSON();
 
             $validation = \Config\Services::validation();
@@ -70,6 +73,7 @@ class TokoController extends BaseController
                 "alamat" => $data->alamat,
                 "phone_number" => $data->phone_number,
                 "email_toko" => $data->email_toko,
+                "updated_by" => $token['user_id'],
             ];
 
             $this->modelToko->update($id, $tokoData);

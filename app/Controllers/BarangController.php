@@ -22,6 +22,7 @@ class BarangController extends ResourceController
     // Create Model Barang
     public function createModelBarang()
     {
+        $token = $this->request->user;
         $data = $this->request->getJSON();
         $validation = \Config\Services::validation();
         $validation->setRules([
@@ -32,7 +33,7 @@ class BarangController extends ResourceController
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
-
+        $data->created_by = $token['user_id'];
         $this->modelBarangModel->insert($data);
 
         return $this->jsonResponse->oneResp('Add ' . $data->nama_model . ' successfully', ['id' => $this->modelBarangModel->insertID()], 201);
@@ -70,6 +71,7 @@ class BarangController extends ResourceController
     // Create Seri
     public function createSeri()
     {
+        $token = $this->request->user;
         $data = $this->request->getJSON();
         $validation = \Config\Services::validation();
         $validation->setRules([
@@ -78,6 +80,7 @@ class BarangController extends ResourceController
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
+        $data->created_by = $token['user_id'];
 
         $this->seriModel->insert($data);
         return $this->jsonResponse->oneResp('Add ' . $data->seri . ' successfully', ['id' => $this->seriModel->insertID()], 201);
@@ -116,7 +119,9 @@ class BarangController extends ResourceController
     // Update Model Barang
     public function updateModelBarang($id = null)
     {
+        $token = $this->request->user;
         $data = $this->request->getJSON();
+        $data->updated_by = $token['user_id'];
         $this->modelBarangModel->update($id, $data);
         return $this->jsonResponse->oneResp('Update ' . $data->nama_model . ' successfully', [], 200);
     }
@@ -124,7 +129,9 @@ class BarangController extends ResourceController
     // Update Seri
     public function updateSeri($id = null)
     {
+        $token = $this->request->user;
         $data = $this->request->getJSON();
+        $data->updated_by = $token['user_id'];
         $this->seriModel->update($id, $data);
         return $this->jsonResponse->oneResp('Update ' . $data->seri . ' successfully', [], 200);
     }

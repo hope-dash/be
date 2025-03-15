@@ -28,14 +28,16 @@ class ProductController extends ResourceController
 
     public function createProduct()
     {
+        $token = $this->request->user;
         $data = $this->request->getJSON();
 
         $validation = \Config\Services::validation();
         $validation->setRules([
             'id_model' => 'required',
-            'id_seri_barang' => 'required',
             'harga_modal' => 'required',
             'harga_jual' => 'required',
+            'notes' => 'permit_empty',
+            'id_seri_barang' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -56,11 +58,13 @@ class ProductController extends ResourceController
         $productData = [
             'id_barang' => $productId,
             'nama_barang' => $data->nama_barang,
-            'id_seri_barang' => $data->id_seri_barang,
+            'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
             'suplier' => $data->suplier,
             'id_model_barang' => $data->id_model,
+            'notes' => $data->notes ?? null,
+            "created_by" => $token['user_id'],
         ];
 
         $this->productModel->insert($productData);
@@ -77,21 +81,22 @@ class ProductController extends ResourceController
             }
         }
 
-
         $this->stockModel->insertBatch($stockData);
         return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $productId], 201);
     }
 
+
     public function updateProduct($id = null)
     {
+        $token = $this->request->user;
         $data = $this->request->getJSON();
 
         $validation = \Config\Services::validation();
         $validation->setRules([
             'id_model' => 'required',
-            'id_seri_barang' => 'required',
             'harga_modal' => 'required',
             'harga_jual' => 'required',
+            'id_seri_barang' => 'permit_empty', // Ubah di sini
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -105,9 +110,11 @@ class ProductController extends ResourceController
 
         $productData = [
             'nama_barang' => $data->nama_barang,
-            'id_seri_barang' => $data->id_seri_barang,
+            'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
+            'notes' => $data->notes ?? null,
+            "updated_by" => $token['user_id'],
         ];
 
         $this->productModel->update($id, row: $productData);
@@ -195,6 +202,7 @@ class ProductController extends ResourceController
                     'product.id_barang',
                     'product.suplier',
                     'suplier.suplier_name', // Select supplier name
+                    'product.nama_barang as nama_barang',
                     'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", seri.seri) as nama_lengkap_barang',
                     'product.harga_modal',
                     'product.harga_jual',
@@ -239,7 +247,8 @@ class ProductController extends ResourceController
                         'id' => $productId,
                         'kode_barang' => $item['id_barang'],
                         'suplier' => $item['suplier_name'], // Use supplier name from the join
-                        'nama_barang' => $item['nama_lengkap_barang'],
+                        'nama_barang' => $item['nama_barang'],
+                        'nama_lengkap_barang' => $item['nama_lengkap_barang'],
                         'harga_modal' => $item['harga_modal'],
                         'harga_jual' => $item['harga_jual'],
                         'nama_model' => $item['nama_model'],
@@ -298,7 +307,8 @@ class ProductController extends ResourceController
             $sortBy = $this->request->getGet('sortBy') ?? 'product.id_barang';
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
-            $id_toko = $this->request->getGet('id_toko') ?? ''; // Perbaikan dari 'namaProduct'
+            $id_toko = $this->request->getGet('id_toko') ?? '';
+            $is_pricelist = $this->request->getGet('is_pricelist') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
             $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
@@ -308,19 +318,18 @@ class ProductController extends ResourceController
             $kode_exclude = $requestData['kode_exclude'] ?? [];
 
             $builder = $this->stockModel
-                ->join('product', 'stock.id_barang = product.id_barang', 'left')
-                ->join('model_barang', 'product.id_model_barang = model_barang.id', 'left')
-                ->join('seri', 'product.id_seri_barang = seri.id', 'left')
-                ->select([
-                    'stock.id_toko',
-                    'stock.stock',
-                    'product.id_barang as kode_barang',
-                    "product.harga_jual",
-                    "product.harga_modal",
-                    "CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) AS nama_lengkap_barang"
-                ])
-                ->where('stock.stock >', 0);
-
+            ->join('product', 'stock.id_barang = product.id_barang', 'left')
+            ->join('model_barang', 'product.id_model_barang = model_barang.id', 'left')
+            ->join('seri', 'product.id_seri_barang = seri.id', 'left')
+            ->select([
+                'stock.id_toko',
+                'stock.stock',
+                'product.id_barang as kode_barang',
+                "product.harga_jual",
+                ...($is_pricelist ? [] : ["product.harga_modal"]),
+                "CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) AS nama_lengkap_barang"
+            ])
+            ->where('stock.stock >', 0);
 
             if (!empty($id_toko)) {
                 $builder->where('stock.id_toko', $id_toko);

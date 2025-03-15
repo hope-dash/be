@@ -71,7 +71,14 @@ class SuplierController extends ResourceController
     // POST: Tambah supplier baru
     public function create()
     {
-        $data = $this->request->getJSON();
+        $token = $this->request->user;
+        $input = $this->request->getJSON();
+        $data = [
+            "suplier_name" => $input->suplier_name,
+            "suplier_number" => $input->suplier_number,
+            "notes" => $input->notes,
+            "created_by" => $token['user_id'],
+        ];
         if (!$this->suplierModel->insert($data)) {
             return $this->jsonResponse->error($this->suplierModel->errors(), 400);
         }
@@ -81,7 +88,14 @@ class SuplierController extends ResourceController
     // PUT/PATCH: Update supplier
     public function update($id = null)
     {
-        $data = $this->request->getJSON();
+        $token = $this->request->user;
+        $input = $this->request->getJSON();
+        $data = [
+            "suplier_name" => $input->suplier_name,
+            "suplier_number" => $input->suplier_number,
+            "notes" => $input->notes,
+            "updated_by" => $token['user_id'],
+        ];
         if (!$this->suplierModel->find($id)) {
             return $this->jsonResponse->error("Supplier dengan ID $id tidak ditemukan", 400);
 

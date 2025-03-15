@@ -38,6 +38,24 @@ class CreateTransactionTable extends Migration
                 'type' => 'DATETIME',
                 'null' => true,
             ],
+            'created_at' => [
+                'type' => 'DATETIME',
+                'null' => true,
+            ],
+             'created_by' => [
+               'type' => 'VARCHAR',
+                'constraint' => '3',
+                'null' => true,
+            ],
+            'updated_at' => [
+                'type' => 'DATETIME',
+                'null' => true,
+            ],
+             'updated_by' => [
+               'type' => 'VARCHAR',
+                'constraint' => '3',
+                'null' => true,
+            ],
         ]);
         $this->forge->addKey('id', true);
         $this->forge->createTable('transaction');

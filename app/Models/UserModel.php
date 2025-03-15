@@ -10,9 +10,9 @@ class UserModel extends Model
     protected $primaryKey       = 'user_id';
     protected $useAutoIncrement = true;
     protected $returnType       = 'array';
-    protected $useSoftDeletes   = true;
+    //protected $useSoftDeletes   = true;
     protected $protectFields    = true;
-    protected $allowedFields    = ["name","username","email" ,"password","access"];
+    protected $allowedFields    = ["name","username","email" ,"password","access","created_by","updated_by"];
 
     // protected bool $allowEmptyInserts = false;
     // protected bool $updateOnlyChanged = true;

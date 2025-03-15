@@ -29,6 +29,7 @@ class CreateProductTable extends Migration
             'id_seri_barang' => [
                 'type' => 'INT',
                 'constraint' => 3,
+                'null' => true,
             ],
             'harga_modal' => [
                 'type' => 'DECIMAL',
@@ -42,12 +43,25 @@ class CreateProductTable extends Migration
                 'type' => 'INT',
                 'constraint' => 3,
             ],
+            'notes' => [
+                'type' => 'TEXT'
+            ],
             'created_at' => [
                 'type' => 'DATETIME',
                 'null' => true,
             ],
+             'created_by' => [
+               'type' => 'VARCHAR',
+                'constraint' => '3',
+                'null' => true,
+            ],
             'updated_at' => [
                 'type' => 'DATETIME',
+                'null' => true,
+            ],
+             'updated_by' => [
+               'type' => 'VARCHAR',
+                'constraint' => '3',
                 'null' => true,
             ],
         ]);

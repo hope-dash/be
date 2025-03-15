@@ -11,11 +11,11 @@ $routes->options('api/(:any)', function () {
 });
 
 $routes->post('api/login', 'UserController::login');
-$routes->post('api/register', 'UserController::create');
+$routes->post('api/register-be', 'UserController::create');
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //user
-    //$routes->post('register', 'UserController::create');
+    $routes->post('register', 'UserController::create');
     $routes->get('user/(:num)', 'UserController::userById/$1');
     $routes->get('user', 'UserController::getAllUser');
     $routes->put('user/(:num)', 'UserController::edit/$1');

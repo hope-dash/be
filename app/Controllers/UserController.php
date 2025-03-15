@@ -31,6 +31,7 @@ class UserController extends ResourceController
     public function create()
     {
         try {
+            $token = $this->request->user ? $this->request->user : null;
             $data = $this->request->getJSON();
 
             $validation = \Config\Services::validation();
@@ -51,6 +52,7 @@ class UserController extends ResourceController
                 "email" => $data->email,
                 "password" => password_hash($data->password, PASSWORD_DEFAULT),
                 "access" => $data->access,
+                "created_by" => $token['user_id'],
             ];
             if ($this->model->insert($data)) {
                 return $this->jsonResponse->oneResp("User Created Successfully");
@@ -87,6 +89,7 @@ class UserController extends ResourceController
     }
     public function edit($id = null)
     {
+        $token = $this->request->user;
         try {
             $user = $this->model->find($id);
             $data = $this->request->getJson();
@@ -124,6 +127,7 @@ class UserController extends ResourceController
                 "username" => $dataArray['username'],
                 "email" => $dataArray['email'],
                 "access" => $dataArray['access'],
+                "updated_by" => $token['user_id'],
             ];
 
             // Cek apakah password diisi
@@ -143,8 +147,6 @@ class UserController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
-
 
 
     public function delete($id = null)
@@ -173,7 +175,7 @@ class UserController extends ResourceController
     {
         try {
 
-            $query = $this->model->select('user_id, username, name, email, access, created_at, updated_at, deleted_at')->where("user_id", $id)->first();
+            $query = $this->model->select('user_id, username, name, email, access, created_at, updated_at')->where("user_id", $id)->first();
             if ($query) {
 
                 if (!empty($query['access'])) {
