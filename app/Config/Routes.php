@@ -12,6 +12,7 @@ $routes->options('api/(:any)', function () {
 
 $routes->post('api/login', 'UserController::login');
 $routes->post('api/register-be', 'UserController::create');
+$routes->post('api/pricelist', 'ProductController::getProductStock');
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //user

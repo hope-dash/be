@@ -101,8 +101,8 @@ class UserController extends ResourceController
             $validation = \Config\Services::validation();
             $rules = [
                 "name" => 'required',
-                "username" => 'required', // Menghindari konflik dengan username yang sama
-                "email" => 'required|valid_email', // Menghindari konflik dengan email yang sama
+                "username" => 'required|is_unique[users.username,user_id,' . $id . ']',
+                "email" => 'required|valid_email|is_unique[users.email,user_id,' . $id . ']',
                 "access" => 'required',
             ];
 
@@ -126,7 +126,7 @@ class UserController extends ResourceController
                 "name" => $dataArray['name'],
                 "username" => $dataArray['username'],
                 "email" => $dataArray['email'],
-                "access" => $dataArray['access'],
+                "access" => json_encode($dataArray['access']), // Mengubah array menjadi JSON
                 "updated_by" => $token['user_id'],
             ];
 
@@ -147,6 +147,7 @@ class UserController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
 
 
     public function delete($id = null)

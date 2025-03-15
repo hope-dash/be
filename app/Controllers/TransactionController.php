@@ -411,6 +411,9 @@ class TransactionController extends BaseController
 
         // Fetch products for the transaction
         $productBuilder = $db->table('sales_product sp')
+            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('model_barang', 'model_barang.id = p.id_model_barang', 'left')
+            ->join('seri', 'seri.id = p.id_seri_barang', 'left') 
             ->select("
             sp.kode_barang,
             sp.jumlah,
@@ -419,10 +422,10 @@ class TransactionController extends BaseController
             sp.modal_system as harga_modal,
             sp.total_modal,
             sp.margin,
-            p.nama_barang
+            CONCAT(p.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) as nama_barang
         ")
-            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
             ->where('sp.id_transaction', $id);
+
 
         $products = $productBuilder->get()->getResultArray();
         $transaction['products'] = $products;
