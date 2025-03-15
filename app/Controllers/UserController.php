@@ -106,9 +106,9 @@ class UserController extends ResourceController
                 "access" => 'required',
             ];
 
-            // Cek apakah password diisi dan tambahkan aturan validasi jika ada
+
             if (!empty($data->password)) {
-                $rules["password"] = 'min_length[8]'; // Validasi panjang password
+                $rules["password"] = 'min_length[8]';
             }
 
             $validation->setRules($rules);
@@ -116,9 +116,8 @@ class UserController extends ResourceController
             // Konversi stdClass ke array
             $dataArray = (array) $data;
 
-            // Validasi data
-            if (!$validation->run($dataArray)) {
-                return $this->jsonResponse->error($validation->getErrors(), 400);
+            if (!$this->validate($validation->getRules())) {
+                return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
             }
 
             // Siapkan data untuk diperbarui
