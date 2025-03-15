@@ -16,7 +16,7 @@ class CreateStockTable extends Migration
             ],
             'id_barang' => [
                 'type' => 'VARCHAR',
-                'constraint' => 5,
+                'constraint' => 10,
             ],
             'id_toko' => [
                 'type' => 'INT',

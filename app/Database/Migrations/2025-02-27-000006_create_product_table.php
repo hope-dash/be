@@ -16,7 +16,7 @@ class CreateProductTable extends Migration
             ],
             'id_barang' => [
                 'type' => 'VARCHAR',
-                'constraint' => '5',
+                'constraint' => '10',
             ],
             'nama_barang' => [
                 'type' => 'VARCHAR',
