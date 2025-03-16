@@ -326,6 +326,8 @@ class ProductController extends ResourceController
                 'stock.stock',
                 'product.id_barang as kode_barang',
                 "product.harga_jual",
+                "model_barang.nama_model",
+                "seri.seri",
                 ...($is_pricelist ? [] : ["product.harga_modal"]),
                 "CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) AS nama_lengkap_barang"
             ])
