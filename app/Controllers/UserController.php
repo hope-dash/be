@@ -51,7 +51,7 @@ class UserController extends ResourceController
                 "username" => $data->username,
                 "email" => $data->email,
                 "password" => password_hash($data->password, PASSWORD_DEFAULT),
-                "access" => $data->access,
+                "access" => json_encode( $data->access), 
                 "created_by" => $token['user_id'],
             ];
             if ($this->model->insert($data)) {
@@ -125,7 +125,7 @@ class UserController extends ResourceController
                 "name" => $dataArray['name'],
                 "username" => $dataArray['username'],
                 "email" => $dataArray['email'],
-                "access" => json_encode($dataArray['access']), // Mengubah array menjadi JSON
+                "access" => json_encode($dataArray['access']), 
                 "updated_by" => $token['user_id'],
             ];
 
