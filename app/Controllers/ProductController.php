@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Models\ModelBarangModel;
 use App\Models\ProductModel;
+use App\Models\ImageModel;
 use App\Models\StockModel;
 use CodeIgniter\RESTful\ResourceController;
 use App\Models\JsonResponse;
@@ -13,6 +14,7 @@ class ProductController extends ResourceController
     protected $modelBarangModel;
     protected $productModel;
     protected $stockModel;
+    protected $imageModel;
     protected $jsonResponse;
     protected $db;
 
@@ -20,6 +22,7 @@ class ProductController extends ResourceController
     public function __construct()
     {
         $this->modelBarangModel = new ModelBarangModel();
+        $this->imageModel = new ImageModel();
         $this->productModel = new ProductModel();
         $this->stockModel = new StockModel();
         $this->jsonResponse = new JsonResponse();
@@ -85,13 +88,19 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $productId], 201);
     }
+
     public function uploadImages()
     {
-
         $kode = $this->request->getPost('kode');
         $images = $this->request->getFiles();
-        $imageModel = new \App\Models\ImageModel();
-        $imagePaths = [];
+        $imagePaths = $this->request->getPost('image'); 
+
+        $uploadedImagePaths = [];
+        $existingImages = $this->imageModel->where('type', 'product')
+            ->where('kode', $kode)
+            ->findAll();
+
+        $existingImageUrls = array_column($existingImages, 'url');
 
         if (!empty($images['image'])) {
             foreach ($images['image'] as $image) {
@@ -99,23 +108,50 @@ class ProductController extends ResourceController
                     $newName = $image->getRandomName();
                     $image->move(ROOTPATH . 'public/uploads/images', $newName);
                     $imagePath = 'uploads/images/' . $newName;
-                    $imagePaths[] = $imagePath;
+                    $uploadedImagePaths[] = $imagePath;
 
-
-                    $imageModel->insert([
-                        'type' => "product",
-                        'kode' => $kode,
-                        'url' => $imagePath,
-                    ]);
+                    if (!in_array($imagePath, $existingImageUrls)) {
+                        $this->imageModel->insert([
+                            'type' => "product",
+                            'kode' => $kode,
+                            'url' => $imagePath,
+                        ]);
+                    }
                 } else {
-                    return $this->jsonResponse->error('Error uploading image: ' . $image->getErrorString(), 400);
+                    return $this->jsonResponse->oneResp('Invalid image file', [], 400);
                 }
             }
         }
-        return $this->jsonResponse->oneResp('Images uploaded successfully', ['image_paths' => $imagePaths], 201);
+
+        if (!empty($imagePaths)) {
+            foreach ($imagePaths as $imagePath) {
+                if (file_exists(ROOTPATH . 'public/' . $imagePath)) {
+                    $uploadedImagePaths[] = $imagePath;
+                    if (!in_array($imagePath, $existingImageUrls)) {
+                        $this->imageModel->insert([
+                            'type' => "product",
+                            'kode' => $kode,
+                            'url' => $imagePath,
+                        ]);
+                    }
+                } else {
+                    return $this->jsonResponse->oneResp('Invalid image path: ' . $imagePath, [], 400);
+                }
+            }
+        }
+
+        foreach ($existingImages as $existingImage) {
+            if (!in_array($existingImage['url'], $uploadedImagePaths)) {
+                $this->imageModel->delete($existingImage['id']);
+            }
+        }
+
+        if (empty($uploadedImagePaths)) {
+            return $this->jsonResponse->oneResp('No images or paths provided', [], 400);
+        }
+
+        return $this->jsonResponse->oneResp('Images uploaded successfully', ['image_paths' => $uploadedImagePaths], 201);
     }
-
-
 
     public function updateProduct($id = null)
     {
