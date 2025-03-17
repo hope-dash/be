@@ -60,6 +60,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
 
     //products
     $routes->post('product', 'ProductController::createProduct');
+    $routes->post('product/image', 'ProductController::uploadImages');
     $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
     $routes->get('product', 'ProductController::getAllProduct');
     $routes->post('product-stock', 'ProductController::getProductStock');

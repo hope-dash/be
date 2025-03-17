@@ -82,8 +82,39 @@ class ProductController extends ResourceController
         }
 
         $this->stockModel->insertBatch($stockData);
+
         return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $productId], 201);
     }
+    public function uploadImages()
+    {
+
+        $kode = $this->request->getPost('kode');
+        $images = $this->request->getFiles();
+        $imageModel = new \App\Models\ImageModel();
+        $imagePaths = [];
+
+        if (!empty($images['image'])) {
+            foreach ($images['image'] as $image) {
+                if ($image->isValid() && !$image->hasMoved()) {
+                    $newName = $image->getRandomName();
+                    $image->move(ROOTPATH . 'public/uploads/images', $newName);
+                    $imagePath = 'uploads/images/' . $newName;
+                    $imagePaths[] = $imagePath;
+
+
+                    $imageModel->insert([
+                        'type' => "product",
+                        'kode' => $kode,
+                        'url' => $imagePath,
+                    ]);
+                } else {
+                    return $this->jsonResponse->error('Error uploading image: ' . $image->getErrorString(), 400);
+                }
+            }
+        }
+        return $this->jsonResponse->oneResp('Images uploaded successfully', ['image_paths' => $imagePaths], 201);
+    }
+
 
 
     public function updateProduct($id = null)
@@ -318,20 +349,20 @@ class ProductController extends ResourceController
             $kode_exclude = $requestData['kode_exclude'] ?? [];
 
             $builder = $this->stockModel
-            ->join('product', 'stock.id_barang = product.id_barang', 'left')
-            ->join('model_barang', 'product.id_model_barang = model_barang.id', 'left')
-            ->join('seri', 'product.id_seri_barang = seri.id', 'left')
-            ->select([
-                'stock.id_toko',
-                'stock.stock',
-                'product.id_barang as kode_barang',
-                "product.harga_jual",
-                "model_barang.nama_model",
-                "seri.seri",
-                ...($is_pricelist ? [] : ["product.harga_modal"]),
-                "CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) AS nama_lengkap_barang"
-            ])
-            ->where('stock.stock >', 0);
+                ->join('product', 'stock.id_barang = product.id_barang', 'left')
+                ->join('model_barang', 'product.id_model_barang = model_barang.id', 'left')
+                ->join('seri', 'product.id_seri_barang = seri.id', 'left')
+                ->select([
+                    'stock.id_toko',
+                    'stock.stock',
+                    'product.id_barang as kode_barang',
+                    "product.harga_jual",
+                    "model_barang.nama_model",
+                    "seri.seri",
+                    ...($is_pricelist ? [] : ["product.harga_modal"]),
+                    "CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri) AS nama_lengkap_barang"
+                ])
+                ->where('stock.stock >', 0);
 
             if (!empty($id_toko)) {
                 $builder->where('stock.id_toko', $id_toko);
