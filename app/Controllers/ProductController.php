@@ -93,7 +93,7 @@ class ProductController extends ResourceController
     {
         $kode = $this->request->getPost('kode');
         $images = $this->request->getFiles();
-        $imagePaths = $this->request->getPost('image'); 
+        $imagePaths = $this->request->getPost('image');
 
         $uploadedImagePaths = [];
         $existingImages = $this->imageModel->where('type', 'product')
@@ -217,7 +217,7 @@ class ProductController extends ResourceController
             $product = $this->productModel->find($id);
             if ($product) {
                 $product = $this->productModel
-                    ->select('product.*, product.id_model_barang as id_model,  model_barang.nama_model, seri.seri')
+                    ->select('product.*, product.id_model_barang as id_model, model_barang.nama_model, seri.seri')
                     ->join('model_barang', 'model_barang.id = product.id_seri_barang')
                     ->join('seri', 'seri.id = product.id_seri_barang')
                     ->where('product.id', $id)
@@ -225,8 +225,9 @@ class ProductController extends ResourceController
 
                 if ($product) {
                     $product = (array) $product;
+
                     $stockData = $this->productModel
-                        ->select('stock.id, stock.stock,stock.id_toko, stock.barang_cacat, toko.toko_name')
+                        ->select('stock.id, stock.stock, stock.id_toko, stock.barang_cacat, toko.toko_name')
                         ->join('stock', 'stock.id_barang = product.id_barang', 'left')
                         ->join('toko', 'toko.id = stock.id_toko', 'left')
                         ->where('product.id', $id)
@@ -234,6 +235,12 @@ class ProductController extends ResourceController
                         ->getResultArray();
 
                     $product['stock'] = $stockData;
+
+                    $existingImages = $this->imageModel->where('type', 'product')
+                        ->where('kode', $product['id_barang'])
+                        ->findAll();
+
+                    $product['images'] = array_column($existingImages, 'url');
 
                     return $this->jsonResponse->oneResp('', $product);
                 } else {
@@ -246,6 +253,7 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage());
         }
     }
+
 
     public function getAllProduct()
     {
@@ -268,7 +276,8 @@ class ProductController extends ResourceController
                     'product.id',
                     'product.id_barang',
                     'product.suplier',
-                    'suplier.suplier_name', // Select supplier name
+                    'product.notes',
+                    'suplier.suplier_name',
                     'product.nama_barang as nama_barang',
                     'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", seri.seri) as nama_lengkap_barang',
                     'product.harga_modal',
@@ -313,7 +322,8 @@ class ProductController extends ResourceController
                     $formattedProducts[$productId] = [
                         'id' => $productId,
                         'kode_barang' => $item['id_barang'],
-                        'suplier' => $item['suplier_name'], // Use supplier name from the join
+                        'notes' => $item['notes'],
+                        'suplier' => $item['suplier_name'],
                         'nama_barang' => $item['nama_barang'],
                         'nama_lengkap_barang' => $item['nama_lengkap_barang'],
                         'harga_modal' => $item['harga_modal'],
@@ -357,7 +367,16 @@ class ProductController extends ResourceController
 
                     // Gabungkan string stok dalam satu langkah
                     $formattedProducts[$productId]['stock_string'] = implode("\n", $stockStrings);
+
+                    $existingImages = $this->imageModel->where('type', 'product')
+                        ->where('kode', $item['id_barang'])
+                        ->findAll();
+
+                    $formattedProducts[$productId]['images'] = array_column($existingImages, 'url');
+
                 }
+
+
             }
 
             return $this->jsonResponse->multiResp('', array_values($formattedProducts), $total_data, $total_page, $page, $limit, 200);
@@ -435,6 +454,15 @@ class ProductController extends ResourceController
                 ->limit($limit, $offset)
                 ->get()
                 ->getResultArray();
+
+            foreach ($products as &$product) {
+                $existingImages = $this->imageModel
+                    ->where('type', 'product')
+                    ->where('kode', $product['kode_barang'])
+                    ->findAll();
+
+                $product['images'] = array_column($existingImages, 'url');
+            }
 
             return $this->jsonResponse->multiResp('', array_values($products), $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
