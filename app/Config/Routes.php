@@ -78,6 +78,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('transaction/cancel/(:num)', 'TransactionController::updateTransactionStatusToCancel/$1');
     $routes->post('transaction/dp/(:num)', 'TransactionController::updateTransactionStatusToPartiallyPaid/$1');
     $routes->post('transaction/paid/(:num)', 'TransactionController::updateTransactionStatusToFullyPaid/$1');
+    $routes->post('transaction/complaint/(:num)', 'TransactionController::complainProduct/$1');
 
     //reporting
     $routes->get('reporting/revenue-profit', 'TransactionController::calculateRevenueAndProfit');

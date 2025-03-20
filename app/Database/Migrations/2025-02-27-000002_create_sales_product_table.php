@@ -46,7 +46,11 @@ class CreateSalesProductTable extends Migration
                 'type' => 'DECIMAL',
                 'constraint' => '10,2',
             ],
-            'margin' => [
+            'actual_per_piece' => [
+                'type' => 'DECIMAL',
+                'constraint' => '10,2',
+            ],
+            'actual_total' => [
                 'type' => 'DECIMAL',
                 'constraint' => '10,2',
             ],
