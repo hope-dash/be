@@ -26,6 +26,11 @@ class CreateTransactionTable extends Migration
                 'type' => 'VARCHAR',
                 'constraint' => '200',
             ],
+            'PO' => [
+                'type' => 'TINYINT',
+                'constraint' => 1,
+                'default' => 0,
+            ],
             'status' => [
                 'type' => 'VARCHAR',
                 'constraint' => '50',
@@ -42,8 +47,8 @@ class CreateTransactionTable extends Migration
                 'type' => 'DATETIME',
                 'null' => true,
             ],
-             'created_by' => [
-               'type' => 'VARCHAR',
+            'created_by' => [
+                'type' => 'VARCHAR',
                 'constraint' => '3',
                 'null' => true,
             ],
@@ -51,8 +56,8 @@ class CreateTransactionTable extends Migration
                 'type' => 'DATETIME',
                 'null' => true,
             ],
-             'updated_by' => [
-               'type' => 'VARCHAR',
+            'updated_by' => [
+                'type' => 'VARCHAR',
                 'constraint' => '3',
                 'null' => true,
             ],

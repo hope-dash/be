@@ -16,7 +16,7 @@ class CreateProductTable extends Migration
             ],
             'id_barang' => [
                 'type' => 'VARCHAR',
-                'constraint' => '10',
+                'constraint' => '13',
             ],
             'nama_barang' => [
                 'type' => 'VARCHAR',
@@ -39,9 +39,17 @@ class CreateProductTable extends Migration
                 'type' => 'DECIMAL',
                 'constraint' => '10,2',
             ],
+            'harga_jual_toko' => [
+                'type' => 'DECIMAL',
+                'constraint' => '10,2',
+            ],
             'suplier' => [
-                'type' => 'INT',
-                'constraint' => 3,
+                'type' => 'TEXT',
+            ],
+            'dropship' => [
+                'type' => 'TINYINT',
+                'constraint' => 1,
+                'default' => 0,
             ],
             'notes' => [
                 'type' => 'TEXT'
@@ -50,8 +58,8 @@ class CreateProductTable extends Migration
                 'type' => 'DATETIME',
                 'null' => true,
             ],
-             'created_by' => [
-               'type' => 'VARCHAR',
+            'created_by' => [
+                'type' => 'VARCHAR',
                 'constraint' => '3',
                 'null' => true,
             ],
@@ -59,8 +67,8 @@ class CreateProductTable extends Migration
                 'type' => 'DATETIME',
                 'null' => true,
             ],
-             'updated_by' => [
-               'type' => 'VARCHAR',
+            'updated_by' => [
+                'type' => 'VARCHAR',
                 'constraint' => '3',
                 'null' => true,
             ],

@@ -51,8 +51,45 @@ class UserController extends ResourceController
                 "username" => $data->username,
                 "email" => $data->email,
                 "password" => password_hash($data->password, PASSWORD_DEFAULT),
-                "access" => json_encode( $data->access), 
+                "access" => json_encode($data->access),
                 "created_by" => $token['user_id'],
+            ];
+            if ($this->model->insert($data)) {
+                return $this->jsonResponse->oneResp("User Created Successfully");
+            } else {
+                return $this->jsonResponse->error("Create Failed");
+            }
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+
+    public function create_be()
+    {
+        try {
+            $data = $this->request->getJSON();
+
+            $validation = \Config\Services::validation();
+            $validation->setRules([
+                "name" => 'required',
+                "username" => 'required|is_unique[users.username]',
+                "email" => 'required|valid_email|is_unique[users.email]',
+                "password" => 'required',
+                "access" => 'required',
+            ]);
+
+            if (!$this->validate($validation->getRules())) {
+                return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+            }
+            $data = [
+                "name" => $data->name,
+                "username" => $data->username,
+                "email" => $data->email,
+                "password" => password_hash($data->password, PASSWORD_DEFAULT),
+                "access" => json_encode($data->access),
+                "created_by" => 0,
             ];
             if ($this->model->insert($data)) {
                 return $this->jsonResponse->oneResp("User Created Successfully");
@@ -125,7 +162,7 @@ class UserController extends ResourceController
                 "name" => $dataArray['name'],
                 "username" => $dataArray['username'],
                 "email" => $dataArray['email'],
-                "access" => json_encode($dataArray['access']), 
+                "access" => json_encode($dataArray['access']),
                 "updated_by" => $token['user_id'],
             ];
 
