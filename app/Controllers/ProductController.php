@@ -461,8 +461,9 @@ class ProductController extends ResourceController
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                 ->select([
                     'product.id',
-                    'product.id_barang',
-                    'product.nama_barang',
+                    'product.id_barang as kode_barang',
+                    'product.nama_barang as nama_barang',
+                    'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
                     'COALESCE(seri.seri, "") as seri',
                     'product.dropship',
                     'stock.stock',
@@ -474,7 +475,7 @@ class ProductController extends ResourceController
 
             // Apply filters
             if (!empty($namaProduct)) {
-                $builder->like('product.nama_barang', $namaProduct, 'both');
+                $builder->like('product.nama_lengkap_barang', $namaProduct, 'both');
             }
             if (!empty($seri)) {
                 $builder->where('product.id_seri_barang', $seri);
@@ -636,7 +637,7 @@ class ProductController extends ResourceController
                     $stock = array_key_exists(chr(ord($columnName) - 1), $row) && is_numeric($row[chr(ord($columnName) - 1)]) ? (int) $row[chr(ord($columnName) - 1)] : 0;
 
                     $stockToInsert[] = [
-                        'id_barang' => $lastId,
+                        'id_barang' => $id_barang,
                         'id_toko' => $storeMap[$storeName],
                         'stock' => $stock,
                         'barang_cacat' => $barang_cacat,
