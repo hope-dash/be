@@ -542,14 +542,16 @@ class ProductController extends ResourceController
         $excelData = $sheet->toArray(null, true, true, true);
         $header = array_shift($excelData);
 
+        // Ambil toko dari header
         $storeNames = [];
         foreach ($header as $key => $column) {
-            if (strpos($column, 'STOCK') !== false || strpos($column, 'BARANG CACAT') !== false) {
+            if (stripos($column, 'STOCK') !== false || stripos($column, 'BARANG CACAT') !== false) {
                 $storeName = trim(str_replace(['STOCK', 'BARANG CACAT'], '', $column));
-                $storeNames[$storeName] = (int) $key;
+                $storeNames[$storeName] = $key; // Simpan indeks abjad kolom
             }
         }
 
+        // Mapping toko
         $storeQuery = $this->db->table('toko')->whereIn('toko_name', array_keys($storeNames))->get();
         $storeMap = [];
         foreach ($storeQuery->getResultArray() as $store) {
@@ -559,23 +561,22 @@ class ProductController extends ResourceController
         $categoryMap = [];
         $seriesMap = [];
         $supplierMap = [];
+        $dataToInsert = [];
+        $productMap = [];
+        $stockToInsert = [];
+
+        $lastProduct = $this->db->table('product')->select('id')->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
+        $lastId = $lastProduct ? (int) preg_replace('/[^0-9]/', '', $lastProduct['id']) : 0;
 
         foreach ($excelData as $row) {
-            if (empty(trim($row['B'] ?? ''))) {
-                log_message('error', "Skipping row with empty category.");
+            $lastId++;
+            $categoryName = trim($row['B'] ?? '');
+            if (empty($categoryName))
                 continue;
-            }
 
-            $categoryName = trim($row['B']);
-            $seriesName = trim($row['C'] ?? '');
-            $supplierList = array_filter(array_map('trim', explode(',', $row['D'] ?? '')));
-
+            // Cek kategori
             if (!isset($categoryMap[$categoryName])) {
-                $category = $this->db->table('model_barang')
-                    ->where('LOWER(TRIM(nama_model))', strtolower($categoryName))
-                    ->get()
-                    ->getRowArray();
-
+                $category = $this->db->table('model_barang')->where('LOWER(TRIM(nama_model))', strtolower($categoryName))->get()->getRowArray();
                 if ($category) {
                     $categoryMap[$categoryName] = $category['id'];
                 } else {
@@ -584,7 +585,9 @@ class ProductController extends ResourceController
                 }
             }
 
-            if (!isset($seriesMap[$seriesName])) {
+            // Cek seri
+            $seriesName = trim($row['C'] ?? '');
+            if (!isset($seriesMap[$seriesName]) && !empty($seriesName)) {
                 $series = $this->db->table('seri')->where('seri', $seriesName)->get()->getRowArray();
                 if ($series) {
                     $seriesMap[$seriesName] = $series['id'];
@@ -594,6 +597,9 @@ class ProductController extends ResourceController
                 }
             }
 
+            // Cek supplier
+            $supplierList = array_filter(array_map('trim', explode(',', $row['D'] ?? '')));
+            $suplierIds = [];
             foreach ($supplierList as $supplier) {
                 if (!isset($supplierMap[$supplier])) {
                     $existingSupplier = $this->db->table('suplier')->where('suplier_name', $supplier)->get()->getRowArray();
@@ -604,71 +610,60 @@ class ProductController extends ResourceController
                         $supplierMap[$supplier] = $this->db->insertID();
                     }
                 }
-            }
-        }
-
-        $dataToInsert = [];
-        foreach ($excelData as $row) {
-            if (empty(trim($row['B'] ?? ''))) {
-                continue;
+                $suplierIds[] = $supplierMap[$supplier];
             }
 
-            $id_model = $categoryMap[$row['B']];
-            $id_seri_barang = $seriesMap[$row['C']] ?? null;
-            $nama_barang = trim($row['A']);
-            $harga_modal = (float) str_replace(',', '', $row['F'] ?? 0);
-            $harga_jual = (float) str_replace(',', '', $row['G'] ?? 0);
-            $harga_jual_toko = (float) str_replace(',', '', $row['H'] ?? 0);
-            $dropship = strtolower(trim($row['E'] ?? '')) == "TRUE" ? 1 : 0;
+            $id_barang = $category['kode_awal'] . str_pad($lastId, 3, '0', STR_PAD_LEFT);
 
-            $suplierList = array_filter(array_map('trim', explode(',', $row['D'] ?? '')));
-            $suplierIds = array_map(fn($sup) => $supplierMap[$sup] ?? null, $suplierList);
-            $suplierStr = implode(',', array_filter($suplierIds));
-
-            $dataToInsert[] = [
-                'nama_barang' => $nama_barang,
-                'id_seri_barang' => $id_seri_barang,
-                'harga_modal' => $harga_modal,
-                'harga_jual' => $harga_jual,
-                'harga_jual_toko' => $harga_jual_toko,
-                'suplier' => $suplierStr,
-                'id_model_barang' => $id_model,
-                'dropship' => $dropship,
-                "created_by" => $token['user_id'],
+            // Data produk
+            $productMap[trim($row['A'])] = [
+                'id_barang' => $id_barang,
+                'nama_barang' => trim($row['A']),
+                'id_seri_barang' => $seriesMap[$seriesName] ?? null,
+                'harga_modal' => isset($row['F']) ? (float) str_replace(',', '', $row['F']) : 0,
+                'harga_jual' => isset($row['G']) ? (float) str_replace(',', '', $row['G']) : 0,
+                'harga_jual_toko' => isset($row['H']) ? (float) str_replace(',', '', $row['H']) : 0,
+                'suplier' => implode(',', array_filter($suplierIds)),
+                'id_model_barang' => $categoryMap[$categoryName],
+                'dropship' => $row['E'] === "TRUE" ? 1 : 0,
+                'created_by' => $token['user_id'],
             ];
-        }
+            $dataToInsert[] = $productMap[trim($row['A'])];
 
-        $this->db->table('product')->insertBatch($dataToInsert);
-
-        $insertedProducts = $this->db->table('product')->orderBy('id', 'DESC')->limit(count($dataToInsert))->get()->getResultArray();
-
-        $stockToInsert = [];
-        foreach ($insertedProducts as $index => $product) {
-            $model = $this->db->table('model_barang')->where('id', $product['id_model_barang'])->get()->getRowArray();
-            $kodeAwal = $model['kode_awal'] ?? '';
-
-            $productId = $kodeAwal . str_pad($product['id'], 3, '0', STR_PAD_LEFT);
-            $this->db->table('product')->where('id', $product['id'])->update(['id_barang' => $productId]);
-
-            foreach ($storeNames as $storeName => $columnKey) {
+            foreach ($storeNames as $storeName => $columnName) {
                 if (isset($storeMap[$storeName])) {
-                    $stock = isset($excelData[$index][$columnKey]) && is_numeric($excelData[$index][$columnKey]) ? (int) $excelData[$index][$columnKey] : 0;
-                    $barang_cacat = isset($excelData[$index][(int) $columnKey + 1]) && is_numeric($excelData[$index][(int) $columnKey + 1]) ? (int) $excelData[$index][(int) $columnKey + 1] : 0;
+                    $barang_cacat = array_key_exists($columnName, $row) && is_numeric($row[$columnName]) ? (int) $row[$columnName] : 0;
+                    $stock = array_key_exists(chr(ord($columnName) - 1), $row) && is_numeric($row[chr(ord($columnName) - 1)]) ? (int) $row[chr(ord($columnName) - 1)] : 0;
 
                     $stockToInsert[] = [
-                        'id_barang' => $productId,  // Pakai id_barang yang sudah benar
+                        'id_barang' => $lastId,
                         'id_toko' => $storeMap[$storeName],
                         'stock' => $stock,
                         'barang_cacat' => $barang_cacat,
                     ];
                 }
             }
+
+        }
+        // Insert produk
+        if (!empty($dataToInsert)) {
+            $this->db->table('product')->insertBatch($dataToInsert);
+        } else {
+            return $this->jsonResponse->error("No valid data to insert.", 400);
         }
 
-        $this->db->table('stock')->insertBatch($stockToInsert);
+        // Insert stok jika ada data
+        if (!empty($stockToInsert)) {
+            $this->db->table('stock')->insertBatch($stockToInsert);
+        } else {
+            return $this->jsonResponse->error("Stock data is empty.", 400);
+        }
 
         return $this->jsonResponse->oneResp(count($dataToInsert) . ' products added successfully', [], 201);
     }
+
+
+
 
 
 
