@@ -6,8 +6,10 @@ use App\Models\ModelBarangModel;
 use App\Models\ProductModel;
 use App\Models\ImageModel;
 use App\Models\StockModel;
+use App\Models\TokoModel;
 use CodeIgniter\RESTful\ResourceController;
 use App\Models\JsonResponse;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class ProductController extends ResourceController
 {
@@ -17,6 +19,7 @@ class ProductController extends ResourceController
     protected $imageModel;
     protected $jsonResponse;
     protected $db;
+    protected $modelToko;
 
 
     public function __construct()
@@ -27,6 +30,7 @@ class ProductController extends ResourceController
         $this->stockModel = new StockModel();
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
+        $this->modelToko = new TokoModel();
     }
 
     public function createProduct()
@@ -232,8 +236,6 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp('Update ' . $data->nama_barang . ' successfully', ['id' => $id], 200);
     }
-
-
     public function getDetailById($id = null)
     {
         try {
@@ -302,7 +304,6 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage());
         }
     }
-
     public function getAllProduct()
     {
         try {
@@ -439,7 +440,6 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function getProductStock()
     {
         try {
@@ -503,8 +503,6 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
-
     public function deleteByProductId($id)
     {
         // Start a database transaction
@@ -530,6 +528,149 @@ class ProductController extends ResourceController
         }
 
     }
+    public function bulkUpload()
+    {
+        $token = $this->request->user;
+        $file = $this->request->getFile('excel_file');
+
+        if (!$file->isValid() || !in_array($file->getExtension(), ['xls', 'xlsx'])) {
+            return $this->jsonResponse->error("Invalid file format. Please upload an Excel file.", 400);
+        }
+
+        $spreadsheet = IOFactory::load($file->getTempName());
+        $sheet = $spreadsheet->getActiveSheet();
+        $excelData = $sheet->toArray(null, true, true, true);
+        $header = array_shift($excelData);
+
+        $storeNames = [];
+        foreach ($header as $key => $column) {
+            if (strpos($column, 'STOCK') !== false || strpos($column, 'BARANG CACAT') !== false) {
+                $storeName = trim(str_replace(['STOCK', 'BARANG CACAT'], '', $column));
+                $storeNames[$storeName] = (int) $key;
+            }
+        }
+
+        $storeQuery = $this->db->table('toko')->whereIn('toko_name', array_keys($storeNames))->get();
+        $storeMap = [];
+        foreach ($storeQuery->getResultArray() as $store) {
+            $storeMap[$store['toko_name']] = $store['id'];
+        }
+
+        $categoryMap = [];
+        $seriesMap = [];
+        $supplierMap = [];
+
+        foreach ($excelData as $row) {
+            if (empty(trim($row['B'] ?? ''))) {
+                log_message('error', "Skipping row with empty category.");
+                continue;
+            }
+
+            $categoryName = trim($row['B']);
+            $seriesName = trim($row['C'] ?? '');
+            $supplierList = array_filter(array_map('trim', explode(',', $row['D'] ?? '')));
+
+            if (!isset($categoryMap[$categoryName])) {
+                $category = $this->db->table('model_barang')
+                    ->where('LOWER(TRIM(nama_model))', strtolower($categoryName))
+                    ->get()
+                    ->getRowArray();
+
+                if ($category) {
+                    $categoryMap[$categoryName] = $category['id'];
+                } else {
+                    log_message('error', "Category '$categoryName' not found in database.");
+                    return $this->jsonResponse->error("Category '$categoryName' not found.", 400);
+                }
+            }
+
+            if (!isset($seriesMap[$seriesName])) {
+                $series = $this->db->table('seri')->where('seri', $seriesName)->get()->getRowArray();
+                if ($series) {
+                    $seriesMap[$seriesName] = $series['id'];
+                } else {
+                    $this->db->table('seri')->insert(['seri' => $seriesName]);
+                    $seriesMap[$seriesName] = $this->db->insertID();
+                }
+            }
+
+            foreach ($supplierList as $supplier) {
+                if (!isset($supplierMap[$supplier])) {
+                    $existingSupplier = $this->db->table('suplier')->where('suplier_name', $supplier)->get()->getRowArray();
+                    if ($existingSupplier) {
+                        $supplierMap[$supplier] = $existingSupplier['id'];
+                    } else {
+                        $this->db->table('suplier')->insert(['suplier_name' => $supplier]);
+                        $supplierMap[$supplier] = $this->db->insertID();
+                    }
+                }
+            }
+        }
+
+        $dataToInsert = [];
+        foreach ($excelData as $row) {
+            if (empty(trim($row['B'] ?? ''))) {
+                continue;
+            }
+
+            $id_model = $categoryMap[$row['B']];
+            $id_seri_barang = $seriesMap[$row['C']] ?? null;
+            $nama_barang = trim($row['A']);
+            $harga_modal = (float) str_replace(',', '', $row['F'] ?? 0);
+            $harga_jual = (float) str_replace(',', '', $row['G'] ?? 0);
+            $harga_jual_toko = (float) str_replace(',', '', $row['H'] ?? 0);
+            $dropship = strtolower(trim($row['E'] ?? '')) == "TRUE" ? 1 : 0;
+
+            $suplierList = array_filter(array_map('trim', explode(',', $row['D'] ?? '')));
+            $suplierIds = array_map(fn($sup) => $supplierMap[$sup] ?? null, $suplierList);
+            $suplierStr = implode(',', array_filter($suplierIds));
+
+            $dataToInsert[] = [
+                'nama_barang' => $nama_barang,
+                'id_seri_barang' => $id_seri_barang,
+                'harga_modal' => $harga_modal,
+                'harga_jual' => $harga_jual,
+                'harga_jual_toko' => $harga_jual_toko,
+                'suplier' => $suplierStr,
+                'id_model_barang' => $id_model,
+                'dropship' => $dropship,
+                "created_by" => $token['user_id'],
+            ];
+        }
+
+        $this->db->table('product')->insertBatch($dataToInsert);
+
+        $insertedProducts = $this->db->table('product')->orderBy('id', 'DESC')->limit(count($dataToInsert))->get()->getResultArray();
+
+        $stockToInsert = [];
+        foreach ($insertedProducts as $index => $product) {
+            $model = $this->db->table('model_barang')->where('id', $product['id_model_barang'])->get()->getRowArray();
+            $kodeAwal = $model['kode_awal'] ?? '';
+
+            $productId = $kodeAwal . str_pad($product['id'], 3, '0', STR_PAD_LEFT);
+            $this->db->table('product')->where('id', $product['id'])->update(['id_barang' => $productId]);
+
+            foreach ($storeNames as $storeName => $columnKey) {
+                if (isset($storeMap[$storeName])) {
+                    $stock = isset($excelData[$index][$columnKey]) && is_numeric($excelData[$index][$columnKey]) ? (int) $excelData[$index][$columnKey] : 0;
+                    $barang_cacat = isset($excelData[$index][(int) $columnKey + 1]) && is_numeric($excelData[$index][(int) $columnKey + 1]) ? (int) $excelData[$index][(int) $columnKey + 1] : 0;
+
+                    $stockToInsert[] = [
+                        'id_barang' => $productId,  // Pakai id_barang yang sudah benar
+                        'id_toko' => $storeMap[$storeName],
+                        'stock' => $stock,
+                        'barang_cacat' => $barang_cacat,
+                    ];
+                }
+            }
+        }
+
+        $this->db->table('stock')->insertBatch($stockToInsert);
+
+        return $this->jsonResponse->oneResp(count($dataToInsert) . ' products added successfully', [], 201);
+    }
+
+
 
 
 }

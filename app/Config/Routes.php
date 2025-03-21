@@ -66,6 +66,8 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('product-stock', 'ProductController::getProductStock');
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
     $routes->delete('product/(:num)', 'ProductController::deleteByProductId/$1');
+    $routes->post('bulk-product', 'ProductController::bulkUpload');
+
 
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');

@@ -16,6 +16,11 @@ class TransactionModel extends Model
         'FAILED' => 'Failed',
         'CANCEL' => 'Cancelled',
         'REFUNDED' => 'Refunded',
+        'NEED_REFUNDED' => 'Need to Refund',
+        'RETUR' => 'Retur',
+        'PAID' => 'Paid',
+        'PACKING' => 'packing',
+        'IN_DELIVERY' => '⁠in delivery',
     ];
 
     protected $useTimestamps = true;
