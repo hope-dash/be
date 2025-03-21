@@ -73,6 +73,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('transaction/(:num)', 'TransactionController::getTransactionDetailById/$1');
     $routes->get('dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
     $routes->post('count-transaction', 'TransactionController::countTransaction');
+    $routes->put('transaction/(:num)', 'TransactionController::updateTransaction/$1');
 
     $routes->post('transaction/refund/(:num)', 'TransactionController::updateTransactionStatusToRefunded/$1');
     $routes->post('transaction/cancel/(:num)', 'TransactionController::updateTransactionStatusToCancel/$1');
