@@ -13,6 +13,10 @@ $routes->options('api/(:any)', function () {
 $routes->post('api/login', 'UserController::login');
 $routes->post('api/register-be', 'UserController::create_be');
 $routes->post('api/pricelist', 'ProductController::getProductStock');
+$routes->get('api/dropdown/toko', 'TokoController::dropdownToko');
+$routes->get('api/dropdown/model_barang', 'BarangController::dropdownModel');
+$routes->get('api/dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
+$routes->get('api/dropdown/suplier', 'SuplierController::dropdownSuplier');
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //user
@@ -41,7 +45,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('toko', 'TokoController::getAllToko');
     $routes->put('toko/(:num)', 'TokoController::update/$1');
     $routes->delete('toko/(:num)', 'TokoController::delete/$1');
-    $routes->get('dropdown/toko', 'TokoController::dropdownToko');
+
 
 
     // Model Barang Routes
@@ -49,7 +53,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('model_barang', 'BarangController::listModelBarang');
     $routes->put('model_barang/(:num)', 'BarangController::updateModelBarang/$1');
     $routes->delete('model_barang/(:num)', 'BarangController::deleteModel/$1');
-    $routes->get('dropdown/model_barang', 'BarangController::dropdownModel');
+
 
     // Seri Routes
     $routes->post('seri', 'BarangController::createSeri');
@@ -73,7 +77,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('transaction', 'TransactionController::createTransaction');
     $routes->get('transaction', 'TransactionController::getListTransaction');
     $routes->get('transaction/(:num)', 'TransactionController::getTransactionDetailById/$1');
-    $routes->get('dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
+
     $routes->post('count-transaction', 'TransactionController::countTransaction');
     $routes->put('transaction/(:num)', 'TransactionController::updateTransaction/$1');
 
@@ -92,9 +96,6 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
-    $routes->get('dropdown/suplier', 'SuplierController::dropdownSuplier');
-
-
 });
 
 
