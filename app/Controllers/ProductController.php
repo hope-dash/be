@@ -494,6 +494,10 @@ class ProductController extends ResourceController
 
             // Fetch product stock data with pagination
             $products = $builder
+                ->groupStart()
+                ->where('stock.stock >', 0)
+                ->orWhere('product.dropship >', 0)
+                ->groupEnd()
                 ->orderBy($sortBy, $sortMethod)
                 ->limit($limit, $offset)
                 ->get()

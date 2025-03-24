@@ -340,7 +340,6 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $search = $this->request->getGet('search');
-        $jatuh_tempo = $this->request->getGet('jatuh_tempo');
 
         if ($status) {
             $builder->where('t.status', $status);
@@ -350,10 +349,11 @@ class TransactionController extends BaseController
         }
 
         if ($date_start && $date_end) {
-            $builder->where("t.date_time BETWEEN :date_start: AND :date_end:", [
-                'date_start' => $date_start,
-                'date_end' => $date_end
-            ]);
+            $builder->where("t.date_time BETWEEN '{$date_start}' AND '{$date_end}'");
+        } elseif ($date_start) {
+            $builder->where("t.date_time >= '{$date_start}'");
+        } elseif ($date_end) {
+            $builder->where("t.date_time <= '{$date_end}'");
         }
 
         // **SEARCH (customer_name, customer_phone, invoice_number)**
