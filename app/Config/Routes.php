@@ -86,6 +86,8 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('transaction/dp/(:num)', 'TransactionController::updateTransactionStatusToPartiallyPaid/$1');
     $routes->post('transaction/paid/(:num)', 'TransactionController::updateTransactionStatusToFullyPaid/$1');
     $routes->post('transaction/complaint/(:num)', 'TransactionController::complainProduct/$1');
+    $routes->post('transaction/update-status/(:num)', 'TransactionController::updateTransactionStatus/$1');
+    
 
     //reporting
     $routes->get('reporting/revenue-profit', 'TransactionController::calculateRevenueAndProfit');
@@ -94,6 +96,8 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/top-customers', 'TransactionController::topCustomers');
     $routes->get('reporting/top-products', 'TransactionController::topSoldProducts');
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
+    $routes->get('reporting/due-transaction', 'TransactionController::getUpcomingDueTransactions');
+    
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
 });
