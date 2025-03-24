@@ -113,11 +113,8 @@ class TransactionController extends BaseController
         $metaData = [
             'ppn' => $data['ppn'],
             'grand_total' => $data['totalAmount'],
+            'discount' => $data['discount'],
         ];
-
-        if (!empty($data['discount'])) {
-            $metaData['discount'] = $data['discount'];
-        }
 
         if (!empty($data['jatuh_tempo'])) {
             $metaData['jatuh_tempo'] = $data['jatuh_tempo'];
@@ -126,6 +123,11 @@ class TransactionController extends BaseController
         if (!empty($data['source'])) {
             $metaData['source'] = $data['source'];
         }
+
+        if (!empty($data['refunded_amount'])) {
+            $metaData['refunded_amount'] = $data['refunded_amount'];
+        }
+
 
         if (empty($data['customerId'])) {
             $metaData['customer_name'] = $data['customer_name'];
@@ -139,6 +141,7 @@ class TransactionController extends BaseController
                 ->where('transaction_id', $transactionId)
                 ->where('key', $key)
                 ->first();
+            
 
             if ($existingMeta) {
                 // Jika sudah ada, update data
@@ -494,7 +497,7 @@ class TransactionController extends BaseController
             $cashflowDetails = $db->table('cashflow')
                 ->select('*')
                 ->where('id', $cashflowId)
-                ->orderBy('date_time', 'ASC')
+                ->orderBy('date_time', 'DESC')
                 ->get()
                 ->getResultArray();
             $cashflowRecords = array_merge($cashflowRecords, $cashflowDetails);
@@ -1059,7 +1062,6 @@ class TransactionController extends BaseController
         $data = $this->request->getJSON();
         $validation = \Config\Services::validation();
         $validation->setRules([
-
             'metode_pembayaran' => 'required',
         ]);
 
@@ -1071,7 +1073,7 @@ class TransactionController extends BaseController
 
         $db->table('transaction')
             ->where('id', $transactionId)
-            ->update(['status' => 'PAID', 'updated_by' => $token['user_id'], 'total_payment' => $newTotalPayment + $transaction['amount']]);
+            ->update(['status' => 'PAID', 'updated_by' => $token['user_id'], 'total_payment' => $newTotalPayment + $transaction['total_payment']]);
 
         $cashflowData = [
             'debit' => $newTotalPayment,
@@ -1302,10 +1304,19 @@ class TransactionController extends BaseController
                 $productMap[$product['id_barang']] = $product;
             }
 
-            // **2. Kembalikan Stok untuk Produk yang Dihapus dari Transaksi**
-            foreach ($oldItemMap as $kodeBarang => $oldItem) {
-                if (!in_array($kodeBarang, $kodeBarangList)) {
-                    $this->restoreStock($transaction['id_toko'], $kodeBarang, $oldItem['jumlah']);
+            // **2. Periksa dan Perbarui Stok**
+            foreach ($data->item as $item) {
+                $kode_barang = $item->kode_barang;
+                $newJumlah = $item->jumlah;
+                $oldJumlah = isset($oldItemMap[$kode_barang]) ? $oldItemMap[$kode_barang]['jumlah'] : 0;
+                $diffJumlah = $newJumlah - $oldJumlah;
+
+                if ($diffJumlah > 0) {
+                    // Jika jumlah bertambah, cek stok sebelum menguranginya
+                    $this->checkAndUpdateStock($data->id_toko, $kode_barang, $diffJumlah);
+                } elseif ($diffJumlah < 0) {
+                    // Jika jumlah berkurang, kembalikan stok
+                    $this->restoreStock($data->id_toko, $kode_barang, abs($diffJumlah));
                 }
             }
 
@@ -1314,19 +1325,7 @@ class TransactionController extends BaseController
 
             $salesData = [];
             foreach ($data->item as $item) {
-                if (!isset($productMap[$item->kode_barang])) {
-                    throw new \Exception("Produk {$item->kode_barang} tidak ditemukan.");
-                }
-
                 $product = $productMap[$item->kode_barang];
-
-                // **4. Update Stok Hanya Jika Jumlah Berubah**
-                if ($product['dropship'] != 1) {
-                    if (!isset($oldItemMap[$item->kode_barang]) || $oldItemMap[$item->kode_barang]['jumlah'] != $item->jumlah) {
-                        // Jika produk baru atau jumlahnya berubah, update stok
-                        $this->checkAndUpdateStock($data->id_toko, $item->kode_barang, $item->jumlah);
-                    }
-                }
 
                 $salesData[] = [
                     'kode_barang' => $item->kode_barang,
@@ -1346,14 +1345,24 @@ class TransactionController extends BaseController
                 'po' => $data->po,
                 'id_toko' => $data->id_toko,
                 "updated_by" => $token['user_id'],
-                'date_time' => date('Y-m-d H:i:s')
+                'date_time' => date('Y-m-d H:i:s'),
             ];
+
+            // **4. Tambahkan logika status transaksi**
+            if ($transaction['status'] === 'PAID') {
+                if ($grandTotal > $transaction['amount']) {
+                    $updateTransaction['status'] = 'PARTIALLY_PAID';
+                } elseif ($grandTotal < $transaction['amount']) {
+                    $updateTransaction['status'] = 'NEED_REFUNDED';
+                }
+            }
 
             if (!$this->transactions->update($transactionId, $updateTransaction)) {
                 throw new \Exception("Gagal memperbarui transaksi.");
             }
 
-            $this->saveTransactionMeta($transactionId, [
+            // **5. Simpan meta tambahan jika terjadi refund**
+            $metaData = [
                 'ppn' => $ppn,
                 'totalAmount' => $totalAmount,
                 'discount' => $data->discount,
@@ -1361,7 +1370,13 @@ class TransactionController extends BaseController
                 'source' => $data->source,
                 'customerId' => $customerId,
                 'customer_name' => $data->customer_name
-            ]);
+            ];
+
+            if ($transaction['status'] === 'PAID' && $grandTotal < $transaction['total_payment']) {
+                $metaData['refunded_amount'] = $transaction['total_payment'] - $grandTotal;
+            }
+
+            $this->saveTransactionMeta($transactionId, $metaData);
 
             if (!$this->SalesProductModel->insertBatch($salesData)) {
                 throw new \Exception("Gagal memperbarui data penjualan.");
@@ -1379,6 +1394,9 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
+
+
+
     private function restoreStock($idToko, $kodeBarang, $jumlah)
     {
         // Cek apakah stok barang tersedia di toko
@@ -1457,7 +1475,9 @@ class TransactionController extends BaseController
 
         // Cek apakah transaksi ada dan statusnya PAID
         $builder = $db->table('transaction');
-        $transaction = $builder->where('id', $transactionId)->where('status', 'PAID')->get()->getRowArray();
+        $transaction = $builder->where('id', $transactionId)
+            ->whereIn('status', ['PAID', 'PACKING', 'IN_DELIVERY'])
+            ->get()->getRowArray();
 
         if (!$transaction) {
             return $this->jsonResponse->oneResp('Transaksi tidak ditemukan atau status bukan PAID.', null, 404);

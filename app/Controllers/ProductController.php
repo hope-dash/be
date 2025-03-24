@@ -264,7 +264,7 @@ class ProductController extends ResourceController
 
                     // Fetch existing images
                     $existingImages = $this->imageModel->where('type', 'product')
-                        ->where('kode', $product['id_barang'])
+                        ->where('kode', $id)
                         ->findAll();
 
                     $product['images'] = array_column($existingImages, 'url');
@@ -308,6 +308,9 @@ class ProductController extends ResourceController
     {
         try {
             $sortBy = $this->request->getGet('sortBy') ?? 'product.id';
+            if ($sortBy === 'kode_barang') {
+                $sortBy = 'product.id_barang';
+            }
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
@@ -360,7 +363,7 @@ class ProductController extends ResourceController
 
             // Fetch product data with pagination
             $products = $builder
-                ->groupBy('product.id') // Group by product ID to aggregate supplier names
+                ->groupBy('product.id')
                 ->orderBy($sortBy, $sortMethod)
                 ->limit($limit, $offset)
                 ->get()
@@ -428,7 +431,7 @@ class ProductController extends ResourceController
 
                     // Fetch existing images
                     $existingImages = $this->imageModel->where('type', 'product')
-                        ->where('kode', $item['id_barang'])
+                        ->where('kode', $item['id'])
                         ->findAll();
 
                     $formattedProducts[$productId]['images'] = array_column($existingImages, 'url');
@@ -475,8 +478,10 @@ class ProductController extends ResourceController
 
             // Apply filters
             if (!empty($namaProduct)) {
-                $builder->like('product.nama_lengkap_barang', $namaProduct, 'both');
+                $builder->where("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri) LIKE", "%{$namaProduct}%");
             }
+
+
             if (!empty($seri)) {
                 $builder->where('product.id_seri_barang', $seri);
             }
@@ -502,6 +507,15 @@ class ProductController extends ResourceController
                 ->limit($limit, $offset)
                 ->get()
                 ->getResultArray();
+
+            foreach ($products as &$item) {
+                $existingImages = $this->imageModel
+                    ->where('type', 'product')
+                    ->where('kode', $item['id'])
+                    ->findAll();
+
+                $item['images'] = array_column($existingImages, 'url');
+            }
 
             return $this->jsonResponse->multiResp('', $products, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
