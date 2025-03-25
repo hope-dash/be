@@ -44,7 +44,6 @@ class ProductController extends ResourceController
             'harga_modal' => 'required',
             'harga_jual' => 'required',
             'harga_jual_toko' => 'permit_empty',
-            'notes' => 'permit_empty',
             'id_seri_barang' => 'permit_empty',
             'dropship' => 'permit_empty',
             'suplier' => 'permit_empty',
@@ -96,7 +95,7 @@ class ProductController extends ResourceController
 
         $this->stockModel->insertBatch($stockData);
 
-        return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $productId], 201);
+        return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $nextId], 201);
     }
 
 
@@ -175,7 +174,6 @@ class ProductController extends ResourceController
             'harga_modal' => 'required',
             'harga_jual' => 'required',
             'harga_jual_toko' => 'permit_empty',
-            'notes' => 'permit_empty',
             'id_seri_barang' => 'permit_empty',
             'dropship' => 'permit_empty',
             'suplier' => 'permit_empty',
@@ -341,11 +339,12 @@ class ProductController extends ResourceController
                     'GROUP_CONCAT(suplier.suplier_name) as suplier_names' // Get all supplier names
                 ]);
 
-
-
             // Apply filters
             if (!empty($namaProduct)) {
-                $builder->like('CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", seri.seri)', $namaProduct, 'both');
+                $builder->groupStart()
+                    ->like("CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                ->groupEnd();
             }
             if (!empty($seri)) {
                 $builder->like('product.id_seri_barang', $seri, 'both');
@@ -457,6 +456,10 @@ class ProductController extends ResourceController
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
+            // Ambil data dari body request
+            $requestBody = $this->request->getJSON(true);
+            $kode_exclude = !empty($requestBody['kode_exclude']) ? $requestBody['kode_exclude'] : [];
+
             $builder = $this->productModel
                 ->join('stock', 'stock.id_barang = product.id_barang', 'left')
                 ->join('toko', 'toko.id = stock.id_toko', 'left')
@@ -478,9 +481,11 @@ class ProductController extends ResourceController
 
             // Apply filters
             if (!empty($namaProduct)) {
-                $builder->where("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri) LIKE", "%{$namaProduct}%");
+                $builder->groupStart()
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                    ->groupEnd();
             }
-
 
             if (!empty($seri)) {
                 $builder->where('product.id_seri_barang', $seri);
@@ -492,6 +497,10 @@ class ProductController extends ResourceController
                 $builder->where('toko.id', $id_toko);
             }
 
+            // Exclude products with kode_exclude
+            if (!empty($kode_exclude) && is_array($kode_exclude)) {
+                $builder->whereNotIn('product.id_barang', $kode_exclude);
+            }
 
             // Count total data
             $total_data = $builder->countAllResults(false);
@@ -522,6 +531,7 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
     public function deleteByProductId($id)
     {
         // Start a database transaction
