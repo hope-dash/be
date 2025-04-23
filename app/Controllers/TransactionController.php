@@ -60,39 +60,32 @@ class TransactionController extends BaseController
 
     private function checkAndUpdateStock($id_toko, $kode_barang, $jumlah)
     {
-        // Cek apakah produk adalah dropship
-        $product = $this->ProductModel
-            ->where('id_barang', $kode_barang)
-            ->get()
-            ->getRowArray();
-
-        if (!$product) {
-            throw new \Exception("Produk dengan kode {$kode_barang} tidak ditemukan.");
-        }
-
-        // Jika produk adalah dropship, tidak perlu mengurangi stok
-        if ($product['dropship'] == 1) {
-            return true;
-        }
-
-        // Ambil stok dari toko
+        // Ambil data stok dari toko
         $stock = $this->stockModel
             ->where('id_toko', $id_toko)
             ->where('id_barang', $kode_barang)
             ->get()
             ->getRowArray();
 
-        if (!$stock || $stock['stock'] < $jumlah) {
+        if (!$stock) {
+            throw new \Exception("Stok untuk produk {$kode_barang} tidak ditemukan.");
+        }
+
+        if (!empty($stock['dropship']) && (int) $stock['dropship'] === 1) {
+            return true;
+        }
+
+        if ((int) $stock['stock'] < $jumlah) {
             throw new \Exception("Stok tidak mencukupi untuk produk {$kode_barang}.");
         }
 
-        // Kurangi stok jika bukan dropship
         return $this->stockModel
             ->where('id_toko', $id_toko)
             ->where('id_barang', $kode_barang)
             ->set('stock', 'stock - ' . $jumlah, false)
             ->update();
     }
+
 
 
     private function getOrCreateCustomer($customer_name, $customer_phone)
@@ -213,9 +206,9 @@ class TransactionController extends BaseController
                 }
 
                 $product = $productMap[$item->kode_barang];
-                if ($product['dropship'] != 1) {
-                    $this->checkAndUpdateStock($data->id_toko, $item->kode_barang, $item->jumlah);
-                }
+
+                $this->checkAndUpdateStock($data->id_toko, $item->kode_barang, $item->jumlah);
+
 
                 // Harga modal setelah diskon
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
@@ -1182,10 +1175,8 @@ class TransactionController extends BaseController
         $token = $this->request->user;
         $db = \Config\Database::connect();
 
-        // Start a transaction
         $db->transBegin();
 
-        // Retrieve the transaction
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
             ->whereIn('status', ['SUCCESS'])
@@ -1196,11 +1187,10 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction not found or not eligible for complaint', null, 404);
         }
 
-        // Get the complaint data from the request
         $data = $this->request->getJSON();
         $products = $data->products;
 
-        $totalRefundAmount = 0; // Initialize total refund amount
+        $totalRefundAmount = 0;
 
         foreach ($products as $product) {
             $kode_barang = $product->kode_barang;
@@ -1208,7 +1198,7 @@ class TransactionController extends BaseController
             $barang_cacat = $product->barang_cacat;
             $solution = $product->solution;
 
-            // Save to the 'retur' table
+            // Simpan retur
             $returData = [
                 'transaction_id' => $transactionId,
                 'kode_barang' => $kode_barang,
@@ -1218,9 +1208,8 @@ class TransactionController extends BaseController
             ];
             $db->table('retur')->insert($returData);
 
-            // Retrieve product details
-            $salesProduct = $db->table('sales_product sp')
-                ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            // Ambil data penjualan
+            $salesProduct = $db->table('sales_product')
                 ->where('id_transaction', $transactionId)
                 ->where('kode_barang', $kode_barang)
                 ->get()
@@ -1230,33 +1219,39 @@ class TransactionController extends BaseController
                 return $this->jsonResponse->oneResp('Product not found for kode_barang: ' . $kode_barang, null, 404);
             }
 
-            // Handle refund scenario
+            // Ambil stock terkait untuk cek dropship
+            $stock = $db->table('stock')
+                ->where('id_toko', $transaction['id_toko'])
+                ->where('id_barang', $kode_barang)
+                ->get()
+                ->getRowArray();
+
+            $isDropship = isset($stock['dropship']) && (int) $stock['dropship'] === 1;
+
+            // Hitung refund
             if ($solution === 'refund') {
                 $refundAmount = $jumlah * $salesProduct['actual_per_piece'];
                 $totalRefundAmount += $refundAmount;
             }
 
-
-            // Handle exchange scenario
+            // Tukar barang: kurangi stok
             if ($solution === 'exchange') {
                 $db->table('stock')
                     ->where('id_barang', $kode_barang)
                     ->where('id_toko', $transaction['id_toko'])
-                    ->set('stock', 'stock - ' . $jumlah, false) // Decrement stock
+                    ->set('stock', 'stock - ' . $jumlah, false)
                     ->update();
             }
 
-            if ($salesProduct['dropship'] !== "1") {
-                // Handle defective items
+            // Jika bukan dropship, proses pengembalian ke stock
+            if (!$isDropship) {
                 if ($barang_cacat) {
-                    // Increment defective stock
                     $db->table('stock')
                         ->where('id_barang', $kode_barang)
                         ->where('id_toko', $transaction['id_toko'])
                         ->set('barang_cacat', 'barang_cacat + ' . $jumlah, false)
                         ->update();
                 } else {
-                    // Return normal product to stock if not defective
                     $db->table('stock')
                         ->where('id_barang', $kode_barang)
                         ->where('id_toko', $transaction['id_toko'])
@@ -1266,13 +1261,12 @@ class TransactionController extends BaseController
             }
         }
 
+        // Status transaksi dan metadata
         $db->table('transaction')
             ->where('id', $transactionId)
             ->update(['status' => 'RETUR', 'updated_by' => $token['user_id']]);
 
-        // Update cashflow for total refund amount outside the loop
         if ($totalRefundAmount > 0) {
-            // Update transaction_meta for refunded_at and oneResp
             $metaData = [
                 [
                     'transaction_id' => $transactionId,
@@ -1282,7 +1276,7 @@ class TransactionController extends BaseController
                 [
                     'transaction_id' => $transactionId,
                     'key' => 'refunded_amount',
-                    'value' => $refundAmount
+                    'value' => $totalRefundAmount // perbaiki jadi total
                 ]
             ];
 
@@ -1295,7 +1289,6 @@ class TransactionController extends BaseController
                 ->update(['status' => 'NEED_REFUNDED', 'updated_by' => $token['user_id']]);
         }
 
-        // Commit the transaction
         if ($db->transStatus() === false) {
             $db->transRollback();
             return $this->jsonResponse->oneResp('Failed to process complaint', null, 500);
@@ -1304,6 +1297,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Complaint processed successfully', null, 200);
         }
     }
+
 
     public function updateTransaction($transactionId)
     {
@@ -1453,7 +1447,6 @@ class TransactionController extends BaseController
 
     private function restoreStock($idToko, $kodeBarang, $jumlah)
     {
-
         $stok = $this->stockModel
             ->select('stock.id, stock.stock, product.dropship')
             ->join('product', 'product.id_barang = stock.id_barang')
@@ -1461,20 +1454,19 @@ class TransactionController extends BaseController
             ->where('stock.id_barang', $kodeBarang)
             ->first();
 
-
         if (!$stok) {
             throw new \Exception("Stok untuk produk {$kodeBarang} tidak ditemukan di toko {$idToko}.");
         }
 
+        $isDropship = isset($stok['dropship']) && (int) $stok['dropship'] === 1;
 
-        if ((int) $stok['dropship'] !== 1) {
+        if (!$isDropship) {
             $this->stockModel
                 ->where('id', $stok['id'])
-                ->set('stock', 'stock + ' . $jumlah, false)
+                ->set('stock', 'stock + ' . (int) $jumlah, false)
                 ->update();
         }
     }
-
 
 
     public function getUpcomingDueTransactions()

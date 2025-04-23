@@ -45,7 +45,6 @@ class ProductController extends ResourceController
             'harga_jual' => 'required',
             'harga_jual_toko' => 'permit_empty',
             'id_seri_barang' => 'permit_empty',
-            'dropship' => 'permit_empty',
             'suplier' => 'permit_empty',
             'suplier.*' => 'permit_empty|integer',
         ]);
@@ -56,7 +55,7 @@ class ProductController extends ResourceController
 
         $model = $this->modelBarangModel->find($data->id_model);
         if (!$model) {
-            return $this->jsonResponse->error("Type not Valid", 400);
+            return $this->jsonResponse->error("Kategori barang tidak valid", 400);
         }
 
         $kodeAwal = $model['kode_awal'];
@@ -75,7 +74,6 @@ class ProductController extends ResourceController
             'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null, // Convert array to comma-separated string
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
-            'dropship' => isset($data->dropship) ? (int) $data->dropship : 0, // Convert boolean to integer
             "created_by" => $token['user_id'],
         ];
 
@@ -83,12 +81,14 @@ class ProductController extends ResourceController
 
         $stockData = [];
         foreach ($data->stock as $toko) {
+
             if (isset($toko->id_toko) && $toko->id_toko !== "" && $toko->id_toko !== "0") {
                 $stockData[] = [
                     'id_barang' => $productId,
                     'id_toko' => $toko->id_toko,
                     'stock' => $toko->stock,
                     'barang_cacat' => $toko->barang_cacat,
+                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
                 ];
             }
         }
@@ -176,7 +176,6 @@ class ProductController extends ResourceController
             'harga_jual' => 'required',
             'harga_jual_toko' => 'permit_empty',
             'id_seri_barang' => 'permit_empty',
-            'dropship' => 'permit_empty',
             'suplier' => 'permit_empty',
             'suplier.*' => 'permit_empty|integer',
         ]);
@@ -187,7 +186,7 @@ class ProductController extends ResourceController
 
         $model = $this->modelBarangModel->find($data->id_model);
         if (!$model) {
-            return $this->jsonResponse->error("Type not Valid", 400);
+            return $this->jsonResponse->error("Kategori barang tidak valid", 400);
         }
 
         $productData = [
@@ -197,7 +196,6 @@ class ProductController extends ResourceController
             'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
             'notes' => $data->notes ?? null,
-            'dropship' => isset($data->dropship) ? (int) $data->dropship : 0, // Convert boolean to integer
             "updated_by" => $token['user_id'],
         ];
 
@@ -210,6 +208,7 @@ class ProductController extends ResourceController
                 $stockData = [
                     'stock' => $toko->stock,
                     'barang_cacat' => $toko->barang_cacat,
+                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
                 ];
 
                 $this->stockModel->update($toko->id, $stockData);
@@ -220,6 +219,7 @@ class ProductController extends ResourceController
                     'id_toko' => $toko->id_toko,
                     'stock' => $toko->stock,
                     'barang_cacat' => $toko->barang_cacat,
+                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
                 ];
 
                 // Create new stock entry
@@ -332,7 +332,6 @@ class ProductController extends ResourceController
                     'product.harga_modal',
                     'product.harga_jual',
                     'product.harga_jual_toko',
-                    'product.dropship',
                     'model_barang.nama_model',
                     'COALESCE(seri.seri, "") as seri',
                     '(SELECT SUM(stock.stock) FROM stock WHERE stock.id_barang = product.id_barang) as total_stock',
@@ -388,7 +387,6 @@ class ProductController extends ResourceController
                         'harga_modal' => $item['harga_modal'],
                         'harga_jual' => $item['harga_jual'],
                         'harga_jual_toko' => $item['harga_jual_toko'],
-                        'dropship' => (bool) $item['dropship'],
                         'nama_model' => $item['nama_model'],
                         'seri' => $item['seri'],
                         'stock' => [],
@@ -401,7 +399,7 @@ class ProductController extends ResourceController
                 // Fetch stock data based on product code
                 if (!empty($item['id_barang'])) {
                     $stocks = $this->stockModel
-                        ->select('stock.stock, stock.barang_cacat, toko.toko_name')
+                        ->select('stock.dropship, stock.stock, stock.barang_cacat, toko.toko_name')
                         ->join('toko', 'toko.id = stock.id_toko', 'left')
                         ->where('stock.id_barang', $item['id_barang'])
                         ->findAll();
@@ -411,11 +409,13 @@ class ProductController extends ResourceController
                         $stockValue = (int) ($stockItem['stock'] ?? 0);
                         $barangCacat = (int) ($stockItem['barang_cacat'] ?? 0);
                         $tokoName = $stockItem['toko_name'] ?? 'Tidak diketahui';
+                        $dropship = $stockItem['dropship'] === "1" ;
 
                         $formattedProducts[$productId]['stock'][] = [
                             'stock' => $stockValue,
                             'barang_cacat' => $barangCacat,
-                            'toko_name' => $tokoName
+                            'toko_name' => $tokoName,
+                            'dropship' => $dropship
                         ];
 
                         // Add to total stock & defective items
@@ -474,8 +474,8 @@ class ProductController extends ResourceController
                     'product.nama_barang as nama_barang',
                     'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
                     'COALESCE(seri.seri, "") as seri',
-                    'product.dropship',
                     'stock.stock',
+                    'stock.dropship',
                     'stock.barang_cacat',
                     'toko.toko_name',
                     ...($is_toko ? ["product.harga_jual_toko as harga_jual"] : ["product.harga_jual"]),
@@ -513,7 +513,7 @@ class ProductController extends ResourceController
             $products = $builder
                 ->groupStart()
                 ->where('stock.stock >', 0)
-                ->orWhere('product.dropship >', 0)
+                ->orWhere('stock.dropship >', 0)
                 ->groupEnd()
                 ->orderBy($sortBy, $sortMethod)
                 ->limit($limit, $offset)
@@ -693,11 +693,4 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp(count($dataToInsert) . ' products added successfully', [], 201);
     }
-
-
-
-
-
-
-
 }
