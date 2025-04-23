@@ -286,9 +286,6 @@ class TransactionController extends BaseController
         }
     }
 
-
-
-
     public function countTransaction()
     {
         $data = $this->request->getJSON();
@@ -460,7 +457,7 @@ class TransactionController extends BaseController
                 tm_total_dp.value AS total_dp,
                 tm_source.value AS source,
                 tm_discount.value AS discount,
-                tm_jatuh_tempo.value AS jatuh_tempo_pada,
+                tm_jatuh_tempo.value AS jatuh_tempo,
             ")
             ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
@@ -490,11 +487,11 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction not found', null, 404);
         }
 
-        if (!empty($transaction['jatuh_tempo_pada'])) {
-            $jatuhTempo = new \DateTime($transaction['jatuh_tempo_pada']);
+        if (!empty($transaction['jatuh_tempo'])) {
+            $jatuhTempo = new \DateTime($transaction['jatuh_tempo']);
             $today = new \DateTime();
             $interval = $today->diff($jatuhTempo);
-            $transaction['jatuh_tempo'] = ($interval->invert == 0) ? $interval->days + 1 : 0;
+            $transaction['jatuh_tempo_pada'] = ($interval->invert == 0) ? $interval->days + 1 : 0;
         }
 
         // Fetch products for the transaction
@@ -550,6 +547,7 @@ class TransactionController extends BaseController
 
         return $this->jsonResponse->oneResp('Success', $transaction, 200);
     }
+
     public function calculateRevenueAndProfit()
     {
         $date_start = $this->request->getGet('date_start');
@@ -607,9 +605,13 @@ class TransactionController extends BaseController
             // Query untuk menghitung total debit dan kredit
             $query = $this->db->table('cashflow')
                 ->select('SUM(debit) AS total_debit, SUM(credit) AS total_credit')
-                ->where('status', 'SUCCESS')
-                ->where('date_time >=', $date_start)
-                ->where('date_time <=', $date_end);
+                ->where('status', 'SUCCESS');
+
+            // Filter berdasarkan tanggal jika diberikan
+            if (!empty($date_start) && !empty($date_end)) {
+                $query->where('date_time >=', $date_start)
+                    ->where('date_time <=', $date_end);
+            }
 
             if ($id_toko) {
                 $query->where('id_toko', $id_toko);
@@ -617,7 +619,7 @@ class TransactionController extends BaseController
 
             if (!empty($type)) {
                 $types = explode(',', $type);
-                $query = $query->whereIn('type', array_map('trim', $types));
+                $query->whereIn('type', array_map('trim', $types));
             }
 
             if (!empty($transaction)) {
@@ -629,7 +631,6 @@ class TransactionController extends BaseController
             }
 
             $result = $query->get()->getRow();
-
 
             if ($result) {
                 return $this->jsonResponse->oneResp("Data berhasil diambil", [
@@ -644,6 +645,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
 
     public function calculateExpenseAllocation()
     {
@@ -689,6 +691,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
     public function topCustomers($limit = 10)
     {
         $date_start = $this->request->getGet('date_start');
@@ -722,6 +725,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
     public function topSoldProducts($limit = 5)
     {
         $date_start = $this->request->getGet('date_start');

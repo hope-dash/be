@@ -67,7 +67,7 @@ class ProductController extends ResourceController
 
         $productData = [
             'id_barang' => $productId,
-            'nama_barang' => $data->nama_barang,
+            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : null,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
@@ -95,7 +95,8 @@ class ProductController extends ResourceController
 
         $this->stockModel->insertBatch($stockData);
 
-        return $this->jsonResponse->oneResp('Add ' . $data->nama_barang . ' successfully', ['id' => $nextId], 201);
+        return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
+
     }
 
 
@@ -190,7 +191,7 @@ class ProductController extends ResourceController
         }
 
         $productData = [
-            'nama_barang' => $data->nama_barang,
+            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : '',
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
@@ -232,7 +233,7 @@ class ProductController extends ResourceController
             $this->productModel->update($id, ['suplier' => $supplierIds]);
         }
 
-        return $this->jsonResponse->oneResp('Update ' . $data->nama_barang . ' successfully', ['id' => $id], 200);
+        return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id], 200);
     }
     public function getDetailById($id = null)
     {
@@ -344,7 +345,7 @@ class ProductController extends ResourceController
                 $builder->groupStart()
                     ->like("CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri)", $namaProduct)
                     ->orLike("product.id_barang", $namaProduct)
-                ->groupEnd();
+                    ->groupEnd();
             }
             if (!empty($seri)) {
                 $builder->like('product.id_seri_barang', $seri, 'both');
@@ -452,6 +453,7 @@ class ProductController extends ResourceController
             $is_pricelist = $this->request->getGet('is_pricelist') ?? '';
             $is_toko = $this->request->getGet('is_toko') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
+            $model = $this->request->getGet('model') ?? '';
             $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
@@ -468,6 +470,7 @@ class ProductController extends ResourceController
                 ->select([
                     'product.id',
                     'product.id_barang as kode_barang',
+                    'model_barang.nama_model',
                     'product.nama_barang as nama_barang',
                     'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
                     'COALESCE(seri.seri, "") as seri',

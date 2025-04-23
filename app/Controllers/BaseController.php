@@ -55,9 +55,9 @@ abstract class BaseController extends Controller
 
         // E.g.: $this->session = service('session');
         $this->response->setHeader('Access-Control-Allow-Origin', '*')
-                   ->setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, PUT, DELETE')
-                   ->setHeader('Access-Control-Allow-Headers', 'X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Authorization')
-                   ->setHeader('Access-Control-Allow-Credentials', 'true');
+            ->setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, PUT, DELETE')
+            ->setHeader('Access-Control-Allow-Headers', 'X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Authorization')
+            ->setHeader('Access-Control-Allow-Credentials', 'true');
 
     }
 }
