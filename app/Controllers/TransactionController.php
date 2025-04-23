@@ -106,7 +106,7 @@ class TransactionController extends BaseController
         return $customer['id'];
     }
 
-    private function calculateTransactionTotals($items, $discount, $ppn)
+    private function calculateTransactionTotals($items, $discount, $ppn, $pengiriman)
     {
         $totalAmount = 0;
         foreach ($items as $item) {
@@ -114,7 +114,7 @@ class TransactionController extends BaseController
         }
 
         $totalPpn = ($totalAmount * $ppn) / 100;
-        $grandTotal = $totalAmount + $totalPpn - $discount;
+        $grandTotal = $totalAmount + $totalPpn + $pengiriman - $discount;
 
         return [$totalAmount, $totalPpn, $grandTotal];
     }
@@ -126,10 +126,16 @@ class TransactionController extends BaseController
             'ppn_value' => $data['ppn_value'],
             'grand_total' => $data['totalAmount'],
             'discount' => $data['discount'],
+            'alamat' => $data['alamat'],
+            'pengiriman' => $data['pengiriman'],
         ];
 
         if (!empty($data['jatuh_tempo'])) {
             $metaData['jatuh_tempo'] = $data['jatuh_tempo'];
+        }
+
+        if (!empty($data['biaya_pengiriman'])) {
+            $metaData['biaya_pengiriman'] = $data['biaya_pengiriman'];
         }
 
         if (!empty($data['source'])) {
@@ -194,7 +200,7 @@ class TransactionController extends BaseController
             }
 
             // Menghitung Total, PPN, dan Grand Total
-            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals($data->item, $data->discount, $data->ppn);
+            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals($data->item, $data->discount, $data->ppn, $data->biaya_pengiriman);
 
             // Hitung Discount Rate
             $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
@@ -255,6 +261,9 @@ class TransactionController extends BaseController
                 'source' => $data->source,
                 'customerId' => $customerId,
                 'jatuh_tempo' => $data->jatuh_tempo,
+                'alamat' => $data->alamat,
+                'pengiriman' => $data->pengiriman,
+                'biaya_pengiriman' => $data->biaya_pengiriman,
                 'customer_name' => $data->customer_name
             ]);
 
@@ -318,9 +327,10 @@ class TransactionController extends BaseController
             // Simpan transaksi
             $transactionData = [
                 'discount' => $data->discount,
+                'biaya_pengiriman' => $data->biaya_pengiriman,
                 'sub_total' => $totalAmount,
                 'ppn' => $ppn,
-                'grand_total' => $totalAmount + $ppn - $data->discount,
+                'grand_total' => $totalAmount + $ppn + $data->biaya_pengiriman - $data->discount,
 
             ];
 
@@ -451,6 +461,9 @@ class TransactionController extends BaseController
                 tm_source.value AS source,
                 tm_discount.value AS discount,
                 tm_jatuh_tempo.value AS jatuh_tempo,
+                tm_alamat.value AS alamat,
+                tm_pengiriman.value AS pengiriman,
+                tm_biaya_pengiriman.value AS biaya_pengiriman,
             ")
             ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
@@ -471,6 +484,9 @@ class TransactionController extends BaseController
             ->join('transaction_meta tm_source', 't.id = tm_source.transaction_id AND tm_source.key = "source"', 'left')
             ->join('transaction_meta tm_discount', 't.id = tm_discount.transaction_id AND tm_discount.key = "discount"', 'left')
             ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
+            ->join('transaction_meta tm_alamat', 't.id = tm_alamat.transaction_id AND tm_alamat.key = "alamat"', 'left')
+            ->join('transaction_meta tm_pengiriman', 't.id = tm_pengiriman.transaction_id AND tm_pengiriman.key = "pengiriman"', 'left')
+            ->join('transaction_meta tm_biaya_pengiriman', 't.id = tm_biaya_pengiriman.transaction_id AND tm_biaya_pengiriman.key = "biaya_pengiriman"', 'left')
             ->where('t.id', $id);
 
 
@@ -1344,7 +1360,7 @@ class TransactionController extends BaseController
             }
 
             // **4. Menghitung Total, PPN, dan Grand Total**
-            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals($data->item, $data->discount, $data->ppn);
+            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals($data->item, $data->discount, $data->ppn, $data->biaya_pengiriman);
 
             // **5. Hitung Discount Rate**
             $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
@@ -1417,6 +1433,9 @@ class TransactionController extends BaseController
                 'discount_rate' => $discount_rate, // Simpan discount rate untuk referensi
                 'jatuh_tempo' => $data->jatuh_tempo,
                 'source' => $data->source,
+                'alamat' => $data->alamat,
+                'pengiriman' => $data->pengiriman,
+                'biaya_pengiriman' => $data->biaya_pengiriman,
                 'customerId' => $customerId,
                 'customer_name' => $data->customer_name
             ];

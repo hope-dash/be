@@ -25,6 +25,7 @@ class CustomerController extends BaseController
             $validation = \Config\Services::validation();
             $validation->setRules([
                 'nama_customer' => 'required',
+                'alamat' => 'required',
                 'no_hp_customer' => 'required|min_length[10]|max_length[15]',
             ]);
 
@@ -34,6 +35,7 @@ class CustomerController extends BaseController
 
             $customerData = [
                 'nama_customer' => $data->nama_customer,
+                'alamat' => $data->alamat,
                 'no_hp_customer' => $data->no_hp_customer,
             ];
 
@@ -59,6 +61,7 @@ class CustomerController extends BaseController
             $validation = \Config\Services::validation();
             $validation->setRules([
                 'nama_customer' => 'required',
+                'alamat' => 'required',
                 'no_hp_customer' => 'required|min_length[10]|max_length[15]',
             ]);
 
@@ -68,6 +71,7 @@ class CustomerController extends BaseController
 
             $customerData = [
                 'nama_customer' => $data->nama_customer,
+                'alamat' => $data->alamat,
                 'no_hp_customer' => $data->no_hp_customer,
             ];
 
