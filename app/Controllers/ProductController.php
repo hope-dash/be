@@ -252,12 +252,18 @@ class ProductController extends ResourceController
 
                     // Fetch stock data
                     $stockData = $this->productModel
-                        ->select('stock.id, stock.stock, stock.id_toko, stock.barang_cacat, toko.toko_name')
+                        ->select("stock.id, stock.stock,IF(stock.dropship = 1, 1, 0) AS dropship, stock.id_toko, stock.barang_cacat, toko.toko_name")
                         ->join('stock', 'stock.id_barang = product.id_barang', 'left')
                         ->join('toko', 'toko.id = stock.id_toko', 'left')
                         ->where('product.id', $id)
                         ->get()
                         ->getResultArray();
+
+                    foreach ($stockData as &$row) {
+                        $row['dropship'] = (bool) $row['dropship'];
+                    }
+                    unset($row);
+
 
                     $product['stock'] = $stockData;
 
@@ -409,7 +415,7 @@ class ProductController extends ResourceController
                         $stockValue = (int) ($stockItem['stock'] ?? 0);
                         $barangCacat = (int) ($stockItem['barang_cacat'] ?? 0);
                         $tokoName = $stockItem['toko_name'] ?? 'Tidak diketahui';
-                        $dropship = $stockItem['dropship'] === "1" ;
+                        $dropship = $stockItem['dropship'] === "1";
 
                         $formattedProducts[$productId]['stock'][] = [
                             'stock' => $stockValue,
@@ -418,12 +424,15 @@ class ProductController extends ResourceController
                             'dropship' => $dropship
                         ];
 
-                        // Add to total stock & defective items
-                        $formattedProducts[$productId]['total_stock'] += $stockValue;
-                        $formattedProducts[$productId]['total_cacat'] += $barangCacat;
+                        if (!$dropship) {
+                            // Add to total stock & defective items
+                            $formattedProducts[$productId]['total_stock'] += $stockValue;
+                            $formattedProducts[$productId]['total_cacat'] += $barangCacat;
+                        }
+
 
                         // Save for stock_string
-                        $stockStrings[] = "{$tokoName}={$stockValue}";
+                        $stockStrings[] = "{$tokoName}=" . (!$dropship ? $stockValue : 'dropship');
                     }
 
                     // Combine stock strings

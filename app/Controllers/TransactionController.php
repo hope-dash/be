@@ -88,7 +88,7 @@ class TransactionController extends BaseController
 
 
 
-    private function getOrCreateCustomer($customer_name, $customer_phone)
+    private function getOrCreateCustomer($customer_name, $customer_phone, $customer_alamat)
     {
         if (empty($customer_phone)) {
             return null;
@@ -98,7 +98,8 @@ class TransactionController extends BaseController
         if (!$customer) {
             $this->customer->insert([
                 'nama_customer' => $customer_name,
-                'no_hp_customer' => $customer_phone
+                'no_hp_customer' => $customer_phone,
+                'alamat' => $customer_alamat
             ]);
             return $this->customer->insertID();
         }
@@ -185,7 +186,7 @@ class TransactionController extends BaseController
         $db->transStart();
 
         try {
-            $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone);
+            $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
 
             $kodeBarangList = array_column($data->item, 'kode_barang');
             $products = $this->ProductModel->whereIn('id_barang', $kodeBarangList)->findAll();
@@ -1329,7 +1330,7 @@ class TransactionController extends BaseController
                 throw new \Exception("Transaksi tidak ditemukan.");
             }
 
-            $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone);
+            $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
 
             // **1. Ambil Data Item Lama**
             $oldItems = $this->SalesProductModel->where('id_transaction', $transactionId)->findAll();
