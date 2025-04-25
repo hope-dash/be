@@ -203,29 +203,38 @@ class ProductController extends ResourceController
 
         // Update stock data
         foreach ($data->stock as $toko) {
+            // Cek jika stock ID tersedia dan valid
             if (isset($toko->id) && $this->stockModel->find($toko->id)) {
-                // Update existing stock
+                // Update stock lama
+                $stockData = [
+                    'stock' => $toko->stock,
+                    'barang_cacat' => $toko->barang_cacat,
+                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
+                ];
+                $this->stockModel->update($toko->id, $stockData);
+            } else {
+                // Cek apakah kombinasi id_barang dan id_toko sudah ada
+                $existingStock = $this->stockModel
+                    ->where('id_barang', $id)
+                    ->where('id_toko', $toko->id_toko)
+                    ->first();
+
                 $stockData = [
                     'stock' => $toko->stock,
                     'barang_cacat' => $toko->barang_cacat,
                     'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
                 ];
 
-                $this->stockModel->update($toko->id, $stockData);
-            } else {
-                // Prepare data for new stock entry
-                $newStockData = [
-                    'id_barang' => $id, // Use the product ID for new stock entry
-                    'id_toko' => $toko->id_toko,
-                    'stock' => $toko->stock,
-                    'barang_cacat' => $toko->barang_cacat,
-                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
-                ];
-
-                // Create new stock entry
-                $this->stockModel->insert($newStockData);
+                if ($existingStock) {
+                    $this->stockModel->update($existingStock['id'], $stockData);
+                } else {
+                    $stockData['id_barang'] = $data->id_barang;
+                    $stockData['id_toko'] = $toko->id_toko;
+                    $this->stockModel->insert($stockData);
+                }
             }
         }
+
 
         // Update suppliers if provided
         if (!empty($data->suplier)) {
