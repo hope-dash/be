@@ -746,21 +746,21 @@ class TransactionController extends BaseController
             $query = $this->db->table('sales_product')
                 ->select('sales_product.kode_barang, product.nama_barang, model_barang.nama_model, 
                       COALESCE(seri.seri, "Tidak Ada Seri") AS seri, 
-                      SUM(CASE WHEN stock.dropship > 0 THEN sales_product.jumlah ELSE 0 END) AS total_sold, 
-                      (SELECT COALESCE(SUM(stock.stock), 0) 
+                      SUM(sales_product.jumlah) AS total_sold,  
+                      (SELECT COALESCE(SUM(CASE WHEN stock.dropship > 0 THEN stock.stock ELSE 0 END), 0) 
                        FROM stock 
-                       WHERE stock.id_barang = sales_product.kode_barang AND stock.dropship > 0) AS total_stock')
+                       WHERE stock.id_barang = sales_product.kode_barang) AS total_stock')
                 ->join('transaction', 'sales_product.id_transaction = transaction.id')
                 ->join('product', 'sales_product.kode_barang = product.id_barang')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id')
                 ->join('seri', 'product.id_seri_barang = seri.id', 'left')
-                ->join('stock', 'sales_product.kode_barang = stock.id_barang', 'left')  // Pastikan join stock
                 ->where('transaction.date_time >=', $date_start)
                 ->where('transaction.date_time <=', $date_end)
                 ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'RETUR', 'PARTIALY_PAID'])
                 ->groupBy(['sales_product.kode_barang', 'product.nama_barang', 'model_barang.nama_model', 'seri.seri'])
                 ->orderBy('total_sold', 'DESC')
                 ->limit($limit);
+
 
 
             if ($id_toko) {
