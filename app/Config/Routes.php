@@ -17,6 +17,7 @@ $routes->get('api/dropdown/toko', 'TokoController::dropdownToko');
 $routes->get('api/dropdown/model_barang', 'BarangController::dropdownModel');
 $routes->get('api/dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
 $routes->get('api/dropdown/suplier', 'SuplierController::dropdownSuplier');
+$routes->get('api/detail/toko/(:num)', 'TokoController::getDetailById/$1');
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //user
