@@ -158,9 +158,15 @@ class TokoController extends BaseController
     public function dropdownToko()
     {
         try {
+            $roleHeader = $this->request->getHeaderLine('role');
+            $roleIds = array_filter(array_map('trim', explode(',', $roleHeader)));
 
-            $result = $this->modelToko->select('id, toko_name')->get()->getResult();
+            $query = $this->modelToko->select('id, toko_name');
+            if (!empty($roleIds)) {
+                $query->whereIn('id', $roleIds);
+            }
 
+            $result = $query->get()->getResult();
 
             $formattedResult = array_map(function ($row) {
                 return [
@@ -168,10 +174,12 @@ class TokoController extends BaseController
                     'value' => $row->id
                 ];
             }, $result);
+
             return $this->jsonResponse->oneResp('', $formattedResult, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
 
 }

@@ -708,27 +708,31 @@ class TransactionController extends BaseController
         $date_end = $this->request->getGet('date_end');
         $id_toko = $this->request->getGet('id_toko');
         try {
+            // Perbaiki query untuk memastikan join dan kondisi WHERE tepat
             $query = $this->db->table('transaction_meta')
                 ->select('customer.id AS customer_id, customer.nama_customer, COUNT(transaction_meta.transaction_id) AS total_transactions')
-                ->join('transaction', 'transaction.id = transaction_meta.transaction_id')
-                ->join('customer', 'customer.id = transaction_meta.value')
+                ->join('transaction', 'transaction.id = transaction_meta.transaction_id') // pastikan join transaksi benar
+                ->join('customer', 'customer.id = transaction_meta.value') // pastikan value merujuk ke customer.id
                 ->where('transaction.status', 'SUCCESS')
-                ->where('transaction_meta.key', 'customer_id')
-                ->groupBy('transaction_meta.value')
-                ->orderBy('total_transactions', 'DESC')
+                ->where('transaction_meta.key', 'customer_id') // pastikan key benar
                 ->where('transaction.date_time >=', $date_start)
                 ->where('transaction.date_time <=', $date_end)
+                ->groupBy('customer.id') // gunakan customer.id di sini untuk memastikan data per customer
+                ->orderBy('total_transactions', 'DESC')
                 ->limit($limit);
 
+            // Menambahkan filter toko jika ada
             if ($id_toko) {
-                $query->where('id_toko', $id_toko);
+                $query->where('transaction.id_toko', $id_toko);
             }
+
+            // Mendapatkan hasil query
             $results = $query->get()->getResult();
 
             if ($results) {
                 return $this->jsonResponse->oneResp("Data berhasil diambil", $results, 200);
             } else {
-                return $this->jsonResponse->error("Tidak ada", 404);
+                return $this->jsonResponse->error("Tidak ada data untuk kriteria ini", 404);
             }
 
         } catch (\Exception $e) {
@@ -740,16 +744,22 @@ class TransactionController extends BaseController
     {
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
-        $id_toko = $this->request->getGet('id_toko');
+
+        // Ambil ID toko dari header 'role' (misalnya: 0,1,2)
+        $roleHeader = $this->request->getHeaderLine('role');
+        $id_toko_list = array_filter(array_map('trim', explode(',', $roleHeader)));
 
         try {
             $query = $this->db->table('sales_product')
                 ->select('sales_product.kode_barang, product.nama_barang, model_barang.nama_model, 
-                      COALESCE(seri.seri, "Tidak Ada Seri") AS seri, 
-                      SUM(sales_product.jumlah) AS total_sold,  
-                      (SELECT COALESCE(SUM(CASE WHEN stock.dropship > 0 THEN stock.stock ELSE 0 END), 0) 
-                       FROM stock 
-                       WHERE stock.id_barang = sales_product.kode_barang) AS total_stock')
+                    COALESCE(seri.seri, "Tidak Ada Seri") AS seri, 
+                    SUM(sales_product.jumlah) AS total_sold,  
+                    (
+                        SELECT COALESCE(SUM(stock.stock), 0) 
+                        FROM stock 
+                        WHERE stock.id_barang = sales_product.kode_barang 
+                        AND stock.dropship = 0
+                    ) AS total_stock')
                 ->join('transaction', 'sales_product.id_transaction = transaction.id')
                 ->join('product', 'sales_product.kode_barang = product.id_barang')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id')
@@ -761,10 +771,9 @@ class TransactionController extends BaseController
                 ->orderBy('total_sold', 'DESC')
                 ->limit($limit);
 
-
-
-            if ($id_toko) {
-                $query->where('transaction.id_toko', $id_toko);
+            // Filter berdasarkan ID toko dari header 'role'
+            if (!empty($id_toko_list)) {
+                $query->whereIn('transaction.id_toko', $id_toko_list);
             }
 
             $results = $query->get()->getResult();

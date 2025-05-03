@@ -190,11 +190,13 @@ class ProductController extends ResourceController
         }
 
         $productData = [
-            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : '',
+            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : null,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
+            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null, // Convert array to comma-separated string
+            'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             "updated_by" => $token['user_id'],
         ];
