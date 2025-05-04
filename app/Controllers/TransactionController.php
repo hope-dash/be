@@ -377,10 +377,20 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $search = $this->request->getGet('search');
+        $role = $this->request->getGet('role');
 
         if ($status) {
             $builder->where('t.status', $status);
         }
+
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
+        }
+
+        if (!empty($role) && !$id_toko) {
+            $builder->whereIn('t.id_toko', $role);
+        }
+
         if ($id_toko) {
             $builder->where('t.id_toko', $id_toko);
         }
@@ -563,6 +573,7 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $id_toko = $this->request->getGet('id_toko');
+        $role = $this->request->getGet('role');
 
         try {
             // Start building the query
@@ -575,6 +586,14 @@ class TransactionController extends BaseController
                 ->whereIn('transaction.status', ['SUCCESS', 'RETUR'])
                 ->where('transaction.date_time >=', $date_start)
                 ->where('transaction.date_time <=', $date_end);
+
+            if (is_string($role)) {
+                $role = array_map('intval', explode(',', $role));
+            }
+
+            if (!empty($role) && !$id_toko) {
+                $query->whereIn('transaction.id_toko', $role);
+            }
 
             // Add store filter if provided
             if ($id_toko) {
@@ -610,6 +629,7 @@ class TransactionController extends BaseController
         $id_toko = $this->request->getGet('id_toko');
         $type = $this->request->getGet('type');
         $transaction = $this->request->getGet('transaction') ?: '';
+        $role = $this->request->getGet('role');
 
         try {
             // Query untuk menghitung total debit dan kredit
@@ -621,6 +641,14 @@ class TransactionController extends BaseController
             if (!empty($date_start) && !empty($date_end)) {
                 $query->where('date_time >=', $date_start)
                     ->where('date_time <=', $date_end);
+            }
+
+            if (is_string($role)) {
+                $role = array_map('intval', explode(',', $role));
+            }
+
+            if (!empty($role) && !$id_toko) {
+                $query->whereIn('id_toko', $role);
             }
 
             if ($id_toko) {
@@ -663,6 +691,7 @@ class TransactionController extends BaseController
         $date_end = $this->request->getGet('date_end');
         $id_toko = $this->request->getGet('id_toko');
         $type = $this->request->getGet('type');
+        $role = $this->request->getGet('role');
 
         try {
             $query = $this->db->table('cashflow')
@@ -671,6 +700,14 @@ class TransactionController extends BaseController
                 ->where('date_time <=', $date_end)
                 ->where('credit >', 0)
                 ->groupBy('type');
+
+            if (is_string($role)) {
+                $role = array_map('intval', explode(',', $role));
+            }
+
+            if (!empty($role) && !$id_toko) {
+                $query->whereIn('id_toko', $role);
+            }
 
             if ($id_toko) {
                 $query->where('id_toko', $id_toko);
@@ -707,23 +744,31 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $id_toko = $this->request->getGet('id_toko');
+        $role = $this->request->getGet('role');
         try {
             // Perbaiki query untuk memastikan join dan kondisi WHERE tepat
-            $query = $this->db->table('transaction_meta')
-                ->select('customer.id AS customer_id, customer.nama_customer, COUNT(transaction_meta.transaction_id) AS total_transactions')
-                ->join('transaction', 'transaction.id = transaction_meta.transaction_id') // pastikan join transaksi benar
-                ->join('customer', 'customer.id = transaction_meta.value') // pastikan value merujuk ke customer.id
-                ->where('transaction.status', 'SUCCESS')
-                ->where('transaction_meta.key', 'customer_id') // pastikan key benar
-                ->where('transaction.date_time >=', $date_start)
-                ->where('transaction.date_time <=', $date_end)
-                ->groupBy('customer.id') // gunakan customer.id di sini untuk memastikan data per customer
+            $query = $this->db->table('transaction t')
+                ->select('c.id AS customer_id, c.nama_customer, COUNT(DISTINCT t.id) AS total_transactions, SUM(t.amount) AS total_amount_spent')
+                ->join('transaction_meta tm', 't.id = tm.transaction_id AND tm.key = "customer_id" AND tm.value IS NOT NULL AND tm.value != ""', 'inner')
+                ->join('customer c', 'c.id = tm.value', 'left')
+                ->where('t.status', 'SUCCESS')
+                ->where('t.date_time >=', $date_start)
+                ->where('t.date_time <=', $date_end)
+                ->groupBy('c.id, c.nama_customer')
                 ->orderBy('total_transactions', 'DESC')
                 ->limit($limit);
 
+            if (is_string($role)) {
+                $role = array_map('intval', explode(',', $role));
+            }
+
+            if (!empty($role) && !$id_toko) {
+                $query->whereIn('t.id_toko', $role);
+            }
+
             // Menambahkan filter toko jika ada
             if ($id_toko) {
-                $query->where('transaction.id_toko', $id_toko);
+                $query->where('t.id_toko', $id_toko);
             }
 
             // Mendapatkan hasil query
@@ -744,11 +789,9 @@ class TransactionController extends BaseController
     {
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
+        $role = $this->request->getGet('role');
 
         // Ambil ID toko dari header 'role' (misalnya: 0,1,2)
-        $roleHeader = $this->request->getHeaderLine('role');
-        $id_toko_list = array_filter(array_map('trim', explode(',', $roleHeader)));
-
         try {
             $query = $this->db->table('sales_product')
                 ->select('sales_product.kode_barang, product.nama_barang, model_barang.nama_model, 
@@ -771,9 +814,13 @@ class TransactionController extends BaseController
                 ->orderBy('total_sold', 'DESC')
                 ->limit($limit);
 
-            // Filter berdasarkan ID toko dari header 'role'
-            if (!empty($id_toko_list)) {
-                $query->whereIn('transaction.id_toko', $id_toko_list);
+
+            if (is_string($role)) {
+                $role = array_map('intval', explode(',', $role));
+            }
+
+            if (!empty($role)) {
+                $query->whereIn('transaction.id_toko', $role);
             }
 
             $results = $query->get()->getResult();
@@ -794,6 +841,7 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $id_toko = $this->request->getGet('id_toko');
+        $role = $this->request->getGet('role');
 
         try {
             $query = $this->db->table('transaction')
@@ -805,6 +853,14 @@ class TransactionController extends BaseController
                 ->groupBy('tanggal')
                 ->orderBy('tanggal', 'ASC');
 
+
+            if (is_string($role)) {
+                $role = array_map('intval', explode(',', $role));
+            }
+
+            if (!empty($role) && !$id_toko) {
+                $query->whereIn('id_toko', $role);
+            }
 
             if ($id_toko) {
                 $query->where('transaction.id_toko', $id_toko);

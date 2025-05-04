@@ -158,12 +158,13 @@ class TokoController extends BaseController
     public function dropdownToko()
     {
         try {
-            $roleHeader = $this->request->getHeaderLine('role');
-            $roleIds = array_filter(array_map('trim', explode(',', $roleHeader)));
+            // Ambil parameter 'toko' dari query string
+            $tokoParam = $this->request->getGet('role');
+            $tokoIds = array_filter(array_map('trim', explode(',', $tokoParam)));
 
             $query = $this->modelToko->select('id, toko_name');
-            if (!empty($roleIds)) {
-                $query->whereIn('id', $roleIds);
+            if (!empty($tokoIds)) {
+                $query->whereIn('id', $tokoIds);
             }
 
             $result = $query->get()->getResult();
@@ -180,6 +181,4 @@ class TokoController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
-
 }

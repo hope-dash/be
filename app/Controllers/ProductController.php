@@ -98,8 +98,6 @@ class ProductController extends ResourceController
         return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
 
     }
-
-
     public function uploadImages()
     {
         $kode = $this->request->getPost('kode');
@@ -323,11 +321,15 @@ class ProductController extends ResourceController
     public function getAllProduct()
     {
         try {
-            $sortBy = $this->request->getGet('sortBy') ?? 'product.id';
+            $sortBy = $this->request->getGet('sortBy');
             if ($sortBy === 'kode_barang') {
                 $sortBy = 'product.id_barang';
+            } elseif (!$sortBy) {
+                $sortBy = 'product.id';
             }
-            $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+
+            $sortMethodRaw = $this->request->getGet('sortMethod');
+            $sortMethod = $sortMethodRaw ? strtolower($sortMethodRaw) : 'desc';
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
@@ -345,7 +347,7 @@ class ProductController extends ResourceController
                     'product.id_barang',
                     'product.notes',
                     'product.nama_barang as nama_barang',
-                    'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
+                    'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
                     'product.harga_modal',
                     'product.harga_jual',
                     'product.harga_jual_toko',
@@ -492,7 +494,7 @@ class ProductController extends ResourceController
                     'product.id_barang as kode_barang',
                     'model_barang.nama_model',
                     'product.nama_barang as nama_barang',
-                    'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
+                    'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
                     'COALESCE(seri.seri, "") as seri',
                     'stock.stock',
                     'stock.dropship',
@@ -525,10 +527,6 @@ class ProductController extends ResourceController
                 $builder->whereNotIn('product.id_barang', $kode_exclude);
             }
 
-            // Count total data
-            $total_data = $builder->countAllResults(false);
-            $total_page = ceil($total_data / $limit);
-
             // Fetch product stock data with pagination
             $products = $builder
                 ->groupStart()
@@ -536,11 +534,16 @@ class ProductController extends ResourceController
                 ->orWhere('stock.dropship >', 0)
                 ->groupEnd()
                 ->orderBy($sortBy, $sortMethod)
-                ->limit($limit, $offset)
-                ->get()
+                ->limit($limit, $offset);
+
+            // Count total data
+            $total_data = $builder->countAllResults(false);
+            $total_page = ceil($total_data / $limit);
+
+            $productList = $products->get()
                 ->getResultArray();
 
-            foreach ($products as &$item) {
+            foreach ($productList as &$item) {
                 $existingImages = $this->imageModel
                     ->where('type', 'product')
                     ->where('kode', $item['id'])
@@ -549,7 +552,7 @@ class ProductController extends ResourceController
                 $item['images'] = array_column($existingImages, 'url');
             }
 
-            return $this->jsonResponse->multiResp('', $products, $total_data, $total_page, $page, $limit, 200);
+            return $this->jsonResponse->multiResp('', $productList, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }

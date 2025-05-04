@@ -91,6 +91,7 @@ class CashflowController extends ResourceController
         $id_toko = $this->request->getGet('id_toko') ?: '';
         $start_date = $this->request->getGet('date_start') ?: ''; // Tambah start_date
         $end_date = $this->request->getGet('date_end') ?: ''; // Tambah end_date
+        $role = $this->request->getGet('role');
 
         $offset = ($page - 1) * $limit;
         $builder = $this->model;
@@ -104,6 +105,14 @@ class CashflowController extends ResourceController
             } else if ($transaction == "debit") {
                 $builder = $builder->where('debit !=', 0);
             }
+        }
+
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
+        }
+
+        if (!empty($role) && !$id_toko) {
+            $builder->whereIn('id_toko', $role);
         }
 
         if (!empty($type)) {
