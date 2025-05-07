@@ -18,6 +18,7 @@ $routes->get('api/dropdown/model_barang', 'BarangController::dropdownModel');
 $routes->get('api/dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
 $routes->get('api/dropdown/suplier', 'SuplierController::dropdownSuplier');
 $routes->get('api/detail/toko/(:num)', 'TokoController::getDetailById/$1');
+$routes->get('api/dropdown/seri', 'BarangController::dropdownSeri');
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //user
@@ -61,7 +62,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('seri', 'BarangController::listSeri');
     $routes->put('seri/(:num)', 'BarangController::updateSeri/$1');
     $routes->delete('seri/(:num)', 'BarangController::deleteSeri/$1');
-    $routes->get('dropdown/seri', 'BarangController::dropdownSeri');
+
 
     //products
     $routes->post('product', 'ProductController::createProduct');
@@ -88,7 +89,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('transaction/paid/(:num)', 'TransactionController::updateTransactionStatusToFullyPaid/$1');
     $routes->post('transaction/complaint/(:num)', 'TransactionController::complainProduct/$1');
     $routes->post('transaction/update-status/(:num)', 'TransactionController::updateTransactionStatus/$1');
-    
+
 
     //reporting
     $routes->get('reporting/revenue-profit', 'TransactionController::calculateRevenueAndProfit');
@@ -98,7 +99,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/top-products', 'TransactionController::topSoldProducts');
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
     $routes->get('reporting/due-transaction', 'TransactionController::getUpcomingDueTransactions');
-    
+
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
 });
