@@ -1256,127 +1256,212 @@ class TransactionController extends BaseController
     {
         $token = $this->request->user;
         $db = \Config\Database::connect();
-
         $db->transBegin();
 
-        $transaction = $db->table('transaction')
-            ->where('id', $transactionId)
-            ->whereIn('status', ['SUCCESS'])
-            ->get()
-            ->getRowArray();
-
-        if (!$transaction) {
-            return $this->jsonResponse->oneResp('Transaction not found or not eligible for complaint', null, 404);
-        }
-
-        $data = $this->request->getJSON();
-        $products = $data->products;
-
-        $totalRefundAmount = 0;
-
-        foreach ($products as $product) {
-            $kode_barang = $product->kode_barang;
-            $jumlah = $product->jumlah;
-            $barang_cacat = $product->barang_cacat;
-            $solution = $product->solution;
-
-            // Simpan retur
-            $returData = [
-                'transaction_id' => $transactionId,
-                'kode_barang' => $kode_barang,
-                'barang_cacat' => $barang_cacat,
-                'jumlah' => $jumlah,
-                'solution' => $solution,
-            ];
-            $db->table('retur')->insert($returData);
-
-            // Ambil data penjualan
-            $salesProduct = $db->table('sales_product')
-                ->where('id_transaction', $transactionId)
-                ->where('kode_barang', $kode_barang)
+        try {
+            // Get transaction data
+            $transaction = $db->table('transaction')
+                ->where('id', $transactionId)
+                ->whereIn('status', ['SUCCESS'])
                 ->get()
                 ->getRowArray();
 
-            if (!$salesProduct) {
-                return $this->jsonResponse->oneResp('Product not found for kode_barang: ' . $kode_barang, null, 404);
+            if (!$transaction) {
+                log_message('error', 'Transaction not found or not eligible for complaint');
+                return $this->jsonResponse->oneResp('Transaction not found or not eligible for complaint', null, 404);
             }
 
-            // Ambil stock terkait untuk cek dropship
-            $stock = $db->table('stock')
-                ->where('id_toko', $transaction['id_toko'])
-                ->where('id_barang', $kode_barang)
+            // Get discount from transaction_meta
+            $discountMeta = $db->table('transaction_meta')
+                ->where('transaction_id', $transactionId)
+                ->like('key', 'discount')
                 ->get()
                 ->getRowArray();
 
-            $isDropship = isset($stock['dropship']) && (int) $stock['dropship'] === 1;
+            $discount = $discountMeta ? (float) $discountMeta['value'] : 0;
 
-            // Hitung refund
-            if ($solution === 'refund') {
-                $refundAmount = $jumlah * $salesProduct['actual_per_piece'];
-                $totalRefundAmount += $refundAmount;
+            $data = $this->request->getJSON();
+            if (!isset($data->products)) {
+                return $this->jsonResponse->oneResp('Invalid request data', null, 400);
             }
 
-            // Tukar barang: kurangi stok
-            if ($solution === 'exchange') {
-                $db->table('stock')
+            $products = $data->products;
+            $totalRefundAmount = 0;
+
+            foreach ($products as $product) {
+                // Validate product data
+                if (!isset($product->kode_barang) || !isset($product->jumlah) || !isset($product->barang_cacat) || !isset($product->solution)) {
+                    throw new \RuntimeException('Invalid product data structure');
+                }
+
+                $id_toko = $transaction['id_toko'];
+                $kode_barang = $product->kode_barang;
+                $jumlah = (int) $product->jumlah;
+                $barang_cacat = (bool) $product->barang_cacat;
+                $solution = $product->solution;
+
+                // Get product stock
+                $stock = $db->table('stock')
                     ->where('id_barang', $kode_barang)
-                    ->where('id_toko', $transaction['id_toko'])
-                    ->set('stock', 'stock - ' . $jumlah, false)
-                    ->update();
-            }
+                    ->where('id_toko', $id_toko)
+                    ->get()
+                    ->getRowArray();
 
-            // Jika bukan dropship, proses pengembalian ke stock
-            if (!$isDropship) {
-                if ($barang_cacat) {
-                    $db->table('stock')
-                        ->where('id_barang', $kode_barang)
-                        ->where('id_toko', $transaction['id_toko'])
-                        ->set('barang_cacat', 'barang_cacat + ' . $jumlah, false)
-                        ->update();
-                } else {
-                    $db->table('stock')
-                        ->where('id_barang', $kode_barang)
-                        ->where('id_toko', $transaction['id_toko'])
-                        ->set('stock', 'stock + ' . $jumlah, false)
-                        ->update();
+
+                if (!$stock) {
+                    return $this->jsonResponse->oneResp('Stock not found for product: ' . $kode_barang, null, 404);
+                }
+
+                // Validate exchange
+                if ($solution === 'exchange') {
+                    $isDropship = $stock['is_dropship'] ?? 0;
+                    if ($isDropship == 0 && $stock['stock'] < $jumlah) {
+                        return $this->jsonResponse->oneResp('Stock not available for exchange product: ' . $kode_barang, null, 400);
+                    }
+
+                    if ($barang_cacat) {
+                        $db->table('stock')
+                            ->where('id_barang', $kode_barang)
+                            ->where('id_toko', $id_toko)
+                            ->update([
+                                'barang_cacat' => $stock['barang_cacat'] + $jumlah,
+                                'stock' => $stock['stock'] - $jumlah,
+                            ]);
+                    }
+                }
+
+                // Save retur
+                $returData = [
+                    'transaction_id' => $transactionId,
+                    'kode_barang' => $kode_barang,
+                    'barang_cacat' => $barang_cacat,
+                    'jumlah' => $jumlah,
+                    'solution' => $solution,
+                ];
+
+                if (!$db->table('retur')->insert($returData)) {
+                    throw new \RuntimeException('Failed to insert retur for product: ' . $kode_barang);
+                }
+
+                // Process refund
+                if ($solution === 'refund') {
+                    // Get sales data
+                    $salesProduct = $db->table('sales_product')
+                        ->where('id_transaction', $transactionId)
+                        ->where('kode_barang', $kode_barang)
+                        ->get()
+                        ->getRowArray();
+
+                    if (!$salesProduct) {
+                        return $this->jsonResponse->oneResp('Product not found in sales: ' . $kode_barang, null, 404);
+                    }
+
+                    // Validate refund quantity
+                    if ($salesProduct['jumlah'] < $jumlah) {
+                        return $this->jsonResponse->oneResp('Refund quantity exceeds purchase quantity for: ' . $kode_barang, null, 400);
+                    }
+
+                    // Calculate actual price per piece
+                    $actual_per_piece = $salesProduct['harga_jual'] * (1 - ($discount / $transaction['amount']));
+                    $newJumlah = $salesProduct['jumlah'] - $jumlah;
+
+                    // Update sales product
+                    $updateData = [
+                        'jumlah' => $newJumlah,
+                        'total' => $salesProduct['harga_jual'] * $newJumlah,
+                        'actual_per_piece' => $actual_per_piece,
+                        'actual_total' => $actual_per_piece * $newJumlah
+                    ];
+
+                    if (
+                        !$db->table('sales_product')
+                            ->where('id_transaction', $transactionId)
+                            ->where('kode_barang', $kode_barang)
+                            ->update($updateData)
+                    ) {
+                        throw new \RuntimeException('Failed to update sales product: ' . $kode_barang);
+                    }
+
+
+                    $refundAmount = $jumlah * $actual_per_piece;
+                    $totalRefundAmount += $refundAmount;
+
+                    // Return product to stock
+                    $updateField = $barang_cacat ? 'barang_cacat' : 'stock';
+                    $updateValue = $stock[$updateField] + $jumlah;
+
+                    if (
+                        !$db->table('stock')
+                            ->where('id_barang', $kode_barang)
+                            ->where('id_toko', $id_toko)
+                            ->update([$updateField => $updateValue])
+                    ) {
+                        throw new \RuntimeException('Failed to update stock for product: ' . $kode_barang);
+                    }
                 }
             }
-        }
 
-        // Status transaksi dan metadata
-        $db->table('transaction')
-            ->where('id', $transactionId)
-            ->update(['status' => 'RETUR', 'updated_by' => $token['user_id']]);
+            // Update transaction status
+            $updateStatus = $db->table('transaction')
+                ->where('id', $transactionId)
+                ->update([
+                    'status' => $totalRefundAmount > 0 ? 'NEED_REFUNDED' : 'RETUR',
+                    'updated_by' => $token['user_id']
+                ]);
 
-        if ($totalRefundAmount > 0) {
-            $metaData = [
-                [
-                    'transaction_id' => $transactionId,
-                    'key' => 'refunded_at',
-                    'value' => date('Y-m-d H:i:s')
-                ],
-                [
-                    'transaction_id' => $transactionId,
-                    'key' => 'refunded_amount',
-                    'value' => $totalRefundAmount // perbaiki jadi total
-                ]
-            ];
-
-            foreach ($metaData as $data) {
-                $db->table('transaction_meta')->insert($data);
+            if (!$updateStatus) {
+                throw new \RuntimeException('Failed to update transaction status');
             }
 
-            $db->table('transaction')
-                ->where('id', $transactionId)
-                ->update(['status' => 'NEED_REFUNDED', 'updated_by' => $token['user_id']]);
-        }
+            // Process refund amount
+            if ($totalRefundAmount > 0) {
+                // Update transaction amount
+                if (
+                    !$db->table('transaction')
+                        ->where('id', $transactionId)
+                        ->set('amount', 'amount - ' . $totalRefundAmount, false)
+                        ->update()
+                ) {
+                    throw new \RuntimeException('Failed to update transaction amount');
+                }
 
-        if ($db->transStatus() === false) {
-            $db->transRollback();
-            return $this->jsonResponse->oneResp('Failed to process complaint', null, 500);
-        } else {
+                // Insert refund metadata
+                $metaData = [
+                    'transaction_id' => $transactionId,
+                    'key' => 'refunded_amount',
+                    'value' => $totalRefundAmount
+                ];
+
+                if (!$db->table('transaction_meta')->insert($metaData)) {
+                    throw new \RuntimeException('Failed to insert refund metadata');
+                }
+
+                // Update grand total
+                $grandTotal = $db->table('transaction_meta')
+                    ->where('transaction_id', $transactionId)
+                    ->where('key', 'grand_total')
+                    ->get()
+                    ->getRowArray();
+
+                if ($grandTotal) {
+                    $newGrandTotal = (float) $grandTotal['value'] - $totalRefundAmount;
+                    if (
+                        !$db->table('transaction_meta')
+                            ->where('id', $grandTotal['id'])
+                            ->update(['value' => $newGrandTotal])
+                    ) {
+                        throw new \RuntimeException('Failed to update grand total');
+                    }
+                }
+            }
+
             $db->transCommit();
             return $this->jsonResponse->oneResp('Complaint processed successfully', null, 200);
+
+        } catch (\Exception $e) {
+            $db->transRollback();
+            log_message('error', 'Error in complainProduct: ' . $e->getMessage());
+            return $this->jsonResponse->oneResp('Failed to process complaint: ' . $e->getMessage(), null, 500);
         }
     }
 
@@ -1613,7 +1698,7 @@ class TransactionController extends BaseController
         // Cek apakah transaksi ada dan statusnya PAID
         $builder = $db->table('transaction');
         $transaction = $builder->where('id', $transactionId)
-            ->whereIn('status', ['PAID', 'PACKING', 'IN_DELIVERY'])
+            ->whereIn('status', ['PAID', 'PACKING', 'IN_DELIVERY', 'RETUR'])
             ->get()->getRowArray();
 
         if (!$transaction) {

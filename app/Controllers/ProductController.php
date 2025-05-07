@@ -318,6 +318,42 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage());
         }
     }
+
+    public function getListSeribySearchProduct()
+    {
+        $namaProduct = $this->request->getGet('namaProduct') ?? '';
+        try {
+            $builder = $this->productModel
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left') // Tambahkan join ke model_barang
+                ->select([
+                    'seri.seri as label',
+                    'product.id_seri_barang as value',
+                ]);
+
+            // Kondisi untuk memastikan field tidak null
+            $builder->where('seri.seri IS NOT NULL')
+                ->where('model_barang.nama_model IS NOT NULL')
+                ->where('product.nama_barang IS NOT NULL');
+
+            if (!empty($namaProduct)) {
+                $builder->groupStart()
+                    ->like("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, ''))", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                    ->groupEnd();
+            }
+
+            $products = $builder
+                ->groupBy('product.id_seri_barang')
+                ->get()
+                ->getResultArray();
+
+            return $this->jsonResponse->oneResp('', array_values($products), 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
     public function getAllProduct()
     {
         try {
