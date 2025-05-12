@@ -1,0 +1,68 @@
+name: Deploy to FTP
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+jobs:
+  ftp-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get list of changed files
+        id: changed-files
+        run: |
+          echo "CHANGED_FILES<<EOF" >> $GITHUB_OUTPUT
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+          echo "EOF" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Show changed files
+        run: echo "${{ steps.changed-files.outputs.CHANGED_FILES }}"
+
+      - name: Filter files to deploy
+        id: filter-files
+        run: |
+          files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          echo "Changed files:"
+          echo "$files"
+
+          deploy_files=""
+          for file in $files; do
+            if [[ "$file" == "app/Controllers/ProductController.php" ]]; then
+              deploy_files="$deploy_files $file"
+            fi
+            # Tambahkan kondisi lain jika perlu
+          done
+
+          echo "Files to deploy: $deploy_files"
+          echo "deploy_files=$deploy_files" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Set FTP server directory based on branch
+        id: set-dir
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "main" ]]; then
+            echo "server_dir=/api.hopesparepart.my.id" >> $GITHUB_OUTPUT
+          elif [[ "${GITHUB_REF##*/}" == "staging" ]]; then
+            echo "server_dir=/staging.api.hopesparepart.my.id" >> $GITHUB_OUTPUT
+          else
+            echo "server_dir=/default-directory" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload changed files to FTP
+        if: steps.filter-files.outputs.deploy_files != ''
+        uses: SamKirkland/FTP-Deploy-Action@v4
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: "./"
+          server-dir: ${{ steps.set-dir.outputs.server_dir }}
+          include: ${{ steps.filter-files.outputs.deploy_files }}
+          dry-run: false
