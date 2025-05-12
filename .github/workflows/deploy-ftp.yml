@@ -13,35 +13,46 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 2 # Get at least 2 commits for comparison
 
       - name: Get list of changed files
         id: changed-files
         run: |
-          # Ambil daftar file yang berubah antara commit sebelumnya dan commit sekarang
-          changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          # Handle case where github.event.before might not exist
+          if [ -z "${{ github.event.before }}" ]; then
+            echo "No previous commit, deploying all relevant files"
+            # List all files in the repository that match our patterns
+            changed_files=$(find app/Controllers -type f -name "*.php")
+          else
+            echo "Getting changes between ${{ github.event.before }} and ${{ github.sha }}"
+            changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} || echo "")
+          fi
+
           echo "Changed files:"
           echo "$changed_files"
-          # Simpan ke output agar bisa dipakai step lain
           echo "changed_files<<EOF" >> $GITHUB_OUTPUT
           echo "$changed_files" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-        shell: bash
 
       - name: Filter files to deploy
         id: filter-files
         run: |
           files="${{ steps.changed-files.outputs.changed_files }}"
           deploy_files=""
-          for file in $files; do
-            # Contoh filter: hanya file ProductController.php
-            if [[ "$file" == "app/Controllers/ProductController.php" ]]; then
-              deploy_files="$deploy_files $file"
+
+          # Convert to array
+          IFS=$'\n' read -rd '' -a file_array <<< "$files"
+
+          for file in "${file_array[@]}"; do
+            if [[ "$file" == app/Controllers/*.php ]]; then
+              deploy_files="$deploy_files,$file"
             fi
-            # Tambahkan kondisi lain jika ingin deploy file lain
           done
+
+          deploy_files=${deploy_files#,}  # Remove leading comma
           echo "Files to deploy: $deploy_files"
           echo "deploy_files=$deploy_files" >> $GITHUB_OUTPUT
-        shell: bash
 
       - name: Set FTP server directory based on branch
         id: set-dir
@@ -51,18 +62,17 @@ jobs:
             echo "server_dir=/api.hopesparepart.my.id" >> $GITHUB_OUTPUT
           elif [[ "$branch" == "staging" ]]; then
             echo "server_dir=/staging.api.hopesparepart.my.id" >> $GITHUB_OUTPUT
-          else
-            echo "server_dir=/default-directory" >> $GITHUB_OUTPUT
           fi
 
-      - name: Upload changed files to FTP
+      - name: FTP Deploy
         if: steps.filter-files.outputs.deploy_files != ''
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        uses: SamKirkland/FTP-Deploy-Action@4.3.5
         with:
-          server: ${{ secrets.FTP_HOST }}
+          server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: "./"
           server-dir: ${{ steps.set-dir.outputs.server_dir }}
-          include: ${{ steps.filter-files.outputs.deploy_files }}
-          dry-run: false
+          exclude: |
+            *
+            !${{ steps.filter-files.outputs.deploy_files }}
