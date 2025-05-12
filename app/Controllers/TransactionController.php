@@ -86,8 +86,6 @@ class TransactionController extends BaseController
             ->update();
     }
 
-
-
     private function getOrCreateCustomer($customer_name, $customer_phone, $customer_alamat)
     {
         if (empty($customer_phone)) {
@@ -346,30 +344,29 @@ class TransactionController extends BaseController
         $db = \Config\Database::connect();
         $builder = $db->table('transaction t')
             ->select("
-            t.id AS transaction_id,
-            t.invoice AS invoice_number,
-            t.amount,
-            t.po,
-            t.total_payment,
-            t.status,
-            t.id_toko,
-            t.date_time,
-            toko.toko_name,
-            COALESCE(c.nama_customer, tm_name.value) AS customer_name,
-            c.no_hp_customer AS customer_phone,
-            tm_jatuh_tempo.value AS jatuh_tempo_pada,
-            CASE 
-                WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
-                ELSE FALSE
-            END AS jatuh_tempo
-        ")
+                t.id AS transaction_id,
+                t.invoice AS invoice_number,
+                t.amount,
+                t.po,
+                t.total_payment,
+                t.status,
+                t.id_toko,
+                t.date_time,
+                toko.toko_name,
+                COALESCE(c.nama_customer, tm_name.value) AS customer_name,
+                c.no_hp_customer AS customer_phone,
+                tm_jatuh_tempo.value AS jatuh_tempo_pada,
+                CASE 
+                    WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
+                    ELSE FALSE
+                END AS jatuh_tempo
+            ")
             ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
             ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
             ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
             ->join('toko', 't.id_toko = toko.id', 'left')
             ->orderBy('t.date_time', 'DESC');
-
 
         // **FILTERS**
         $status = $this->request->getGet('status');
@@ -378,6 +375,8 @@ class TransactionController extends BaseController
         $date_end = $this->request->getGet('date_end');
         $search = $this->request->getGet('search');
         $role = $this->request->getGet('role');
+        $total_min = $this->request->getGet('total_min');
+        $total_max = $this->request->getGet('total_max');
 
         if ($status) {
             $builder->where('t.status', $status);
@@ -402,6 +401,19 @@ class TransactionController extends BaseController
         } elseif ($date_end) {
             $builder->where("t.date_time <= '{$date_end}'");
         }
+
+        if (
+            isset($total_min) && $total_min !== '' && is_numeric($total_min) &&
+            isset($total_max) && $total_max !== '' && is_numeric($total_max)
+        ) {
+            $builder->where('t.total_payment >=', (float) $total_min);
+            $builder->where('t.total_payment <=', (float) $total_max);
+        } elseif (isset($total_min) && $total_min !== '' && is_numeric($total_min)) {
+            $builder->where('t.total_payment >=', (float) $total_min);
+        } elseif (isset($total_max) && $total_max !== '' && is_numeric($total_max)) {
+            $builder->where('t.total_payment <=', (float) $total_max);
+        }
+
 
         // **SEARCH (customer_name, customer_phone, invoice_number)**
         if ($search) {
@@ -578,14 +590,16 @@ class TransactionController extends BaseController
         try {
             // Start building the query
             $query = $this->db->table('transaction')
-                ->select('SUM(transaction.total_payment) AS total_revenue, 
-                          SUM(transaction.total_payment) - COALESCE(SUM(sales_product.total_modal), 0) AS total_profit,
-                          COALESCE(SUM(tm.value), 0) AS total_refunded')
-                ->join('sales_product', 'transaction.id = sales_product.id_transaction', 'left')
-                ->join('transaction_meta tm', 'transaction.id = tm.transaction_id AND tm.key = "refunded_amount"', 'left')
-                ->whereIn('transaction.status', ['SUCCESS', 'RETUR'])
+                ->select('
+                SUM(sales_product.actual_total) AS total_revenue,
+                SUM(sales_product.total_modal) AS total_modal,
+                SUM(sales_product.actual_total) - SUM(sales_product.total_modal) AS total_profit
+            ')
+                ->join('sales_product', 'sales_product.id_transaction = transaction.id', 'inner')
+                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'REFUNDED'])
                 ->where('transaction.date_time >=', $date_start)
                 ->where('transaction.date_time <=', $date_end);
+
 
             if (is_string($role)) {
                 $role = array_map('intval', explode(',', $role));
@@ -605,14 +619,8 @@ class TransactionController extends BaseController
 
             // Check if result is found
             if ($result) {
-                // Calculate adjusted revenue and profit
-                $adjusted_revenue = $result->total_revenue - $result->total_refunded;
-                $adjusted_profit = $result->total_profit - $result->total_refunded;
 
-                return $this->jsonResponse->oneResp("Data berhasil diambil", [
-                    'total_revenue' => $adjusted_revenue,
-                    'total_profit' => $adjusted_profit
-                ], 200);
+                return $this->jsonResponse->oneResp("Data berhasil diambil", $result, 200);
             } else {
                 return $this->jsonResponse->error("Tidak ada data untuk rentang tanggal ini", 404);
             }
@@ -634,8 +642,7 @@ class TransactionController extends BaseController
         try {
             // Query untuk menghitung total debit dan kredit
             $query = $this->db->table('cashflow')
-                ->select('SUM(debit) AS total_debit, SUM(credit) AS total_credit')
-                ->where('status', 'SUCCESS');
+                ->select('SUM(debit) AS total_debit, SUM(credit) AS total_credit');
 
             // Filter berdasarkan tanggal jika diberikan
             if (!empty($date_start) && !empty($date_end)) {
@@ -683,7 +690,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
 
     public function calculateExpenseAllocation()
     {
@@ -738,7 +744,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function topCustomers($limit = 10)
     {
         $date_start = $this->request->getGet('date_start');
@@ -784,7 +789,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function topSoldProducts($limit = 5)
     {
         $date_start = $this->request->getGet('date_start');
@@ -835,7 +839,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function getFinancialSummary()
     {
         $date_start = $this->request->getGet('date_start');
@@ -898,7 +901,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function updateTransactionStatusToRefunded($transactionId)
     {
         $token = $this->request->user;
@@ -986,8 +988,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction status updated to refunded', null, 200);
         }
     }
-
-
     public function updateTransactionStatusToCancel($transactionId)
     {
         $token = $this->request->user;
@@ -1074,7 +1074,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction status updated to cancel', null, 200);
         }
     }
-
     public function updateTransactionStatusToPartiallyPaid($transactionId)
     {
         $token = $this->request->user;
@@ -1169,8 +1168,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction status updated to partially paid', null, 200);
         }
     }
-
-
     public function updateTransactionStatusToFullyPaid($transactionId)
     {
         $token = $this->request->user;
@@ -1201,7 +1198,11 @@ class TransactionController extends BaseController
 
         $db->table('transaction')
             ->where('id', $transactionId)
-            ->update(['status' => 'PAID', 'updated_by' => $token['user_id'], 'total_payment' => $newTotalPayment + $transaction['total_payment']]);
+            ->update([
+                'status' => 'PAID',
+                'updated_by' => $token['user_id'],
+                'total_payment' => $newTotalPayment + $transaction['total_payment']
+            ]);
 
         $cashflowData = [
             'debit' => $newTotalPayment,
@@ -1216,6 +1217,25 @@ class TransactionController extends BaseController
 
         $db->table('cashflow')->insert($cashflowData);
         $cashflowId = $db->insertID();
+
+        $biayaPengirimanMeta = $db->table('transaction_meta')
+            ->where('transaction_id', $transactionId)
+            ->where('key', 'biaya_pengiriman')
+            ->get()
+            ->getRowArray();
+
+        if ($biayaPengirimanMeta && is_numeric($biayaPengirimanMeta['value']) && (float) $biayaPengirimanMeta['value'] > 0) {
+            $db->table('cashflow')->insert([
+                'debit' => 0,
+                'credit' => (float) $biayaPengirimanMeta['value'],
+                'noted' => "Biaya Pengiriman Transaksi " . $transaction['invoice'],
+                'type' => 'Transaction',
+                'status' => 'SUCCESS',
+                'date_time' => date('Y-m-d H:i:s'),
+                'id_toko' => $transaction['id_toko'],
+                'metode' => $data->metode_pembayaran
+            ]);
+        }
 
         $metaData = [
             [
@@ -1236,10 +1256,8 @@ class TransactionController extends BaseController
         ];
 
         foreach ($metaData as $data) {
-
             $data['key'] = (string) $data['key'];
             $data['value'] = (string) $data['value'];
-
             $db->table('transaction_meta')->insert($data);
         }
 
@@ -1251,7 +1269,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction status updated to fully paid', null, 200);
         }
     }
-
     public function complainProduct($transactionId)
     {
         $token = $this->request->user;
@@ -1464,8 +1481,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Failed to process complaint: ' . $e->getMessage(), null, 500);
         }
     }
-
-
     public function updateTransaction($transactionId)
     {
         $data = $this->request->getJSON();
@@ -1613,8 +1628,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-
-
     private function restoreStock($idToko, $kodeBarang, $jumlah)
     {
         $stok = $this->stockModel
@@ -1637,8 +1650,6 @@ class TransactionController extends BaseController
                 ->update();
         }
     }
-
-
     public function getUpcomingDueTransactions()
     {
         $db = \Config\Database::connect();
@@ -1676,43 +1687,74 @@ class TransactionController extends BaseController
         // Return response
         return $this->jsonResponse->multiResp('Success', $result, count($result), 1, 1, count($result), 200);
     }
-
-    public function updateTransactionStatus($transactionId)
+    public function listSalesProductWithTransaction()
     {
-        $token = $this->request->user;
-        $db = \Config\Database::connect();
-        $data = $this->request->getJSON();
+        $sortBy = $this->request->getGet('sortBy') ?? 'sp.id';
+        $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+        $limit = (int) $this->request->getGet('limit') ?: 10;
+        $page = (int) $this->request->getGet('page') ?: 1;
+        $offset = ($page - 1) * $limit;
 
-        // Validasi input
-        if (!isset($data->status)) {
-            return $this->jsonResponse->oneResp('Status wajib diisi.', null, 400);
+        $id_toko = $this->request->getGet('id_toko');
+        $start_date = $this->request->getGet('date_start');
+        $end_date = $this->request->getGet('date_end');
+        $role = $this->request->getGet('role');
+
+
+        $builder = $this->db->table('sales_product sp');
+        $builder->select("
+            sp.*,
+            t.invoice,
+            t.date_time,
+            t.status,
+            t.id_toko,
+            p.nama_barang,
+            mb.nama_model,
+            s.seri,
+            CONCAT(
+                COALESCE(p.nama_barang, ''), ' ',
+                COALESCE(mb.nama_model, ''), ' ',
+                COALESCE(s.seri, '')
+            ) AS nama_lengkap_barang
+        ");
+        $builder->join('transaction t', 'sp.id_transaction = t.id', 'left');
+        $builder->join('product p', 'sp.kode_barang = p.id_barang', 'left');
+        $builder->join('model_barang mb', 'p.id_model_barang = mb.id', 'left');
+        $builder->join('seri s', 'p.id_seri_barang = s.id', 'left');
+
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
         }
 
-        $newStatus = strtoupper(trim($data->status)); // Pastikan status dalam huruf besar
-        $allowedStatus = ['PACKING', 'IN_DELIVERY', 'SUCCESS'];
-
-        if (!in_array($newStatus, $allowedStatus)) {
-            return $this->jsonResponse->oneResp('Status tidak valid.', null, 400);
+        if (!empty($role) && !$id_toko) {
+            $builder->whereIn('id_toko', $role);
         }
 
-        // Cek apakah transaksi ada dan statusnya PAID
-        $builder = $db->table('transaction');
-        $transaction = $builder->where('id', $transactionId)
-            ->whereIn('status', ['PAID', 'PACKING', 'IN_DELIVERY', 'RETUR'])
-            ->get()->getRowArray();
-
-        if (!$transaction) {
-            return $this->jsonResponse->oneResp('Transaksi tidak ditemukan atau status bukan PAID.', null, 404);
+        if (!empty($id_toko)) {
+            $builder = $builder->like('id_toko', (string) $id_toko, 'both');
         }
 
-        // Update status transaksi
-        $builder->where('id', $transactionId)->update(['status' => $newStatus, 'updated_by' => $token['user_id'],]);
+        if (!empty($start_date) && !empty($end_date)) {
+            $builder = $builder->where('date_time >=', $start_date)
+                ->where('date_time <=', $end_date);
+        } elseif (!empty($start_date)) {
+            $builder = $builder->where('date_time >=', $start_date);
+        } elseif (!empty($end_date)) {
+            $builder = $builder->where('date_time <=', $end_date);
+        }
 
-        return $this->jsonResponse->oneResp('Status transaksi berhasil diperbarui.', [
-            'transaction_id' => $transactionId,
-            'new_status' => $newStatus
-        ], 200);
+        $total_data = $builder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        $result = $builder->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+
+        return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
     }
+
 
 
 }

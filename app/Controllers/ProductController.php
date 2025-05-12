@@ -113,17 +113,40 @@ class ProductController extends ResourceController
 
         if (!empty($images['image'])) {
             foreach ($images['image'] as $image) {
-                if ($image->isValid() && !$image->hasMoved()) {
-                    $newName = $image->getRandomName();
-                    $image->move(ROOTPATH . 'public/uploads/images', $newName);
-                    $imagePath = 'uploads/images/' . $newName;
-                    $uploadedImagePaths[] = $imagePath;
+                if ($image->isValid()) {
+                    $mimeType = $image->getMimeType();
+                    $tempPath = $image->getTempName(); // file asli di /tmp
 
-                    if (!in_array($imagePath, $existingImageUrls)) {
+                    // Nama acak untuk WebP
+                    $webpName = bin2hex(random_bytes(10)) . '.webp';
+                    $webpPath = ROOTPATH . 'public/uploads/images/' . $webpName;
+
+                    // Konversi dari temporary file langsung ke WebP
+                    switch ($mimeType) {
+                        case 'image/jpeg':
+                            $source = imagecreatefromjpeg($tempPath);
+                            break;
+                        case 'image/png':
+                            $source = imagecreatefrompng($tempPath);
+                            imagepalettetotruecolor($source);
+                            imagealphablending($source, true);
+                            imagesavealpha($source, true);
+                            break;
+                        default:
+                            return $this->jsonResponse->oneResp('Unsupported image format', [], 400);
+                    }
+
+                    imagewebp($source, $webpPath, 80);
+                    imagedestroy($source);
+
+                    $finalImagePath = 'uploads/images/' . $webpName;
+                    $uploadedImagePaths[] = $finalImagePath;
+
+                    if (!in_array($finalImagePath, $existingImageUrls)) {
                         $this->imageModel->insert([
                             'type' => "product",
                             'kode' => $kode,
-                            'url' => $imagePath,
+                            'url' => $finalImagePath,
                         ]);
                     }
                 } else {
@@ -349,6 +372,25 @@ class ProductController extends ResourceController
                 ->getResultArray();
 
             return $this->jsonResponse->oneResp('', array_values($products), 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    public function getTotalByModelId()
+    {
+        $modelId = $this->request->getGet('model_id') ?? '';
+
+        try {
+            $builder = $this->productModel;
+
+            if (!empty($modelId)) {
+                $builder->where('id_model_barang', $modelId);
+            } else {
+                return $this->jsonResponse->error('Parameter model_id is required', 400);
+            }
+            $total = $builder->countAllResults(false);
+            return $this->jsonResponse->oneResp('Total data retrieved successfully',  $total, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }

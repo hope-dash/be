@@ -50,21 +50,17 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->put('toko/(:num)', 'TokoController::update/$1');
     $routes->delete('toko/(:num)', 'TokoController::delete/$1');
 
-
-
     // Model Barang Routes
     $routes->post('model_barang', 'BarangController::createModelBarang');
     $routes->get('model_barang', 'BarangController::listModelBarang');
     $routes->put('model_barang/(:num)', 'BarangController::updateModelBarang/$1');
     $routes->delete('model_barang/(:num)', 'BarangController::deleteModel/$1');
 
-
     // Seri Routes
     $routes->post('seri', 'BarangController::createSeri');
     $routes->get('seri', 'BarangController::listSeri');
     $routes->put('seri/(:num)', 'BarangController::updateSeri/$1');
     $routes->delete('seri/(:num)', 'BarangController::deleteSeri/$1');
-
 
     //products
     $routes->post('product', 'ProductController::createProduct');
@@ -75,6 +71,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
     $routes->delete('product/(:num)', 'ProductController::deleteByProductId/$1');
     $routes->post('bulk-product', 'ProductController::bulkUpload');
+    $routes->get('model_barang/count', 'ProductController::getTotalByModelId');
 
 
     //transaction
@@ -101,6 +98,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/top-products', 'TransactionController::topSoldProducts');
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
     $routes->get('reporting/due-transaction', 'TransactionController::getUpcomingDueTransactions');
+    $routes->get('reporting/revenue-profit-detail', 'TransactionController::listSalesProductWithTransaction');
 
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
