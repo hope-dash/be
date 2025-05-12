@@ -373,8 +373,8 @@ class TransactionController extends BaseController
         $id_toko = $this->request->getGet('id_toko');
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
-        $search = $this->request->getGet('search');
         $role = $this->request->getGet('role');
+        $search = $this->request->getGet('search');
         $total_min = $this->request->getGet('total_min');
         $total_max = $this->request->getGet('total_max');
 
@@ -1218,25 +1218,6 @@ class TransactionController extends BaseController
         $db->table('cashflow')->insert($cashflowData);
         $cashflowId = $db->insertID();
 
-        $biayaPengirimanMeta = $db->table('transaction_meta')
-            ->where('transaction_id', $transactionId)
-            ->where('key', 'biaya_pengiriman')
-            ->get()
-            ->getRowArray();
-
-        if ($biayaPengirimanMeta && is_numeric($biayaPengirimanMeta['value']) && (float) $biayaPengirimanMeta['value'] > 0) {
-            $db->table('cashflow')->insert([
-                'debit' => 0,
-                'credit' => (float) $biayaPengirimanMeta['value'],
-                'noted' => "Biaya Pengiriman Transaksi " . $transaction['invoice'],
-                'type' => 'Transaction',
-                'status' => 'SUCCESS',
-                'date_time' => date('Y-m-d H:i:s'),
-                'id_toko' => $transaction['id_toko'],
-                'metode' => $data->metode_pembayaran
-            ]);
-        }
-
         $metaData = [
             [
                 'transaction_id' => (string) $transactionId,
@@ -1687,6 +1668,69 @@ class TransactionController extends BaseController
         // Return response
         return $this->jsonResponse->multiResp('Success', $result, count($result), 1, 1, count($result), 200);
     }
+
+    public function updateTransactionStatus($transactionId)
+    {
+        $token = $this->request->user;
+        $db = \Config\Database::connect();
+        $data = $this->request->getJSON();
+
+        // Validasi input
+        if (!isset($data->status)) {
+            return $this->jsonResponse->oneResp('Status wajib diisi.', null, 400);
+        }
+
+        $newStatus = strtoupper(trim($data->status)); // Pastikan status dalam huruf besar
+        $allowedStatus = ['PACKING', 'IN_DELIVERY', 'SUCCESS'];
+
+        if (!in_array($newStatus, $allowedStatus)) {
+            return $this->jsonResponse->oneResp('Status tidak valid.', null, 400);
+        }
+
+        // Cek apakah transaksi ada dan statusnya PAID
+        $builder = $db->table('transaction');
+        $transaction = $builder->where('id', $transactionId)
+            ->whereIn('status', ['PAID', 'PACKING', 'IN_DELIVERY', 'RETUR'])
+            ->get()->getRowArray();
+
+        if (!$transaction) {
+            return $this->jsonResponse->oneResp('Transaksi tidak ditemukan atau status bukan PAID.', null, 404);
+        }
+
+        // Jika status baru adalah IN_DELIVERY, lakukan pengecekan biaya pengiriman dan insert ke cashflow jika perlu
+        if ($newStatus === 'IN_DELIVERY') {
+            $biayaPengirimanMeta = $db->table('transaction_meta')
+                ->where('transaction_id', $transactionId)
+                ->where('key', 'biaya_pengiriman')
+                ->get()
+                ->getRowArray();
+
+            if ($biayaPengirimanMeta && is_numeric($biayaPengirimanMeta['value']) && (float) $biayaPengirimanMeta['value'] > 0) {
+                // Pastikan metode pembayaran ada di input, jika tidak bisa set default atau handle error
+                $metodePembayaran = isset($data->metode_pembayaran) ? $data->metode_pembayaran : 'unknown';
+
+                $db->table('cashflow')->insert([
+                    'debit' => 0,
+                    'credit' => (float) $biayaPengirimanMeta['value'],
+                    'noted' => "Biaya Pengiriman Transaksi " . $transaction['invoice'],
+                    'type' => 'Transaction',
+                    'status' => 'SUCCESS',
+                    'date_time' => date('Y-m-d H:i:s'),
+                    'id_toko' => $transaction['id_toko'],
+                    'metode' => $metodePembayaran
+                ]);
+            }
+        }
+
+        // Update status transaksi
+        $builder->where('id', $transactionId)->update(['status' => $newStatus, 'updated_by' => $token['user_id'],]);
+
+        return $this->jsonResponse->oneResp('Status transaksi berhasil diperbarui.', [
+            'transaction_id' => $transactionId,
+            'new_status' => $newStatus
+        ], 200);
+    }
+
     public function listSalesProductWithTransaction()
     {
         $sortBy = $this->request->getGet('sortBy') ?? 'sp.id';
@@ -1699,7 +1743,7 @@ class TransactionController extends BaseController
         $start_date = $this->request->getGet('date_start');
         $end_date = $this->request->getGet('date_end');
         $role = $this->request->getGet('role');
-
+        $search = $this->request->getGet('search');
 
         $builder = $this->db->table('sales_product sp');
         $builder->select("
@@ -1743,6 +1787,18 @@ class TransactionController extends BaseController
             $builder = $builder->where('date_time <=', $end_date);
         }
 
+
+        // **SEARCH (customer_name, customer_phone, invoice_number)**
+        if ($search) {
+            $builder->groupStart()
+                ->like('t.invoice', $search)
+                ->orLike('p.nama_barang', $search)
+                ->orLike('mb.nama_model', $search)
+                ->orLike('s.seri', $search)
+                ->groupEnd();
+        }
+
+
         $total_data = $builder->countAllResults(false);
         $total_page = ceil($total_data / $limit);
 
@@ -1754,7 +1810,4 @@ class TransactionController extends BaseController
 
         return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
     }
-
-
-
 }

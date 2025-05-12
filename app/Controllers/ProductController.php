@@ -141,7 +141,7 @@ class ProductController extends ResourceController
                     imagewebp($source, $webpPath, 80);
                     imagedestroy($source);
 
-                    $finalImagePath = 'uploads/images/' . $webpName;
+                    $finalImagePath = 'hope/images/' . $webpName;
                     $uploadedImagePaths[] = $finalImagePath;
 
                     if (!in_array($finalImagePath, $existingImageUrls)) {
