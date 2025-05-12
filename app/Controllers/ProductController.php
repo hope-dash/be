@@ -46,6 +46,7 @@ class ProductController extends ResourceController
             'harga_jual_toko' => 'permit_empty',
             'id_seri_barang' => 'permit_empty',
             'suplier' => 'permit_empty',
+            'description' => 'permit_empty',
             'suplier.*' => 'permit_empty|integer',
         ]);
 
@@ -66,7 +67,8 @@ class ProductController extends ResourceController
 
         $productData = [
             'id_barang' => $productId,
-            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : null,
+            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
+            'description' => isset($data->description) ? $data->description : NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
@@ -198,6 +200,7 @@ class ProductController extends ResourceController
             'harga_jual_toko' => 'permit_empty',
             'id_seri_barang' => 'permit_empty',
             'suplier' => 'permit_empty',
+            'description' => 'permit_empty',
             'suplier.*' => 'permit_empty|integer',
         ]);
 
@@ -211,12 +214,13 @@ class ProductController extends ResourceController
         }
 
         $productData = [
-            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : null,
+            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
+            'description' => isset($data->description) ? $data->description : NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
-            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null, // Convert array to comma-separated string
+            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null, 
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             "updated_by" => $token['user_id'],
@@ -390,7 +394,7 @@ class ProductController extends ResourceController
                 return $this->jsonResponse->error('Parameter model_id is required', 400);
             }
             $total = $builder->countAllResults(false);
-            return $this->jsonResponse->oneResp('Total data retrieved successfully',  $total, 200);
+            return $this->jsonResponse->oneResp('Total data retrieved successfully', $total, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
