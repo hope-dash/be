@@ -11,58 +11,58 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Get list of changed files
-      id: changed-files
-      run: |
-        # Ambil daftar file yang berubah antara commit sebelumnya dan commit sekarang
-        changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
-        echo "Changed files:"
-        echo "$changed_files"
-        # Simpan ke output agar bisa dipakai step lain
-        echo "changed_files<<EOF" >> $GITHUB_OUTPUT
-        echo "$changed_files" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-      shell: bash
+      - name: Get list of changed files
+        id: changed-files
+        run: |
+          # Ambil daftar file yang berubah antara commit sebelumnya dan commit sekarang
+          changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
+          echo "Changed files:"
+          echo "$changed_files"
+          # Simpan ke output agar bisa dipakai step lain
+          echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+          echo "$changed_files" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        shell: bash
 
-    - name: Filter files to deploy
-      id: filter-files
-      run: |
-        files="${{ steps.changed-files.outputs.changed_files }}"
-        deploy_files=""
-        for file in $files; do
-          # Contoh filter: hanya file ProductController.php
-          if [[ "$file" == "app/Controllers/ProductController.php" ]]; then
-            deploy_files="$deploy_files $file"
+      - name: Filter files to deploy
+        id: filter-files
+        run: |
+          files="${{ steps.changed-files.outputs.changed_files }}"
+          deploy_files=""
+          for file in $files; do
+            # Contoh filter: hanya file ProductController.php
+            if [[ "$file" == "app/Controllers/ProductController.php" ]]; then
+              deploy_files="$deploy_files $file"
+            fi
+            # Tambahkan kondisi lain jika ingin deploy file lain
+          done
+          echo "Files to deploy: $deploy_files"
+          echo "deploy_files=$deploy_files" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Set FTP server directory based on branch
+        id: set-dir
+        run: |
+          branch="${GITHUB_REF##*/}"
+          if [[ "$branch" == "main" ]]; then
+            echo "server_dir=/api.hopesparepart.my.id" >> $GITHUB_OUTPUT
+          elif [[ "$branch" == "staging" ]]; then
+            echo "server_dir=/staging.api.hopesparepart.my.id" >> $GITHUB_OUTPUT
+          else
+            echo "server_dir=/default-directory" >> $GITHUB_OUTPUT
           fi
-          # Tambahkan kondisi lain jika ingin deploy file lain
-        done
-        echo "Files to deploy: $deploy_files"
-        echo "deploy_files=$deploy_files" >> $GITHUB_OUTPUT
-      shell: bash
 
-    - name: Set FTP server directory based on branch
-      id: set-dir
-      run: |
-        branch="${GITHUB_REF##*/}"
-        if [[ "$branch" == "main" ]]; then
-          echo "server_dir=/api.hopesparepart.my.id" >> $GITHUB_OUTPUT
-        elif [[ "$branch" == "staging" ]]; then
-          echo "server_dir=/staging.api.hopesparepart.my.id" >> $GITHUB_OUTPUT
-        else
-          echo "server_dir=/default-directory" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Upload changed files to FTP
-      if: steps.filter-files.outputs.deploy_files != ''
-      uses: SamKirkland/FTP-Deploy-Action@v3
-      with:
-        server: ${{ secrets.FTP_HOST }}
-        username: ${{ secrets.FTP_USERNAME }}
-        password: ${{ secrets.FTP_PASSWORD }}
-        local-dir: './'
-        server-dir: ${{ steps.set-dir.outputs.server_dir }}
-        include: ${{ steps.filter-files.outputs.deploy_files }}
-        dry-run: false
+      - name: Upload changed files to FTP
+        if: steps.filter-files.outputs.deploy_files != ''
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: "./"
+          server-dir: ${{ steps.set-dir.outputs.server_dir }}
+          include: ${{ steps.filter-files.outputs.deploy_files }}
+          dry-run: false
