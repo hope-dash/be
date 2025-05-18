@@ -220,7 +220,7 @@ class ProductController extends ResourceController
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
-            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null, 
+            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             "updated_by" => $token['user_id'],
@@ -278,8 +278,8 @@ class ProductController extends ResourceController
             if ($product) {
                 $product = $this->productModel
                     ->select('product.*, product.id_model_barang as id_model, model_barang.nama_model, seri.seri')
-                    ->join('model_barang', 'model_barang.id = product.id_model_barang') // Corrected join to use id_model_barang
-                    ->join('seri', 'seri.id = product.id_seri_barang', 'left') // Ensure left join for optional data
+                    ->join('model_barang', 'model_barang.id = product.id_model_barang')
+                    ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                     ->where('product.id', $id)
                     ->first();
 
@@ -288,7 +288,7 @@ class ProductController extends ResourceController
 
                     // Fetch stock data
                     $stockData = $this->productModel
-                        ->select("stock.id, stock.stock,IF(stock.dropship = 1, 1, 0) AS dropship, stock.id_toko, stock.barang_cacat, toko.toko_name")
+                        ->select("stock.id, stock.stock, IF(stock.dropship = 1, 1, 0) AS dropship, stock.id_toko, stock.barang_cacat, toko.toko_name")
                         ->join('stock', 'stock.id_barang = product.id_barang', 'left')
                         ->join('toko', 'toko.id = stock.id_toko', 'left')
                         ->where('product.id', $id)
@@ -300,19 +300,17 @@ class ProductController extends ResourceController
                     }
                     unset($row);
 
-
                     $product['stock'] = $stockData;
 
-                    // Fetch existing images
+                    // Fetch images
                     $existingImages = $this->imageModel->where('type', 'product')
                         ->where('kode', $id)
                         ->findAll();
-
                     $product['images'] = array_column($existingImages, 'url');
 
-                    // Include dropship and suplier in the response
-                    $product['dropship'] = (bool) $product['dropship']; // Ensure dropship is a boolean
-                    $product['suplier'] = !empty($product['suplier']) ? explode(',', $product['suplier']) : []; // Convert suplier string to array
+                    // Dropship & supplier
+                    $product['dropship'] = (bool) ($product['dropship'] ?? false);
+                    $product['suplier'] = !empty($product['suplier']) ? explode(',', $product['suplier']) : [];
 
                     // Fetch supplier names
                     if (!empty($product['suplier'])) {
@@ -322,7 +320,6 @@ class ProductController extends ResourceController
                             ->get()
                             ->getResultArray();
 
-                        // Map supplier names to their IDs
                         $product['supplier_details'] = [];
                         foreach ($supplierNames as $supplier) {
                             $product['supplier_details'][] = [
@@ -331,16 +328,14 @@ class ProductController extends ResourceController
                             ];
                         }
                     } else {
-                        $product['supplier_details'] = []; // Default to empty if no suppliers
+                        $product['supplier_details'] = [];
                     }
 
-                    return $this->jsonResponse->oneResp('', $product);
-                } else {
-                    return $this->jsonResponse->error('Product Not Found');
+                    return $this->jsonResponse->oneResp('Data berhasil diambil', $product);
                 }
-            } else {
-                return $this->jsonResponse->error('Product Not Found');
             }
+
+            return $this->jsonResponse->error('Product Not Found');
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage());
         }
@@ -349,16 +344,22 @@ class ProductController extends ResourceController
     public function getListSeribySearchProduct()
     {
         $namaProduct = $this->request->getGet('namaProduct') ?? '';
+        $cacheKey = 'seri_by_search_' . md5($namaProduct);
+
         try {
+            $cached = cache()->get($cacheKey);
+            if ($cached !== null) {
+                return $this->jsonResponse->oneResp('Data berhasil diambil dari cache', $cached, 200);
+            }
+
             $builder = $this->productModel
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left') // Tambahkan join ke model_barang
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->select([
                     'seri.seri as label',
                     'product.id_seri_barang as value',
                 ]);
 
-            // Kondisi untuk memastikan field tidak null
             $builder->where('seri.seri IS NOT NULL')
                 ->where('model_barang.nama_model IS NOT NULL')
                 ->where('product.nama_barang IS NOT NULL');
@@ -374,6 +375,9 @@ class ProductController extends ResourceController
                 ->groupBy('product.id_seri_barang')
                 ->get()
                 ->getResultArray();
+
+            // Simpan ke cache selama 10 menit
+            cache()->save($cacheKey, array_values($products), 600);
 
             return $this->jsonResponse->oneResp('', array_values($products), 200);
         } catch (\Exception $e) {
@@ -633,6 +637,111 @@ class ProductController extends ResourceController
 
                 $item['images'] = array_column($existingImages, 'url');
             }
+
+            return $this->jsonResponse->multiResp('', $productList, $total_data, $total_page, $page, $limit, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    public function getProductStockForPricelist()
+    {
+        try {
+            $sortBy = $this->request->getGet('sortBy') ?? 'product.id_barang';
+            $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+            $namaProduct = $this->request->getGet('namaProduct') ?? '';
+            $id_toko = $this->request->getGet('id_toko') ?? '';
+            $is_pricelist = $this->request->getGet('is_pricelist') ?? '';
+            $is_toko = $this->request->getGet('is_toko') ?? '';
+            $seri = $this->request->getGet('seri') ?? '';
+            $model = $this->request->getGet('model') ?? '';
+            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+
+            $cacheKeyData = [
+                'sortBy' => $sortBy,
+                'sortMethod' => $sortMethod,
+                'namaProduct' => $namaProduct,
+                'id_toko' => $id_toko,
+                'is_pricelist' => $is_pricelist,
+                'is_toko' => $is_toko,
+                'seri' => $seri,
+                'model' => $model,
+                'limit' => $limit,
+                'page' => $page,
+            ];
+
+            $cacheKey = 'getProductStockForPricelist_' . md5(json_encode($cacheKeyData));
+
+            $cache = \Config\Services::cache();
+
+            if ($cached = $cache->get($cacheKey)) {
+                return $this->jsonResponse->multiResp('', $cached['data'], $cached['total_data'], $cached['total_page'], $page, $limit, 200);
+            }
+
+            $offset = ($page - 1) * $limit;
+
+            $builder = $this->productModel
+                ->join('stock', 'stock.id_barang = product.id_barang', 'left')
+                ->join('toko', 'toko.id = stock.id_toko', 'left')
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->select([
+                    'product.id',
+                    'product.id_barang as kode_barang',
+                    'model_barang.nama_model',
+                    'product.nama_barang as nama_barang',
+                    'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
+                    'COALESCE(seri.seri, "") as seri',
+                    'stock.stock',
+                    'stock.dropship',
+                    'stock.barang_cacat',
+                    'toko.toko_name',
+                    "product.harga_jual",
+                    ...($is_toko ? ["product.harga_jual_toko as harga_toko"] : []),
+                ]);
+
+            if (!empty($namaProduct)) {
+                $builder->groupStart()
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                    ->groupEnd();
+            }
+            if (!empty($seri)) {
+                $builder->where('product.id_seri_barang', $seri);
+            }
+            if (!empty($model)) {
+                $builder->where('product.id_model_barang', $model);
+            }
+            if (!empty($id_toko)) {
+                $builder->where('toko.id', $id_toko);
+            }
+
+            $productsQuery = $builder
+                ->orderBy($sortBy, $sortMethod)
+                ->limit($limit, $offset);
+
+            $total_data = $builder->countAllResults(false);
+            $total_page = ceil($total_data / $limit);
+
+            $productList = $productsQuery->get()
+                ->getResultArray();
+
+            foreach ($productList as &$item) {
+                $existingImages = $this->imageModel
+                    ->where('type', 'product')
+                    ->where('kode', $item['id'])
+                    ->findAll();
+
+                $item['images'] = array_column($existingImages, 'url');
+            }
+
+            // Simpan ke cache selama 5 menit (300 detik)
+            $cache->save($cacheKey, [
+                'data' => $productList,
+                'total_data' => $total_data,
+                'total_page' => $total_page,
+            ], 300);
 
             return $this->jsonResponse->multiResp('', $productList, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {

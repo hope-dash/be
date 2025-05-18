@@ -19,8 +19,10 @@ class TransactionModel extends Model
         'NEED_REFUNDED' => 'Need to Refund',
         'RETUR' => 'Retur',
         'PAID' => 'Paid',
-        'PACKING' => 'packing',
-        'IN_DELIVERY' => '⁠in delivery',
+        'PACKING' => 'Packing',
+        'IN_DELIVERY' => 'In Delivery',
+        'PARTIALLY_PAID' => 'DP',
+
     ];
 
     protected $useTimestamps = true;

@@ -5,6 +5,7 @@ namespace Config;
 use CodeIgniter\Events\Events;
 use CodeIgniter\Exceptions\FrameworkException;
 use CodeIgniter\HotReloader\HotReloader;
+use Config\Database; // Tambahkan ini untuk akses Database::connect
 
 /*
  * --------------------------------------------------------------------
@@ -33,7 +34,7 @@ Events::on('pre_system', static function (): void {
             ob_end_flush();
         }
 
-        ob_start(static fn ($buffer) => $buffer);
+        ob_start(static fn($buffer) => $buffer);
     }
 
     /*
@@ -42,7 +43,7 @@ Events::on('pre_system', static function (): void {
      * --------------------------------------------------------------------
      * If you delete, they will no longer be collected.
      */
-    if (CI_DEBUG && ! is_cli()) {
+    if (CI_DEBUG && !is_cli()) {
         Events::on('DBQuery', 'CodeIgniter\Debug\Toolbar\Collectors\Database::collect');
         service('toolbar')->respond();
         // Hot Reload route - for framework use on the hot reloader.
@@ -52,4 +53,14 @@ Events::on('pre_system', static function (): void {
             });
         }
     }
+});
+
+/*
+ * --------------------------------------------------------------------
+ * Close database connection after request
+ * --------------------------------------------------------------------
+ */
+Events::on('post_system', static function (): void {
+    $db = Database::connect();
+    $db->close();
 });
