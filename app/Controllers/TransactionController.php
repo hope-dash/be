@@ -1195,61 +1195,79 @@ class TransactionController extends BaseController
         }
 
         $newTotalPayment = $transaction['amount'] - $transaction['total_payment'];
+        $newTotalPembayaran = $newTotalPayment + $transaction['total_payment'];
+        $ongkirMeta = $db->table('transaction_meta')
+            ->select('value')
+            ->where('transaction_id', $transactionId)
+            ->where('key', 'biaya_pengiriman')
+            ->get()
+            ->getRowArray();
 
+        $ongkir = isset($ongkirMeta['value']) ? (float) $ongkirMeta['value'] : 0;
+        $netIncome = $newTotalPayment - $ongkir;
+
+        // Update status transaksi
         $db->table('transaction')
             ->where('id', $transactionId)
             ->update([
                 'status' => 'PAID',
                 'updated_by' => $token['user_id'],
-                'total_payment' => $newTotalPayment + $transaction['total_payment']
+                'total_payment' => $newTotalPembayaran
             ]);
 
-        $cashflowData = [
-            'debit' => $newTotalPayment,
+        $dateTime = date('Y-m-d H:i:s');
+
+        // Pemasukan dari produk
+        $db->table('cashflow')->insert([
+            'debit' => $netIncome,
             'credit' => 0,
-            'noted' => "Pembayaran Lunas Transaksi " . $transaction['invoice'],
+            'noted' => "Pembayaran Produk Transaksi " . $transaction['invoice'],
             'type' => 'Transaction',
             'status' => 'SUCCESS',
-            'date_time' => date('Y-m-d H:i:s'),
+            'date_time' => $dateTime,
             'id_toko' => $transaction['id_toko'],
-            'metode' => $data->metode_pembayaran
-        ];
+            'metode' => $data->metode_pembayaran,
+            'transaction_id' => $transactionId
+        ]);
 
-        $db->table('cashflow')->insert($cashflowData);
-        $cashflowId = $db->insertID();
+        // Pengeluaran ongkos kirim (jika ada)
+        if ($ongkir > 0) {
+            $db->table('cashflow')->insert([
+                'debit' => 0,
+                'credit' => $ongkir,
+                'noted' => "Pengeluaran Ongkir Transaksi " . $transaction['invoice'],
+                'type' => 'Ongkir',
+                'status' => 'SUCCESS',
+                'date_time' => $dateTime,
+                'id_toko' => $transaction['id_toko'],
+                'metode' => $data->metode_pembayaran,
+                'transaction_id' => $transactionId
+            ]);
+        }
 
+        // Metadata pelunasan
         $metaData = [
-            [
-                'transaction_id' => (string) $transactionId,
-                'key' => 'paid_at',
-                'value' => date('Y-m-d H:i:s')
-            ],
-            [
-                'transaction_id' => (string) $transactionId,
-                'key' => 'cashflow_id',
-                'value' => (string) $cashflowId
-            ],
-            [
-                'transaction_id' => (string) $transactionId,
-                'key' => 'metode_pembayaran_pelunasan',
-                'value' => (string) $data->metode_pembayaran
-            ]
+            ['key' => 'paid_at', 'value' => $dateTime],
+            ['key' => 'metode_pembayaran_pelunasan', 'value' => (string) $data->metode_pembayaran]
         ];
 
-        foreach ($metaData as $data) {
-            $data['key'] = (string) $data['key'];
-            $data['value'] = (string) $data['value'];
-            $db->table('transaction_meta')->insert($data);
+        foreach ($metaData as $meta) {
+            $db->table('transaction_meta')->insert([
+                'transaction_id' => (string) $transactionId,
+                'key' => $meta['key'],
+                'value' => $meta['value']
+            ]);
         }
 
         if ($db->transStatus() === false) {
             $db->transRollback();
-            return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
-        } else {
-            $db->transCommit();
-            return $this->jsonResponse->oneResp('Transaction status updated to fully paid', null, 200);
+            return $this->jsonResponse->oneResp('Gagal memperbarui transaksi', null, 500);
         }
+
+        $db->transCommit();
+        return $this->jsonResponse->oneResp('Transaksi berhasil dilunasi dan dicatat di cashflow', null, 200);
     }
+
     public function complainProduct($transactionId)
     {
         $token = $this->request->user;
@@ -1798,7 +1816,6 @@ class TransactionController extends BaseController
                 ->groupEnd();
         }
 
-
         $total_data = $builder->countAllResults(false);
         $total_page = ceil($total_data / $limit);
 
@@ -1807,7 +1824,41 @@ class TransactionController extends BaseController
             ->get()
             ->getResult();
 
+        // Ambil data list
+        $result = $builder->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
 
-        return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+        // Builder khusus untuk sum
+        $sumBuilder = $this->db->table('sales_product sp');
+        $sumBuilder->join('transaction t', 'sp.id_transaction = t.id', 'left');
+        if (!empty($role) && !$id_toko) {
+            $sumBuilder->whereIn('t.id_toko', $role);
+        }
+        if (!empty($id_toko)) {
+            $sumBuilder->like('t.id_toko', (string) $id_toko, 'both');
+        }
+        if (!empty($start_date)) {
+            $sumBuilder->where('t.date_time >=', $start_date);
+        }
+        if (!empty($end_date)) {
+            $sumBuilder->where('t.date_time <=', $end_date);
+        }
+        if ($search) {
+            $sumBuilder->groupStart()
+                ->like('t.invoice', $search)
+                ->orLike('sp.kode_barang', $search)
+                ->groupEnd();
+        }
+
+        // Ambil total SUM
+        $sum = $sumBuilder->select('
+        SUM(sp.modal_system) AS total_modal_system,
+        SUM(sp.actual_total) AS total_actual_total
+         ')->get()->getRow();
+
+
+        return $this->jsonResponse->multiResp('', ['sum' => $sum, 'result' => $result], $total_data, $total_page, $page, $limit, 200);
     }
 }
