@@ -1752,7 +1752,7 @@ class TransactionController extends BaseController
     public function listSalesProductWithTransaction()
     {
         $sortBy = $this->request->getGet('sortBy') ?? 'sp.id';
-        $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
+        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? 'asc');
         $limit = (int) $this->request->getGet('limit') ?: 10;
         $page = (int) $this->request->getGet('page') ?: 1;
         $offset = ($page - 1) * $limit;
@@ -1763,8 +1763,55 @@ class TransactionController extends BaseController
         $role = $this->request->getGet('role');
         $search = $this->request->getGet('search');
 
-        $builder = $this->db->table('sales_product sp');
-        $builder->select("
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
+        }
+
+        // Builder utama untuk list dan sum
+        $baseBuilder = $this->db->table('sales_product sp')
+            ->join('transaction t', 'sp.id_transaction = t.id', 'left')
+            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+            ->join('seri s', 'p.id_seri_barang = s.id', 'left');
+
+        // Filter toko
+        if (!empty($role) && !$id_toko) {
+            $baseBuilder->whereIn('t.id_toko', $role);
+        }
+
+        if (!empty($id_toko)) {
+            $baseBuilder->like('t.id_toko', (string) $id_toko, 'both');
+        }
+
+        // Filter tanggal
+        if (!empty($start_date)) {
+            $baseBuilder->where('t.date_time >=', $start_date);
+        }
+
+        if (!empty($end_date)) {
+            $baseBuilder->where('t.date_time <=', $end_date);
+        }
+
+        // Filter search
+        if ($search) {
+            $baseBuilder->groupStart()
+                ->like('t.invoice', $search)
+                ->orLike('p.nama_barang', $search)
+                ->orLike('mb.nama_model', $search)
+                ->orLike('s.seri', $search)
+                ->groupEnd();
+        }
+
+        // Clone base builder untuk hitung total & sum
+        $builder = clone $baseBuilder;
+        $sumBuilder = clone $baseBuilder;
+
+        // Count total rows
+        $total_data = $builder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        // Ambil paginated result
+        $result = $builder->select("
             sp.*,
             t.invoice,
             t.date_time,
@@ -1778,87 +1825,29 @@ class TransactionController extends BaseController
                 COALESCE(mb.nama_model, ''), ' ',
                 COALESCE(s.seri, '')
             ) AS nama_lengkap_barang
-        ");
-        $builder->join('transaction t', 'sp.id_transaction = t.id', 'left');
-        $builder->join('product p', 'sp.kode_barang = p.id_barang', 'left');
-        $builder->join('model_barang mb', 'p.id_model_barang = mb.id', 'left');
-        $builder->join('seri s', 'p.id_seri_barang = s.id', 'left');
-
-        if (is_string($role)) {
-            $role = array_map('intval', explode(',', $role));
-        }
-
-        if (!empty($role) && !$id_toko) {
-            $builder->whereIn('id_toko', $role);
-        }
-
-        if (!empty($id_toko)) {
-            $builder = $builder->like('id_toko', (string) $id_toko, 'both');
-        }
-
-        if (!empty($start_date) && !empty($end_date)) {
-            $builder = $builder->where('date_time >=', $start_date)
-                ->where('date_time <=', $end_date);
-        } elseif (!empty($start_date)) {
-            $builder = $builder->where('date_time >=', $start_date);
-        } elseif (!empty($end_date)) {
-            $builder = $builder->where('date_time <=', $end_date);
-        }
-
-
-        // **SEARCH (customer_name, customer_phone, invoice_number)**
-        if ($search) {
-            $builder->groupStart()
-                ->like('t.invoice', $search)
-                ->orLike('p.nama_barang', $search)
-                ->orLike('mb.nama_model', $search)
-                ->orLike('s.seri', $search)
-                ->groupEnd();
-        }
-
-        $total_data = $builder->countAllResults(false);
-        $total_page = ceil($total_data / $limit);
-
-        $result = $builder->orderBy($sortBy, $sortMethod)
+        ")
+            ->orderBy($sortBy, $sortMethod)
             ->limit($limit, $offset)
             ->get()
             ->getResult();
 
-        // Ambil data list
-        $result = $builder->orderBy($sortBy, $sortMethod)
-            ->limit($limit, $offset)
-            ->get()
-            ->getResult();
-
-        // Builder khusus untuk sum
-        $sumBuilder = $this->db->table('sales_product sp');
-        $sumBuilder->join('transaction t', 'sp.id_transaction = t.id', 'left');
-        if (!empty($role) && !$id_toko) {
-            $sumBuilder->whereIn('t.id_toko', $role);
-        }
-        if (!empty($id_toko)) {
-            $sumBuilder->like('t.id_toko', (string) $id_toko, 'both');
-        }
-        if (!empty($start_date)) {
-            $sumBuilder->where('t.date_time >=', $start_date);
-        }
-        if (!empty($end_date)) {
-            $sumBuilder->where('t.date_time <=', $end_date);
-        }
-        if ($search) {
-            $sumBuilder->groupStart()
-                ->like('t.invoice', $search)
-                ->orLike('sp.kode_barang', $search)
-                ->groupEnd();
-        }
-
-        // Ambil total SUM
+        // Ambil SUM
         $sum = $sumBuilder->select('
-        SUM(sp.modal_system) AS total_modal_system,
-        SUM(sp.actual_total) AS total_actual_total
-         ')->get()->getRow();
+            SUM(sp.modal_system) AS total_modal_system,
+            SUM(sp.actual_total) AS total_actual_total
+        ')
+            ->get()
+            ->getRow();
 
-
-        return $this->jsonResponse->multiResp('', ['sum' => $sum, 'result' => $result], $total_data, $total_page, $page, $limit, 200);
+        return $this->jsonResponse->multiResp(
+            '',
+            ['sum' => $sum, 'result' => $result],
+            $total_data,
+            $total_page,
+            $page,
+            $limit,
+            200
+        );
     }
+
 }
