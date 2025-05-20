@@ -99,6 +99,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
     $routes->get('reporting/due-transaction', 'TransactionController::getUpcomingDueTransactions');
     $routes->get('reporting/revenue-profit-detail', 'TransactionController::listSalesProductWithTransaction');
+    $routes->get('reporting/log', 'LogAktivitasController::index');
 
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);

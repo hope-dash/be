@@ -24,6 +24,7 @@ class ProductController extends ResourceController
 
     public function __construct()
     {
+        helper('log');
         $this->modelBarangModel = new ModelBarangModel();
         $this->imageModel = new ImageModel();
         $this->productModel = new ProductModel();
@@ -80,6 +81,16 @@ class ProductController extends ResourceController
         ];
 
         $this->productModel->insert($productData);
+        log_aktivitas([
+            'user_id' => $token['user_id'],
+            'action_type' => 'CREATE',
+            'target_table' => 'product',
+            'target_id' => $nextId,
+            'description' => 'Membuat produk baru',
+            'detail' => [
+                'new' => $data
+            ],
+        ]);
 
         $stockData = [];
         foreach ($data->stock as $toko) {
@@ -187,6 +198,89 @@ class ProductController extends ResourceController
         return $this->jsonResponse->oneResp('Images uploaded successfully', ['image_paths' => $uploadedImagePaths], 201);
     }
 
+    private function generateChangeLogString(array $oldData, object $newData): string
+    {
+        $changes = [];
+
+        $fields = [
+            'nama_barang',
+            'description',
+            'id_seri_barang',
+            'harga_modal',
+            'harga_jual',
+            'harga_jual_toko',
+            'suplier',
+            'id_model',
+            'notes'
+        ];
+
+        foreach ($fields as $field) {
+            $oldValue = $oldData[$field] ?? null;
+            if ($field === 'suplier' && is_array($oldValue)) {
+                $oldValue = implode(',', $oldValue);
+            }
+            $newValue = $newData->$field ?? null;
+            if ($field === 'suplier' && is_array($newValue)) {
+                $newValue = implode(',', $newValue);
+            }
+
+            if ($oldValue != $newValue) {
+                $oldValStr = $oldValue === null ? 'null' : (string) $oldValue;
+                $newValStr = $newValue === null ? 'null' : (string) $newValue;
+                $changes[] = "Data $field diubah dari '$oldValStr' menjadi '$newValStr'";
+            }
+        }
+
+        $oldStockIndex = [];
+        foreach ($oldData['stock'] ?? [] as $stock) {
+
+            $key = $stock['id'] ?? $stock['id_toko'] ?? uniqid('stock_');
+            $oldStockIndex[$key] = $stock;
+        }
+
+
+        foreach ($newData->stock ?? [] as $newStock) {
+            $key = $newStock->id ?? $newStock->id_toko ?? uniqid('stock_');
+
+            $oldStock = $oldStockIndex[$key] ?? null;
+            if (!$oldStock) {
+
+                $changes[] = "Stock baru ditambahkan untuk toko ID {$newStock->id_toko} dengan stock {$newStock->stock}, barang cacat {$newStock->barang_cacat}, dropship " . ($newStock->dropship ? 'true' : 'false');
+            } else {
+
+                foreach (['stock', 'barang_cacat', 'dropship'] as $stockField) {
+                    $oldVal = $oldStock[$stockField] ?? null;
+                    $newVal = $newStock->$stockField ?? null;
+
+
+                    if ($stockField === 'dropship') {
+                        $oldVal = (bool) $oldVal;
+                        $newVal = (bool) $newVal;
+                    }
+
+                    if ($oldVal != $newVal) {
+                        $changes[] = "Stock untuk toko ID {$newStock->id_toko} diubah pada '$stockField' dari '$oldVal' menjadi '$newVal'";
+                    }
+                }
+            }
+
+
+            unset($oldStockIndex[$key]);
+        }
+
+
+        foreach ($oldStockIndex as $oldKey => $oldStock) {
+            $changes[] = "Stock untuk toko ID {$oldStock['id_toko']} dihapus (stock lama: {$oldStock['stock']}, barang cacat: {$oldStock['barang_cacat']}, dropship: " . ($oldStock['dropship'] ? 'true' : 'false') . ")";
+        }
+
+        if (empty($changes)) {
+            return "Tidak ada perubahan data.";
+        }
+
+        return implode(", ", $changes) . ".";
+    }
+
+
     public function updateProduct($id = null)
     {
         $token = $this->request->user;
@@ -213,6 +307,10 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error("Kategori barang tidak valid", 400);
         }
 
+        $oldProductData = $this->getProductDetailArray($id);
+        if (!$oldProductData) {
+            return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+        }
         $productData = [
             'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
             'description' => isset($data->description) ? $data->description : NULL,
@@ -227,6 +325,20 @@ class ProductController extends ResourceController
         ];
 
         $this->productModel->update($id, $productData);
+        $changeLog = $this->generateChangeLogString($oldProductData, $data);
+
+        log_aktivitas([
+            'user_id' => $token['user_id'],
+            'action_type' => 'UPDATE',
+            'target_table' => 'product',
+            'target_id' => $id,
+            'description' => $changeLog,
+            'detail' => [
+                'old' => $oldProductData,
+                'new' => $data
+            ],
+        ]);
+
 
         // Update stock data
         foreach ($data->stock as $toko) {
@@ -271,75 +383,83 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id], 200);
     }
+    // Fungsi baru di controller (atau model helper) untuk ambil data array (tanpa response JSON)
+    private function getProductDetailArray($id)
+    {
+        $product = $this->productModel
+            ->select('product.*, product.id_model_barang as id_model, model_barang.nama_model, seri.seri')
+            ->join('model_barang', 'model_barang.id = product.id_model_barang')
+            ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+            ->where('product.id', $id)
+            ->first();
+
+        if (!$product)
+            return null;
+
+        $product = (array) $product;
+
+        // Ambil stock
+        $stockData = $this->productModel
+            ->select("stock.id, stock.stock, IF(stock.dropship = 1, 1, 0) AS dropship, stock.id_toko, stock.barang_cacat, toko.toko_name")
+            ->join('stock', 'stock.id_barang = product.id_barang', 'left')
+            ->join('toko', 'toko.id = stock.id_toko', 'left')
+            ->where('product.id', $id)
+            ->get()
+            ->getResultArray();
+
+        foreach ($stockData as &$row) {
+            $row['dropship'] = (bool) $row['dropship'];
+        }
+        unset($row);
+
+        $product['stock'] = $stockData;
+
+        // Ambil images
+        $existingImages = $this->imageModel->where('type', 'product')
+            ->where('kode', $id)
+            ->findAll();
+        $product['images'] = array_column($existingImages, 'url');
+
+        // Dropship & supplier
+        $product['dropship'] = (bool) ($product['dropship'] ?? false);
+        $product['suplier'] = !empty($product['suplier']) ? explode(',', $product['suplier']) : [];
+
+        // Ambil supplier details
+        if (!empty($product['suplier'])) {
+            $supplierNames = $this->db->table('suplier')
+                ->select('id, suplier_name')
+                ->whereIn('id', $product['suplier'])
+                ->get()
+                ->getResultArray();
+
+            $product['supplier_details'] = [];
+            foreach ($supplierNames as $supplier) {
+                $product['supplier_details'][] = [
+                    'id' => $supplier['id'],
+                    'name' => $supplier['suplier_name'],
+                ];
+            }
+        } else {
+            $product['supplier_details'] = [];
+        }
+
+        return $product;
+    }
+
+    // Fungsi getDetailById tetap untuk response API (optional)
     public function getDetailById($id = null)
     {
         try {
-            $product = $this->productModel->find($id);
+            $product = $this->getProductDetailArray($id);
             if ($product) {
-                $product = $this->productModel
-                    ->select('product.*, product.id_model_barang as id_model, model_barang.nama_model, seri.seri')
-                    ->join('model_barang', 'model_barang.id = product.id_model_barang')
-                    ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                    ->where('product.id', $id)
-                    ->first();
-
-                if ($product) {
-                    $product = (array) $product;
-
-                    // Fetch stock data
-                    $stockData = $this->productModel
-                        ->select("stock.id, stock.stock, IF(stock.dropship = 1, 1, 0) AS dropship, stock.id_toko, stock.barang_cacat, toko.toko_name")
-                        ->join('stock', 'stock.id_barang = product.id_barang', 'left')
-                        ->join('toko', 'toko.id = stock.id_toko', 'left')
-                        ->where('product.id', $id)
-                        ->get()
-                        ->getResultArray();
-
-                    foreach ($stockData as &$row) {
-                        $row['dropship'] = (bool) $row['dropship'];
-                    }
-                    unset($row);
-
-                    $product['stock'] = $stockData;
-
-                    // Fetch images
-                    $existingImages = $this->imageModel->where('type', 'product')
-                        ->where('kode', $id)
-                        ->findAll();
-                    $product['images'] = array_column($existingImages, 'url');
-
-                    // Dropship & supplier
-                    $product['dropship'] = (bool) ($product['dropship'] ?? false);
-                    $product['suplier'] = !empty($product['suplier']) ? explode(',', $product['suplier']) : [];
-
-                    // Fetch supplier names
-                    if (!empty($product['suplier'])) {
-                        $supplierNames = $this->db->table('suplier')
-                            ->select('id, suplier_name')
-                            ->whereIn('id', $product['suplier'])
-                            ->get()
-                            ->getResultArray();
-
-                        $product['supplier_details'] = [];
-                        foreach ($supplierNames as $supplier) {
-                            $product['supplier_details'][] = [
-                                'id' => $supplier['id'],
-                                'name' => $supplier['suplier_name'],
-                            ];
-                        }
-                    } else {
-                        $product['supplier_details'] = [];
-                    }
-
-                    return $this->jsonResponse->oneResp('Data berhasil diambil', $product);
-                }
+                return $this->jsonResponse->oneResp('Data berhasil diambil', $product);
             }
-
-            return $this->jsonResponse->error('Product Not Found');
+            return $this->jsonResponse->error('Product Not Found', 404);
         } catch (\Exception $e) {
-            return $this->jsonResponse->error($e->getMessage());
+            return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
+
 
     public function getListSeribySearchProduct()
     {

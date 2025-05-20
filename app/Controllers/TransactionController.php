@@ -10,6 +10,7 @@ use App\Models\TransactionMetaModel;
 use App\Models\TransactionModel;
 use App\Models\SalesProductModel;
 use App\Models\ProductModel;
+use App\Models\CashflowModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTime;
 
@@ -24,8 +25,12 @@ class TransactionController extends BaseController
     protected $db;
     protected $stockModel;
 
+    protected $CashflowModel;
+
     public function __construct()
     {
+        helper('TransactionLogHelper');
+        helper('log');
         $this->jsonResponse = new JsonResponse();
         $this->transactions = new TransactionModel();
         $this->transactionMeta = new TransactionMetaModel();
@@ -33,6 +38,7 @@ class TransactionController extends BaseController
         $this->SalesProductModel = new SalesProductModel();
         $this->ProductModel = new ProductModel();
         $this->stockModel = new StockModel();
+        $this->CashflowModel = new CashflowModel();
         $this->db = \Config\Database::connect(); // Memuat database
     }
 
@@ -57,15 +63,17 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
-    private function checkAndUpdateStock($id_toko, $kode_barang, $jumlah)
+    private function checkAndUpdateStock($user_id, $id_toko, $kode_barang, $jumlah)
     {
         // Ambil data stok dari toko
         $stock = $this->stockModel
-            ->where('id_toko', $id_toko)
-            ->where('id_barang', $kode_barang)
+            ->select('stock.*, product.id AS product_id')
+            ->join('product', 'product.id_barang = stock.id_barang')
+            ->where('stock.id_toko', $id_toko)
+            ->where('stock.id_barang', $kode_barang)
             ->get()
             ->getRowArray();
+
 
         if (!$stock) {
             throw new \Exception("Stok untuk produk {$kode_barang} tidak ditemukan.");
@@ -79,13 +87,29 @@ class TransactionController extends BaseController
             throw new \Exception("Stok tidak mencukupi untuk produk {$kode_barang}.");
         }
 
-        return $this->stockModel
+        $result = $this->stockModel
             ->where('id_toko', $id_toko)
             ->where('id_barang', $kode_barang)
             ->set('stock', 'stock - ' . $jumlah, false)
             ->update();
-    }
 
+        if ($result) {
+            log_aktivitas([
+                'user_id' => $user_id,
+                'action_type' => 'UPDATE',
+                'target_table' => 'product',
+                'target_id' => $stock['product_id'],
+                'description' => "Mengurangi stok produk {$kode_barang} pada toko {$id_toko} sebanyak {$jumlah}",
+                'detail' => [
+                    'sebelum' => (int) $stock['stock'],
+                    'dikurangi' => (int) $jumlah,
+                    'sisa' => (int) $stock['stock'] - $jumlah,
+                ]
+            ]);
+        }
+
+        return $result;
+    }
     private function getOrCreateCustomer($customer_name, $customer_phone, $customer_alamat)
     {
         if (empty($customer_phone)) {
@@ -104,7 +128,6 @@ class TransactionController extends BaseController
 
         return $customer['id'];
     }
-
     private function calculateTransactionTotals($items, $discount, $ppn, $pengiriman)
     {
         $totalAmount = 0;
@@ -117,7 +140,6 @@ class TransactionController extends BaseController
 
         return [$totalAmount, $totalPpn, $grandTotal];
     }
-
     private function saveTransactionMeta($transactionId, $data)
     {
         $metaData = [
@@ -173,8 +195,6 @@ class TransactionController extends BaseController
             }
         }
     }
-
-
     public function createTransaction()
     {
         $data = $this->request->getJSON();
@@ -212,7 +232,7 @@ class TransactionController extends BaseController
 
                 $product = $productMap[$item->kode_barang];
 
-                $this->checkAndUpdateStock($data->id_toko, $item->kode_barang, $item->jumlah);
+                $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $item->kode_barang, $item->jumlah);
 
 
                 // Harga modal setelah diskon
@@ -266,6 +286,8 @@ class TransactionController extends BaseController
                 'customer_name' => $data->customer_name
             ]);
 
+
+
             foreach ($salesData as &$item) {
                 $item['id_transaction'] = $insertID;
             }
@@ -280,13 +302,23 @@ class TransactionController extends BaseController
                 throw new \Exception("Terjadi kesalahan saat menyimpan transaksi.");
             }
 
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'CREATE',
+                'target_table' => 'transactions',
+                'target_id' => $insertID,
+                'description' => 'Membuat transaksi baru',
+                'detail' => [
+                    'new' => $data
+                ],
+            ]);
+
             return $this->jsonResponse->oneResp('Transaksi berhasil diproses', $insertID, 201);
         } catch (\Exception $e) {
             $db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-
     public function countTransaction()
     {
         $data = $this->request->getJSON();
@@ -333,12 +365,13 @@ class TransactionController extends BaseController
 
             ];
 
+
+
             return $this->jsonResponse->oneResp('Transaction successfully processed', $transactionData, 201);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-
     public function getListTransaction()
     {
         $db = \Config\Database::connect();
@@ -450,7 +483,6 @@ class TransactionController extends BaseController
             200
         );
     }
-
     public function getTransactionDetailById($id = null)
     {
         $db = \Config\Database::connect();
@@ -579,7 +611,6 @@ class TransactionController extends BaseController
 
         return $this->jsonResponse->oneResp('Success', $transaction, 200);
     }
-
     public function calculateRevenueAndProfit()
     {
         $date_start = $this->request->getGet('date_start');
@@ -629,7 +660,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function calculateDebitAndCredit()
     {
         $date_start = $this->request->getGet('date_start');
@@ -690,7 +720,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function calculateExpenseAllocation()
     {
         $date_start = $this->request->getGet('date_start');
@@ -985,6 +1014,13 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
         } else {
             $db->transCommit();
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'UPDATE',
+                'target_table' => 'transactions',
+                'target_id' => $transactionId,
+                'description' => `Refund transaksi $transactionId sebesar $refundValue`,
+            ]);
             return $this->jsonResponse->oneResp('Transaction status updated to refunded', null, 200);
         }
     }
@@ -1071,6 +1107,13 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
         } else {
             $db->transCommit();
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'UPDATE',
+                'target_table' => 'transactions',
+                'target_id' => $transactionId,
+                'description' => `Update transaksi $transactionId menjadi cancel`,
+            ]);
             return $this->jsonResponse->oneResp('Transaction status updated to cancel', null, 200);
         }
     }
@@ -1165,6 +1208,13 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error('Failed to update transaction', 500);
         } else {
             $db->transCommit();
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'UPDATE',
+                'target_table' => 'transactions',
+                'target_id' => $transactionId,
+                'description' => `Update transaksi $transactionId menjadi DP sebesar $amount menggunakan metode $data->metode_pembayaran`,
+            ]);
             return $this->jsonResponse->oneResp('Transaction status updated to partially paid', null, 200);
         }
     }
@@ -1203,8 +1253,8 @@ class TransactionController extends BaseController
             ->get()
             ->getRowArray();
 
+
         $ongkir = isset($ongkirMeta['value']) ? (float) $ongkirMeta['value'] : 0;
-        $netIncome = $newTotalPayment - $ongkir;
 
         // Update status transaksi
         $db->table('transaction')
@@ -1216,10 +1266,14 @@ class TransactionController extends BaseController
             ]);
 
         $dateTime = date('Y-m-d H:i:s');
-
-        // Pemasukan dari produk
-        $db->table('cashflow')->insert([
-            'debit' => $netIncome,
+        // Metadata pelunasan
+        $metaData = [
+            ['key' => 'paid_at', 'value' => $dateTime],
+            ['key' => 'metode_pembayaran_pelunasan', 'value' => (string) $data->metode_pembayaran]
+        ];
+        // Insert pemasukan produk
+        $cashflowIdProduk = $this->CashflowModel->insert([
+            'debit' => $newTotalPembayaran,
             'credit' => 0,
             'noted' => "Pembayaran Produk Transaksi " . $transaction['invoice'],
             'type' => 'Transaction',
@@ -1230,26 +1284,29 @@ class TransactionController extends BaseController
             'transaction_id' => $transactionId
         ]);
 
-        // Pengeluaran ongkos kirim (jika ada)
+        if ($cashflowIdProduk) {
+            $metaData[] = ['key' => 'cashflow_id', 'value' => $cashflowIdProduk];
+        }
+
+        // Insert pengeluaran ongkir (jika ada)
         if ($ongkir > 0) {
-            $db->table('cashflow')->insert([
+            $cashflowIdOngkir = $this->CashflowModel->insert([
                 'debit' => 0,
                 'credit' => $ongkir,
                 'noted' => "Pengeluaran Ongkir Transaksi " . $transaction['invoice'],
-                'type' => 'Ongkir',
+                'type' => 'Pengiriman',
                 'status' => 'SUCCESS',
                 'date_time' => $dateTime,
                 'id_toko' => $transaction['id_toko'],
                 'metode' => $data->metode_pembayaran,
                 'transaction_id' => $transactionId
             ]);
+
+            if ($cashflowIdOngkir) {
+                $metaData[] = ['key' => 'cashflow_id', 'value' => $cashflowIdOngkir];
+            }
         }
 
-        // Metadata pelunasan
-        $metaData = [
-            ['key' => 'paid_at', 'value' => $dateTime],
-            ['key' => 'metode_pembayaran_pelunasan', 'value' => (string) $data->metode_pembayaran]
-        ];
 
         foreach ($metaData as $meta) {
             $db->table('transaction_meta')->insert([
@@ -1265,9 +1322,15 @@ class TransactionController extends BaseController
         }
 
         $db->transCommit();
+        log_aktivitas([
+            'user_id' => $token['user_id'],
+            'action_type' => 'UPDATE',
+            'target_table' => 'transactions',
+            'target_id' => $transactionId,
+            'description' => `Update transaksi $transactionId menjadi Full Payment menggunakan metode $data->metode_pembayaran`,
+        ]);
         return $this->jsonResponse->oneResp('Transaksi berhasil dilunasi dan dicatat di cashflow', null, 200);
     }
-
     public function complainProduct($transactionId)
     {
         $token = $this->request->user;
@@ -1317,9 +1380,11 @@ class TransactionController extends BaseController
                 $solution = $product->solution;
 
                 // Get product stock
-                $stock = $db->table('stock')
-                    ->where('id_barang', $kode_barang)
-                    ->where('id_toko', $id_toko)
+                $stock = $this->stockModel
+                    ->select('stock.*, product.id AS product_id')
+                    ->join('product', 'product.id_barang = stock.id_barang')
+                    ->where('stock.id_toko', $id_toko)
+                    ->where('stock.id_barang', $kode_barang)
                     ->get()
                     ->getRowArray();
 
@@ -1343,8 +1408,24 @@ class TransactionController extends BaseController
                                 'barang_cacat' => $stock['barang_cacat'] + $jumlah,
                                 'stock' => $stock['stock'] - $jumlah,
                             ]);
+
+                        log_aktivitas([
+                            'user_id' => $token['user_id'],
+                            'action_type' => 'UPDATE',
+                            'target_table' => 'stock',
+                            'target_id' => $stock['product_id'],
+                            'description' => "Transaksi $transactionId Retur. Stok produk {$kode_barang} dikurangi sebanyak {$jumlah} karena barang cacat pada stock toko {$id_toko}.",
+                            'detail' => [
+                                'stok_sebelum' => (int) $stock['stock'],
+                                'barang_cacat_sebelum' => (int) $stock['barang_cacat'],
+                                'jumlah_dikurangi' => (int) $jumlah,
+                                'stok_setelah' => (int) $stock['stock'] - $jumlah,
+                                'barang_cacat_setelah' => (int) $stock['barang_cacat'] + $jumlah,
+                            ]
+                        ]);
                     }
                 }
+
 
                 // Save retur
                 $returData = [
@@ -1414,6 +1495,21 @@ class TransactionController extends BaseController
                     ) {
                         throw new \RuntimeException('Failed to update stock for product: ' . $kode_barang);
                     }
+                    log_aktivitas([
+                        'user_id' => $token['user_id'],
+                        'action_type' => 'UPDATE',
+                        'target_table' => 'stock',
+                        'target_id' => $stock['product_id'],
+                        'description' => "Transaksi $transactionId Retur. Produk {$kode_barang} sebanyak {$jumlah} dikembalikan ke `{$updateField}` pada stok toko {$id_toko}.",
+                        'detail' => [
+                            'tipe_refund' => $barang_cacat ? 'Barang Cacat' : 'Barang Normal',
+                            'stok_sebelum' => (int) $stock['stock'],
+                            'barang_cacat_sebelum' => (int) $stock['barang_cacat'],
+                            'jumlah_dikembalikan' => (int) $jumlah,
+                            'stok_setelah' => $barang_cacat ? (int) $stock['stock'] : (int) $stock['stock'] + $jumlah,
+                            'barang_cacat_setelah' => $barang_cacat ? (int) $stock['barang_cacat'] + $jumlah : (int) $stock['barang_cacat'],
+                        ]
+                    ]);
                 }
             }
 
@@ -1472,6 +1568,14 @@ class TransactionController extends BaseController
             }
 
             $db->transCommit();
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'UPDATE',
+                'target_table' => 'transactions',
+                'target_id' => $transactionId,
+                'description' => `Transaksi $transactionId terdapat complain`,
+                'detail' => $data
+            ]);
             return $this->jsonResponse->oneResp('Complaint processed successfully', null, 200);
 
         } catch (\Exception $e) {
@@ -1507,7 +1611,7 @@ class TransactionController extends BaseController
             $kodeBarangBaru = array_column($data->item, 'kode_barang');
             foreach ($oldItemMap as $kode_barang => $oldItem) {
                 if (!in_array($kode_barang, $kodeBarangBaru)) {
-                    $this->restoreStock($data->id_toko, $kode_barang, $oldItem['jumlah']);
+                    $this->restoreStock($token['user_id'], $data->id_toko, $kode_barang, $oldItem['jumlah']);
                 }
             }
 
@@ -1538,9 +1642,9 @@ class TransactionController extends BaseController
                 $diffJumlah = $newJumlah - $oldJumlah;
 
                 if ($diffJumlah > 0) {
-                    $this->checkAndUpdateStock($data->id_toko, $kode_barang, $diffJumlah);
+                    $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $kode_barang, $diffJumlah);
                 } elseif ($diffJumlah < 0) {
-                    $this->restoreStock($data->id_toko, $kode_barang, abs($diffJumlah));
+                    $this->restoreStock($token['user_id'], $data->id_toko, $kode_barang, abs($diffJumlah));
                 }
             }
 
@@ -1620,6 +1724,21 @@ class TransactionController extends BaseController
             if ($db->transStatus() === false) {
                 throw new \Exception("Terjadi kesalahan saat memperbarui transaksi.");
             }
+            $logDescription = generateTransactionLog(
+                $token['user_id'],
+                $transaction,
+                $updateTransaction,
+                $oldItemMap,
+                $data->item
+            );
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'UPDATE',
+                'target_table' => 'transactions',
+                'target_id' => $transactionId,
+                'description' => $logDescription,
+            ]);
 
             return $this->jsonResponse->oneResp('Transaksi berhasil diperbarui', $transactionId, 200);
         } catch (\Exception $e) {
@@ -1627,10 +1746,10 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-    private function restoreStock($idToko, $kodeBarang, $jumlah)
+    private function restoreStock($user_id, $idToko, $kodeBarang, $jumlah)
     {
         $stok = $this->stockModel
-            ->select('stock.id, stock.stock, product.dropship')
+            ->select('stock.id, stock.stock, product.dropship, product.id as product_id')
             ->join('product', 'product.id_barang = stock.id_barang')
             ->where('stock.id_toko', $idToko)
             ->where('stock.id_barang', $kodeBarang)
@@ -1642,13 +1761,30 @@ class TransactionController extends BaseController
 
         $isDropship = isset($stok['dropship']) && (int) $stok['dropship'] === 1;
 
+        $result = false;
         if (!$isDropship) {
-            $this->stockModel
+            $result = $this->stockModel
                 ->where('id', $stok['id'])
                 ->set('stock', 'stock + ' . (int) $jumlah, false)
                 ->update();
         }
+
+        if ($result) {
+            log_aktivitas([
+                'user_id' => $user_id,
+                'action_type' => 'UPDATE',
+                'target_table' => 'product',
+                'target_id' => $stok['product_id'],
+                'description' => "Mengembalikan stok produk {$kodeBarang} pada toko {$idToko} sebanyak {$jumlah}.",
+                'detail' => [
+                    'stok_sebelum' => (int) $stok['stock'],
+                    'jumlah_ditambah' => (int) $jumlah,
+                    'stok_setelah' => (int) $stok['stock'] + $jumlah,
+                ]
+            ]);
+        }
     }
+
     public function getUpcomingDueTransactions()
     {
         $db = \Config\Database::connect();
