@@ -497,6 +497,7 @@ class TransactionController extends BaseController
                 t.id_toko,
                 t.date_time,
                 toko.toko_name,
+                toko.image_logo,
                 toko.alamat as alamat_toko,
                 toko.phone_number as nomer_toko,
                 COALESCE(c.nama_customer, tm_name.value) AS customer_name,
