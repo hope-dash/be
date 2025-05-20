@@ -12,8 +12,7 @@ class CustomerModel extends Model
     protected $returnType = 'array';
     protected $useSoftDeletes = true;
     protected $protectFields = true;
-    protected $allowedFields = ['nama_customer', 'no_hp_customer', "created_by", "updated_by", "alamat"];
-
+    protected $allowedFields = ['nama_customer', 'no_hp_customer', 'alamat', 'type', 'username', 'created_by', 'updated_by'];
     protected $useTimestamps = true;
     protected $dateFormat = 'datetime';
     protected $createdField = 'created_at';

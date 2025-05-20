@@ -1294,8 +1294,8 @@ class TransactionController extends BaseController
             $cashflowIdOngkir = $this->CashflowModel->insert([
                 'debit' => 0,
                 'credit' => $ongkir,
-                'noted' => "Pengeluaran Ongkir Transaksi " . $transaction['invoice'],
-                'type' => 'Pengiriman',
+                'noted' => "Ongkos Kirim Transaksi " . $transaction['invoice'],
+                'type' => 'Transaction',
                 'status' => 'SUCCESS',
                 'date_time' => $dateTime,
                 'id_toko' => $transaction['id_toko'],

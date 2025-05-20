@@ -13,6 +13,7 @@ $routes->options('api/(:any)', function () {
 $routes->post('api/login', 'UserController::login');
 $routes->post('api/register-be', 'UserController::create_be');
 $routes->post('api/pricelist', 'ProductController::getProductStockForPricelist');
+$routes->post('api/login/customer', 'CustomerController::checkSpecialCustomer');
 $routes->get('api/dropdown/toko', 'TokoController::dropdownToko');
 $routes->get('api/dropdown/model_barang', 'BarangController::dropdownModel');
 $routes->get('api/dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
