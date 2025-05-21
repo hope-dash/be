@@ -163,15 +163,14 @@ class PembelianController extends ResourceController
                     ' menjadi ' . ($stokLama + $jumlahBaru),
             ]);
 
-
-            return $this->respondCreated([
-                'status' => true,
-                'message' => 'Pembelian berhasil disimpan',
-                'data' => [
+            return $this->jsonResponse->oneResp(
+                'Pembelian berhasil disimpan',
+                [
                     'pembelian_id' => $pembelianId,
                     'total_belanja' => $totalBelanja,
                 ],
-            ]);
+                201
+            );
         } catch (\Throwable $e) {
             $db->transRollback();
             return $this->failServerError('Terjadi kesalahan: ' . $e->getMessage());
@@ -263,15 +262,14 @@ class PembelianController extends ResourceController
             ->get()
             ->getRowArray();
 
+        return $this->jsonResponse->oneResp('', [
+            'pembelian' => $pembelian,
+            'detail' => $detail,
+            'biaya' => $biaya
+        ], 200);
 
-        return $this->response->setJSON([
-            'status' => 'success',
-            'data' => [
-                'pembelian' => $pembelian,
-                'detail' => $detail,
-                'biaya' => $biaya
-            ]
-        ]);
+
+
     }
 
 
