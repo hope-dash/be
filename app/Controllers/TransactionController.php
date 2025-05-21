@@ -29,7 +29,6 @@ class TransactionController extends BaseController
 
     public function __construct()
     {
-        helper('TransactionLogHelper');
         helper('log');
         $this->jsonResponse = new JsonResponse();
         $this->transactions = new TransactionModel();
@@ -1020,7 +1019,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => `Refund transaksi $transactionId sebesar $refundValue`,
+                'description' => "Refund transaksi $transactionId sebesar $refundValue",
             ]);
             return $this->jsonResponse->oneResp('Transaction status updated to refunded', null, 200);
         }
@@ -1113,7 +1112,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => `Update transaksi $transactionId menjadi cancel`,
+                'description' => "Update transaksi $transactionId menjadi cancel",
             ]);
             return $this->jsonResponse->oneResp('Transaction status updated to cancel', null, 200);
         }
@@ -1214,7 +1213,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => `Update transaksi $transactionId menjadi DP sebesar $amount menggunakan metode $data->metode_pembayaran`,
+                'description' => "Update transaksi {$transactionId} menjadi DP sebesar {$amount} menggunakan metode {$data->metode_pembayaran}",
             ]);
             return $this->jsonResponse->oneResp('Transaction status updated to partially paid', null, 200);
         }
@@ -1328,7 +1327,7 @@ class TransactionController extends BaseController
             'action_type' => 'UPDATE',
             'target_table' => 'transactions',
             'target_id' => $transactionId,
-            'description' => `Update transaksi $transactionId menjadi Full Payment menggunakan metode $data->metode_pembayaran`,
+            'description' => "Update transaksi {$transactionId} menjadi Full Payment menggunakan metode {$data->metode_pembayaran}",
         ]);
         return $this->jsonResponse->oneResp('Transaksi berhasil dilunasi dan dicatat di cashflow', null, 200);
     }
@@ -1725,7 +1724,7 @@ class TransactionController extends BaseController
             if ($db->transStatus() === false) {
                 throw new \Exception("Terjadi kesalahan saat memperbarui transaksi.");
             }
-            $logDescription = generateTransactionLog(
+            $logDescription = $this->generateTransactionLog(
                 $token['user_id'],
                 $transaction,
                 $updateTransaction,
@@ -1987,4 +1986,46 @@ class TransactionController extends BaseController
         );
     }
 
+    private function generateTransactionLog(int $userId, array $oldTransaction, array $newTransaction, array $oldItems, array $newItems): string
+    {
+        $logDescription = "Transaksi diperbarui oleh user {$userId}. ";
+
+        // Bandingkan field transaksi
+        foreach ($newTransaction as $key => $newVal) {
+            $oldVal = $oldTransaction[$key] ?? null;
+            if ($oldVal != $newVal && !in_array($key, ['updated_by', 'date_time'])) {
+                $logDescription .= ucfirst($key) . " berubah dari {$oldVal} menjadi {$newVal}. ";
+            }
+        }
+
+        // Buat map item baru (kode_barang => object)
+        $newItemMap = [];
+        foreach ($newItems as $item) {
+            $newItemMap[$item->kode_barang] = $item;
+        }
+
+        // Cek perubahan dan penambahan item
+        foreach ($newItemMap as $kode => $item) {
+            if (!isset($oldItems[$kode])) {
+                $logDescription .= "Item {$kode} ditambahkan dengan jumlah {$item->jumlah} dan harga jual {$item->harga_jual}. ";
+            } else {
+                $oldItem = $oldItems[$kode];
+                if ($oldItem['jumlah'] != $item->jumlah) {
+                    $logDescription .= "Item {$kode} jumlah berubah dari {$oldItem['jumlah']} menjadi {$item->jumlah}. ";
+                }
+                if ($oldItem['harga_jual'] != $item->harga_jual) {
+                    $logDescription .= "Item {$kode} harga jual berubah dari {$oldItem['harga_jual']} menjadi {$item->harga_jual}. ";
+                }
+            }
+        }
+
+        // Cek item yang dihapus
+        foreach ($oldItems as $kode => $item) {
+            if (!isset($newItemMap[$kode])) {
+                $logDescription .= "Item {$kode} dihapus dari transaksi. ";
+            }
+        }
+
+        return trim($logDescription);
+    }
 }

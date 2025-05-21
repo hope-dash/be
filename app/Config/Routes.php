@@ -74,6 +74,10 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('bulk-product', 'ProductController::bulkUpload');
     $routes->get('model_barang/count', 'ProductController::getTotalByModelId');
 
+    $routes->post('transaction/belanja', 'PembelianController::create');
+    $routes->get('transaction/belanja', 'PembelianController::listPembelian');
+    $routes->get('transaction/belanja/(:num)', 'PembelianController::getPembelianById/$1');
+
 
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');

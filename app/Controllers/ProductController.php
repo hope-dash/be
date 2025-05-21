@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Models\CustomerModel;
 use App\Models\ModelBarangModel;
 use App\Models\ProductModel;
 use App\Models\ImageModel;
@@ -20,7 +21,7 @@ class ProductController extends ResourceController
     protected $jsonResponse;
     protected $db;
     protected $modelToko;
-
+    protected $customer;
 
     public function __construct()
     {
@@ -32,6 +33,7 @@ class ProductController extends ResourceController
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
         $this->modelToko = new TokoModel();
+        $this->customer = new CustomerModel();
     }
 
     public function createProduct()
@@ -678,8 +680,7 @@ class ProductController extends ResourceController
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $id_toko = $this->request->getGet('id_toko') ?? '';
-            $is_pricelist = $this->request->getGet('is_pricelist') ?? '';
-            $is_toko = $this->request->getGet('is_toko') ?? '';
+            $customer_id = $this->request->getGet('customer_id') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
             $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
@@ -690,25 +691,39 @@ class ProductController extends ResourceController
             $requestBody = $this->request->getJSON(true);
             $kode_exclude = !empty($requestBody['kode_exclude']) ? $requestBody['kode_exclude'] : [];
 
+            $customer = $this->customer
+                ->where('id', $customer_id)
+                ->where('type', 'special')
+                ->where('deleted_at', null)
+                ->first();
+
+            $selectFields = [
+                'product.id',
+                'product.id_barang as kode_barang',
+                'model_barang.nama_model',
+                'product.nama_barang as nama_barang',
+                'product.harga_modal',
+                'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
+                'COALESCE(seri.seri, "") as seri',
+                'stock.stock',
+                'stock.dropship',
+                'stock.barang_cacat',
+                'toko.toko_name',
+            ];
+
+            if ($customer) {
+                $selectFields[] = "product.harga_jual_toko as harga_jual";
+            } else {
+                $selectFields[] = "product.harga_jual";
+            }
+
             $builder = $this->productModel
                 ->join('stock', 'stock.id_barang = product.id_barang', 'left')
                 ->join('toko', 'toko.id = stock.id_toko', 'left')
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->select([
-                    'product.id',
-                    'product.id_barang as kode_barang',
-                    'model_barang.nama_model',
-                    'product.nama_barang as nama_barang',
-                    'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
-                    'COALESCE(seri.seri, "") as seri',
-                    'stock.stock',
-                    'stock.dropship',
-                    'stock.barang_cacat',
-                    'toko.toko_name',
-                    ...($is_toko ? ["product.harga_jual_toko as harga_jual"] : ["product.harga_jual"]),
-                    ...($is_pricelist ? [] : ["product.harga_modal"]),
-                ]);
+                ->select($selectFields);
+
 
             // Apply filters
             if (!empty($namaProduct)) {
@@ -771,8 +786,7 @@ class ProductController extends ResourceController
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $id_toko = $this->request->getGet('id_toko') ?? '';
-            $is_pricelist = $this->request->getGet('is_pricelist') ?? '';
-            $is_toko = $this->request->getGet('is_toko') ?? '';
+            $customer_id = $this->request->getGet('customer_id') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
             $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
@@ -783,8 +797,7 @@ class ProductController extends ResourceController
                 'sortMethod' => $sortMethod,
                 'namaProduct' => $namaProduct,
                 'id_toko' => $id_toko,
-                'is_pricelist' => $is_pricelist,
-                'is_toko' => $is_toko,
+                'customer_id' => $customer_id,
                 'seri' => $seri,
                 'model' => $model,
                 'limit' => $limit,
@@ -801,25 +814,36 @@ class ProductController extends ResourceController
 
             $offset = ($page - 1) * $limit;
 
+            $customer = $this->customer
+                ->where('id', $customer_id)
+                ->where('type', 'special')
+                ->where('deleted_at', null)
+                ->first();
+
+            $selectFields = [
+                'product.id',
+                'product.id_barang as kode_barang',
+                'model_barang.nama_model',
+                'product.nama_barang as nama_barang',
+                'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
+                'COALESCE(seri.seri, "") as seri',
+                'stock.stock',
+                'toko.toko_name',
+            ];
+
+            if ($customer) {
+                $selectFields[] = "product.harga_jual_toko as harga_jual";
+            } else {
+                $selectFields[] = "product.harga_jual";
+            }
+
             $builder = $this->productModel
                 ->join('stock', 'stock.id_barang = product.id_barang', 'left')
                 ->join('toko', 'toko.id = stock.id_toko', 'left')
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->select([
-                    'product.id',
-                    'product.id_barang as kode_barang',
-                    'model_barang.nama_model',
-                    'product.nama_barang as nama_barang',
-                    'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
-                    'COALESCE(seri.seri, "") as seri',
-                    'stock.stock',
-                    'stock.dropship',
-                    'stock.barang_cacat',
-                    'toko.toko_name',
-                    "product.harga_jual",
-                    ...($is_toko ? ["product.harga_jual_toko as harga_toko"] : []),
-                ]);
+                ->select($selectFields);
+
 
             if (!empty($namaProduct)) {
                 $builder->groupStart()
