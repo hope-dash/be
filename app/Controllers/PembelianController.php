@@ -260,7 +260,7 @@ class PembelianController extends ResourceController
         $biaya = $this->db->table('pembelian_biaya')
             ->where('pembelian_id', $id)
             ->get()
-            ->getRowArray();
+            ->getResultArray();
 
         return $this->jsonResponse->oneResp('', [
             'pembelian' => $pembelian,
