@@ -152,7 +152,7 @@ class PembelianController extends ResourceController
         } catch (\Throwable $e) {
             $db->transRollback();
             log_message('error', '[ERROR CREATE PEMBELIAN] ' . $e->getMessage() . ' - Trace: ' . $e->getTraceAsString());
-            return $this->jsonResponse->error(implode(", ", $e->getMessage()), 400);
+            return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
 
@@ -376,6 +376,7 @@ class PembelianController extends ResourceController
         $page = (int) $this->request->getGet('page') ?: 1;
         $limit = (int) $this->request->getGet('limit') ?: 10;
         $offset = ($page - 1) * $limit;
+        $status = $this->request->getGet(index: 'status');
 
         $builder = $this->db->table('pembelian');
         $builder->select('pembelian.*, toko.toko_name, suplier.suplier_name');
@@ -385,6 +386,10 @@ class PembelianController extends ResourceController
         // FILTER
         if ($id_toko) {
             $builder->where('pembelian.id_toko', $id_toko);
+        }
+
+        if ($status) {
+            $builder->where('pembelian.status', $status);
         }
 
         if ($date_start && $date_end) {
@@ -451,11 +456,14 @@ class PembelianController extends ResourceController
             ->get()
             ->getResultArray();
 
-        return $this->jsonResponse->oneResp('', [
-            'pembelian' => $pembelian,
-            'detail' => $detail,
-            'biaya' => $biaya
-        ], 200);
+        if (is_object($pembelian)) {
+            $pembelian = (array) $pembelian;
+        }
+
+        $pembelian['detail'] = $detail;
+        $pembelian['biaya'] = $biaya;
+
+        return $this->jsonResponse->oneResp('', $pembelian, 200);
 
 
 
