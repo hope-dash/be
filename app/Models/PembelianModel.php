@@ -14,6 +14,7 @@ class PembelianModel extends Model
         'supplier_id',
         'total_belanja',
         'catatan',
+        'status',
         'created_at',
         'updated_at',
         'deleted_at',

@@ -14,6 +14,7 @@ class PembelianDetailModel extends Model
         'kode_barang',
         'jumlah',
         'harga_satuan',
+        'ongkir',
         'total_harga'
     ];
 }

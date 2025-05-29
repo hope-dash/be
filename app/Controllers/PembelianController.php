@@ -35,148 +35,339 @@ class PembelianController extends ResourceController
         $this->db = \Config\Database::connect();
     }
 
-    public function create()
+    public function createPembelian()
     {
         $request = $this->request->getJSON(true);
         $token = $this->request->user;
 
-        if (empty($request['tanggal_belanja']) || empty($request['detail']) || empty($request['id_toko'])) {
-            return $this->failValidationError('tanggal_belanja, detail, dan id_toko wajib diisi');
+        // Validasi input dasar
+        if (empty($request['tanggal_belanja']) || empty($request['detail']) || !is_array($request['detail']) || empty($request['id_toko'])) {
+            return $this->jsonResponse->error('tanggal_belanja, detail (harus array), dan id_toko wajib diisi.', 400);
         }
+
+        foreach ($request['detail'] as $key => $item) {
+            if (empty($item['kode_barang']) || !isset($item['jumlah']) || !isset($item['harga_satuan'])) {
+                return $this->jsonResponse->error("Item detail ke-" . ($key + 1) . ": kode_barang, jumlah, dan harga_satuan wajib diisi.", 400);
+            }
+            if (intval($item['jumlah']) <= 0) {
+                return $this->jsonResponse->error('Item detail ke-" . ($key + 1) . ": jumlah harus lebih besar dari 0.', 400);
+            }
+        }
+        if (!empty($request['biaya']) && !is_array($request['biaya'])) {
+            return $this->jsonResponse->error('Biaya harus berupa array jika diisi.', 400);
+        }
+
 
         $db = \Config\Database::connect();
         $db->transBegin();
 
         try {
-            $totalJumlahItem = array_sum(array_column($request['detail'], 'jumlah'));
+            $totalBelanjaDariDetail = 0;
+            foreach ($request['detail'] as $item) {
+                $hargaSatuanItem = floatval($item['harga_satuan']);
+                $ongkirItem = isset($item['ongkir']) ? floatval($item['ongkir']) : 0;
+                $jumlahItem = intval($item['jumlah']);
+                $totalBelanjaDariDetail += ($hargaSatuanItem * $jumlahItem) + $ongkirItem;
+            }
 
             $totalBiayaLain = 0;
             if (!empty($request['biaya'])) {
                 foreach ($request['biaya'] as $biaya) {
+                    if (empty($biaya['nama_biaya']) || !isset($biaya['jumlah'])) {
+                        throw new \Exception("Setiap biaya tambahan harus memiliki nama_biaya dan jumlah.");
+                    }
                     $totalBiayaLain += floatval($biaya['jumlah']);
                 }
             }
 
-            $biayaTambahanPerItem = $totalJumlahItem > 0 ? $totalBiayaLain / $totalJumlahItem : 0;
-
-            $totalBelanjaDetail = 0;
-            foreach ($request['detail'] as $item) {
-                $totalBelanjaDetail += floatval($item['harga_satuan']) * intval($item['jumlah']);
-            }
-            $totalBelanja = $totalBelanjaDetail + $totalBiayaLain;
+            $totalBelanjaKeseluruhan = $totalBelanjaDariDetail + $totalBiayaLain;
 
             $pembelianData = [
                 'tanggal_belanja' => $request['tanggal_belanja'],
                 'supplier_id' => $request['supplier_id'] ?? null,
-                'id_toko' => $request['id_toko'] ?? null,
-                'total_belanja' => $totalBelanja,
+                'id_toko' => $request['id_toko'],
+                'total_belanja' => $totalBelanjaKeseluruhan,
                 'catatan' => $request['catatan'] ?? null,
+                'status' => 'REVIEW', // Status default
                 'created_at' => date('Y-m-d H:i:s'),
-                "created_by" => $token['user_id'],
+                'created_by' => $token['user_id'] ?? null,
             ];
 
             $pembelianId = $this->pembelianModel->insert($pembelianData);
-            if (!$pembelianId)
-                throw new \Exception('Gagal menyimpan data pembelian');
+            if (!$pembelianId) {
+                $errors = $this->pembelianModel->errors();
+                throw new \Exception('Gagal menyimpan data pembelian: ' . implode(', ', $errors ?: []));
+            }
 
+            // Simpan detail pembelian
+            foreach ($request['detail'] as $item) {
+                $hargaSatuanItem = floatval($item['harga_satuan']);
+                $ongkirItem = isset($item['ongkir']) ? floatval($item['ongkir']) : 0;
+                $jumlahItem = intval($item['jumlah']);
+
+                $detailData = [
+                    'pembelian_id' => $pembelianId,
+                    'kode_barang' => $item['kode_barang'],
+                    'jumlah' => $jumlahItem,
+                    'harga_satuan' => $hargaSatuanItem,
+                    'ongkir' => $ongkirItem,
+                    'total_harga' => ($hargaSatuanItem * $jumlahItem) + $ongkirItem,
+                ];
+                if (!$this->pembelianDetailModel->insert($detailData)) {
+                    $errors = $this->pembelianDetailModel->errors();
+                    throw new \Exception('Gagal menyimpan detail pembelian: ' . implode(', ', $errors ?: []));
+                }
+            }
+
+            // Simpan biaya tambahan jika ada
             if (!empty($request['biaya'])) {
                 foreach ($request['biaya'] as $biaya) {
                     $biayaInsert = $this->pembelianBiayaModel->insert([
                         'pembelian_id' => $pembelianId,
                         'nama_biaya' => $biaya['nama_biaya'],
-                        'jumlah' => $biaya['jumlah'],
+                        'jumlah' => floatval($biaya['jumlah']),
                     ]);
-                    if (!$biayaInsert)
-                        throw new \Exception('Gagal menyimpan biaya pembelian');
-                }
-            }
-
-            foreach ($request['detail'] as $item) {
-                $kodeBarang = $item['kode_barang'];
-                $jumlahBaru = intval($item['jumlah']);
-                $hargaSatuan = floatval($item['harga_satuan']);
-                $hargaSatuanFinal = $hargaSatuan + $biayaTambahanPerItem;
-
-                $stock = $this->stockModel->where('id_barang', $kodeBarang)
-                    ->where('id_toko', $request['id_toko'])
-                    ->first();
-                $stokLama = $stock['stock'] ?? 0;
-
-                $product = $this->productModel->where('id_barang', $kodeBarang)->first();
-
-                if (!$product)
-                    throw new \Exception("Produk dengan kode {$kodeBarang} tidak ditemukan");
-
-                $hargaModalLama = floatval($product['harga_modal']);
-                $stokTotal = $stokLama + $jumlahBaru;
-                if ($stokTotal == 0)
-                    $stokTotal = 1;
-
-                $hargaModalBaru = (($hargaModalLama * $stokLama) + ($hargaSatuanFinal * $jumlahBaru)) / $stokTotal;
-
-                if (!$this->productModel->update($product['id'], ['harga_modal' => $hargaModalBaru])) {
-                    throw new \Exception('Gagal update harga modal');
-                }
-
-
-                if ($stock) {
-                    if (!$this->stockModel->update($stock['id'], ['stock' => $stokLama + $jumlahBaru])) {
-                        throw new \Exception('Gagal update stok');
+                    if (!$biayaInsert) {
+                        $errors = $this->pembelianBiayaModel->errors();
+                        throw new \Exception('Gagal menyimpan biaya pembelian tambahan: ' . implode(', ', $errors ?: []));
                     }
                 }
-
-                if (
-                    !$this->pembelianDetailModel->insert([
-                        'pembelian_id' => $pembelianId,
-                        'kode_barang' => $kodeBarang,
-                        'jumlah' => $jumlahBaru,
-                        'harga_satuan' => $hargaSatuanFinal,
-                        'total_harga' => $hargaSatuanFinal * $jumlahBaru,
-                    ])
-                ) {
-                    throw new \Exception('Gagal simpan detail pembelian');
-                }
             }
-            // Insert ke tabel cashflow
-            $db->table('cashflow')->insert([
-                'debit' => 0,
-                'credit' => $totalBelanja,
-                'noted' => "Belanja ID " . $pembelianId . " pada tanggal " . date('Y-m-d'),
-                'type' => 'Belanja',
-                'status' => 'SUCCESS',
-                'date_time' => date('Y-m-d H:i:s'),
-                'id_toko' => $request['id_toko']
-            ]);
 
-            // Commit transaksi
+            if ($db->transStatus() === false) {
+                $db->transRollback();
+                return $this->jsonResponse->error('Gagal menyimpan pembelian karena transaksi database.', 400);
+            }
+
             $db->transCommit();
-
-            // Logging aktivitas
-            log_aktivitas([
-                'user_id' => $token['user_id'],
-                'action_type' => 'UPDATE',
-                'target_table' => 'product',
-                'target_id' => $product['id'],
-                'description' => 'Belanja pada tanggal ' . date('Y-m-d') .
-                    '. Melakukan perubahan data pada harga modal dari ' . $hargaModalLama .
-                    ' menjadi ' . $hargaModalBaru . '. Stock awal ' . $stokLama .
-                    ' menjadi ' . ($stokLama + $jumlahBaru),
-            ]);
 
             return $this->jsonResponse->oneResp(
                 'Pembelian berhasil disimpan',
                 [
                     'pembelian_id' => $pembelianId,
-                    'total_belanja' => $totalBelanja,
                 ],
                 201
             );
+
         } catch (\Throwable $e) {
             $db->transRollback();
-            return $this->failServerError('Terjadi kesalahan: ' . $e->getMessage());
+            log_message('error', '[ERROR CREATE PEMBELIAN] ' . $e->getMessage() . ' - Trace: ' . $e->getTraceAsString());
+            return $this->jsonResponse->error(implode(", ", $e->getMessage()), 400);
         }
     }
 
+    public function cancelPembelian($pembelianId = null)
+    {
+        if ($pembelianId === null) {
+            return $this->jsonResponse->error('ID Pembelian wajib diisi.', 400);
+        }
+
+        $pembelian = $this->pembelianModel->find($pembelianId);
+        if (!$pembelian) {
+            return $this->jsonResponse->error('Data pembelian tidak ditemukan.', 400);
+        }
+
+
+        if ($pembelian['status'] !== 'REVIEW') {
+            return $this->jsonResponse->error('Pembelian ini tidak dapat dibatalkan (status saat ini: ' . $pembelian['status'] . ').', 400);
+        }
+
+        $token = $this->request->user;
+
+        $db = \Config\Database::connect();
+        $db->transBegin();
+
+        try {
+            $updateData = [
+                'status' => 'CANCEL',
+                'updated_at' => date('Y-m-d H:i:s'),
+
+            ];
+
+            if (!$this->pembelianModel->update($pembelianId, $updateData)) {
+                $errors = $this->pembelianModel->errors();
+                throw new \Exception('Gagal mengubah status pembelian menjadi CANCEL: ' . implode(', ', $errors ?: []));
+            }
+
+            if ($db->transStatus() === false) {
+                $db->transRollback();
+                return $this->jsonResponse->error('Gagal membatalkan pembelian karena transaksi database.', 400);
+            }
+
+            $db->transCommit();
+
+            return $this->jsonResponse->oneResp(
+                'Pembelian berhasil dibatalkan',
+                [
+                    'pembelian_id' => $pembelianId,
+                ],
+                200
+            );
+
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            log_message('error', '[ERROR CANCEL PEMBELIAN] ' . $e->getMessage() . ' - Trace: ' . $e->getTraceAsString());
+            return $this->jsonResponse->error('Terjadi kesalahan internal saat membatalkan pembelian: ' . $e->getMessage(), 400);
+        }
+    }
+    public function executePembelian($pembelianId = null)
+    {
+        if ($pembelianId === null) {
+            return $this->jsonResponse->error('Terjadi kesalahan internal saat membatalkan pembelian: ' . $e->getMessage(), 400);
+            return $this->failValidationErrors('ID Pembelian wajib diisi.');
+        }
+
+        $token = $this->request->user;
+        $db = \Config\Database::connect();
+        $db->transBegin();
+
+        try {
+            $pembelian = $this->pembelianModel->find($pembelianId);
+            if (!$pembelian) {
+                throw new \Exception('Data pembelian tidak ditemukan.');
+            }
+
+            if ($pembelian['status'] !== 'REVIEW') {
+                throw new \Exception('Hanya pembelian dengan status REVIEW yang dapat dieksekusi. Status saat ini: ' . $pembelian['status']);
+            }
+
+            $idToko = $pembelian['id_toko'];
+            $pembelianDetails = $this->pembelianDetailModel->where('pembelian_id', $pembelianId)->findAll();
+            if (empty($pembelianDetails)) {
+                throw new \Exception('Detail pembelian tidak ditemukan untuk pembelian ID: ' . $pembelianId);
+            }
+
+            $pembelianBiayas = $this->pembelianBiayaModel->where('pembelian_id', $pembelianId)->findAll();
+
+            $totalBiayaTambahanDariTabel = 0;
+            if (!empty($pembelianBiayas)) {
+                foreach ($pembelianBiayas as $biaya) {
+                    $totalBiayaTambahanDariTabel += floatval($biaya['jumlah']);
+                }
+            }
+
+            $totalJumlahSemuaItem = 0;
+            foreach ($pembelianDetails as $item) {
+                $totalJumlahSemuaItem += intval($item['jumlah']);
+            }
+
+            $biayaTambahanPerUnitItem = $totalJumlahSemuaItem > 0 ? $totalBiayaTambahanDariTabel / $totalJumlahSemuaItem : 0;
+
+            foreach ($pembelianDetails as $item) {
+                $kodeBarang = $item['kode_barang'];
+                $jumlahBeli = intval($item['jumlah']);
+                $hargaSatuanAsli = floatval($item['harga_satuan']);
+                $ongkirPerItem = floatval($item['ongkir']);
+
+                // Harga satuan item setelah ditambah ongkir spesifiknya dan biaya tambahan terdistribusi
+                // Ini adalah harga modal per unit untuk item ini dari pembelian ini
+                $hargaModalSatuanItemIni = $hargaSatuanAsli + $ongkirPerItem + $biayaTambahanPerUnitItem;
+
+                $product = $this->productModel->where('id_barang', $kodeBarang)->first();
+                if (!$product) {
+                    throw new \Exception("Produk dengan kode {$kodeBarang} tidak ditemukan.");
+                }
+                $productId = $product['id'];
+                $hargaModalLama = floatval($product['harga_modal']);
+
+                $stock = $this->stockModel->where('id_barang', $kodeBarang)
+                    ->where('id_toko', $idToko)
+                    ->first();
+                $stokLama = $stock ? intval($stock['stock']) : 0;
+                $stokBaru = $stokLama + $jumlahBeli;
+
+                $stokTotalSetelahBeli = $stokLama + $jumlahBeli;
+                $hargaModalBaru = 0;
+                if ($stokTotalSetelahBeli > 0) {
+                    $calculatedHargaModalBaru = (($hargaModalLama * $stokLama) + ($hargaModalSatuanItemIni * $jumlahBeli)) / $stokTotalSetelahBeli;
+                    $hargaModalBaru = round($calculatedHargaModalBaru);
+                } else {
+                    $hargaModalBaru = round($hargaModalSatuanItemIni);
+                }
+
+
+                // Update harga modal di tabel produk
+                if (!$this->productModel->update($productId, ['harga_modal' => $hargaModalBaru])) {
+                    $errors = $this->productModel->errors();
+                    throw new \Exception('Gagal update harga modal produk ' . $kodeBarang . ': ' . implode(', ', $errors ?: []));
+                }
+
+                // Update atau insert stock
+                if ($stock) {
+                    if (!$this->stockModel->update($stock['id'], ['stock' => $stokBaru])) {
+                        $errors = $this->stockModel->errors();
+                        throw new \Exception('Gagal update stok produk ' . $kodeBarang . ': ' . implode(', ', $errors ?: []));
+                    }
+                } else {
+                    $newStockData = [
+                        'id_barang' => $kodeBarang,
+                        'id_toko' => $idToko,
+                        'stock' => $jumlahBeli,
+
+                    ];
+                    if (!$this->stockModel->insert($newStockData)) {
+                        $errors = $this->stockModel->errors();
+                        throw new \Exception('Gagal insert stok baru untuk produk ' . $kodeBarang . ': ' . implode(', ', $errors ?: []));
+                    }
+                }
+                log_aktivitas([
+                    'user_id' => $token['user_id'],
+                    'action_type' => 'UPDATE',
+                    'target_table' => 'product',
+                    'target_id' => $productId,
+                    'description' => 'Belanja pada tanggal ' . date('Y-m-d') .
+                        " Produk {$kodeBarang}: modal {$hargaModalLama} -> {$hargaModalBaru}, stok {$stokLama} -> {$stokBaru}."
+                ]);
+
+            }
+
+            $cashflowData = [
+                'debit' => 0,
+                'credit' => $pembelian['total_belanja'],
+                'noted' => "Belanja ID " . $pembelianId . " pada tanggal " . date('Y-m-d'),
+                'type' => 'Belanja',
+                'status' => 'SUCCESS',
+                'date_time' => date('Y-m-d H:i:s'),
+                'id_toko' => $idToko,
+
+            ];
+            // Jika menggunakan model: $this->cashflowModel->insert($cashflowData)
+            if (!$db->table('cashflow')->insert($cashflowData)) {
+                throw new \Exception('Gagal mencatat transaksi ke cashflow.');
+            }
+
+
+            $updatePembelianData = [
+                'status' => 'SUCCESS',
+                'updated_at' => date('Y-m-d H:i:s'),
+                'updated_by' => $token['user_id'] ?? null,
+            ];
+            if (!$this->pembelianModel->update($pembelianId, $updatePembelianData)) {
+                $errors = $this->pembelianModel->errors();
+                throw new \Exception('Gagal mengubah status pembelian menjadi SUCCESS: ' . implode(', ', $errors ?: []));
+            }
+
+            if ($db->transStatus() === false) {
+                $db->transRollback();
+                return $this->jsonResponse->error('Gagal mengeksekusi pembelian karena transaksi database.', 400);
+            }
+
+            $db->transCommit();
+
+            return $this->jsonResponse->oneResp(
+                'Pembelian berhasil dieksekusi',
+                [
+                    'pembelian_id' => $pembelianId,
+                ],
+                200
+            );
+
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            log_message('error', '[ERROR EXECUTE PEMBELIAN] ' . $e->getMessage() . ' - Trace: ' . $e->getTraceAsString());
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
     public function listPembelian()
     {
         $id_toko = $this->request->getGet('id_toko');
@@ -221,8 +412,6 @@ class PembelianController extends ResourceController
             200
         );
     }
-
-
     public function getPembelianById($id)
     {
         $pembelian = $this->db->table('pembelian')
