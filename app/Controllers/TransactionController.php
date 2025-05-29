@@ -627,7 +627,7 @@ class TransactionController extends BaseController
                 SUM(sales_product.actual_total) - SUM(sales_product.total_modal) AS total_profit
             ')
                 ->join('sales_product', 'sales_product.id_transaction = transaction.id', 'inner')
-                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'REFUNDED'])
+                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY','PARTIALLY_PAID'])
                 ->where('transaction.date_time >=', $date_start)
                 ->where('transaction.date_time <=', $date_end);
 
@@ -1213,7 +1213,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => "Update transaksi {$transactionId} menjadi DP sebesar {$amount} menggunakan metode {$data->metode_pembayaran}",
+                'description' => "Update transaksi {$transactionId} menjadi DP sebesar {$amount} menggunakan metode { (string) $data->metode_pembayaran}",
             ]);
             return $this->jsonResponse->oneResp('Transaction status updated to partially paid', null, 200);
         }
@@ -1273,7 +1273,7 @@ class TransactionController extends BaseController
         ];
         // Insert pemasukan produk
         $cashflowIdProduk = $this->CashflowModel->insert([
-            'debit' => $newTotalPembayaran,
+            'debit' => $newTotalPayment,
             'credit' => 0,
             'noted' => "Pembayaran Produk Transaksi " . $transaction['invoice'],
             'type' => 'Transaction',
@@ -1908,7 +1908,8 @@ class TransactionController extends BaseController
             ->join('transaction t', 'sp.id_transaction = t.id', 'left')
             ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
-            ->join('seri s', 'p.id_seri_barang = s.id', 'left');
+            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY','PARTIALLY_PAID']);
 
         // Filter toko
         if (!empty($role) && !$id_toko) {

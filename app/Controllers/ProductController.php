@@ -134,7 +134,7 @@ class ProductController extends ResourceController
 
                     // Nama acak untuk WebP
                     $webpName = bin2hex(random_bytes(10)) . '.webp';
-                    $webpPath = ROOTPATH . 'public/uploads/images/' . $webpName;
+                    $webpPath = ROOTPATH . 'public/hope/images/' . $webpName;
 
                     // Konversi dari temporary file langsung ke WebP
                     switch ($mimeType) {
