@@ -67,7 +67,7 @@ class PembelianController extends ResourceController
                 $hargaSatuanItem = floatval($item['harga_satuan']);
                 $ongkirItem = isset($item['ongkir']) ? floatval($item['ongkir']) : 0;
                 $jumlahItem = intval($item['jumlah']);
-                $totalBelanjaDariDetail += ($hargaSatuanItem * $jumlahItem) + $ongkirItem;
+                $totalBelanjaDariDetail += ($hargaSatuanItem + $ongkirItem) * $jumlahItem;
             }
 
             $totalBiayaLain = 0;
@@ -111,7 +111,7 @@ class PembelianController extends ResourceController
                     'jumlah' => $jumlahItem,
                     'harga_satuan' => $hargaSatuanItem,
                     'ongkir' => $ongkirItem,
-                    'total_harga' => ($hargaSatuanItem * $jumlahItem) + $ongkirItem,
+                    'total_harga' => ($hargaSatuanItem + $ongkirItem) * $jumlahItem,
                 ];
                 if (!$this->pembelianDetailModel->insert($detailData)) {
                     $errors = $this->pembelianDetailModel->errors();

@@ -569,10 +569,12 @@ class ProductController extends ResourceController
             // Apply filters
             if (!empty($namaProduct)) {
                 $builder->groupStart()
-                    ->like("CONCAT(product.nama_barang, ' ', model_barang.nama_model, ' ', seri.seri)", $namaProduct)
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
+
+
             if (!empty($seri)) {
                 $builder->like('product.id_seri_barang', $seri, 'both');
             }
@@ -680,6 +682,7 @@ class ProductController extends ResourceController
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $id_toko = $this->request->getGet('id_toko') ?? '';
+            $is_pricelist = $this->request->getGet('is_pricelist') ?? false;
             $customer_id = $this->request->getGet('customer_id') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
@@ -748,15 +751,17 @@ class ProductController extends ResourceController
                 $builder->whereNotIn('product.id_barang', $kode_exclude);
             }
 
-            // Fetch product stock data with pagination
-            $products = $builder
-                ->groupStart()
-                ->where('stock.stock >', 0)
-                ->orWhere('stock.dropship >', 0)
-                ->groupEnd()
-                ->orderBy($sortBy, $sortMethod)
-                ->limit($limit, $offset);
 
+            if ($is_pricelist) {
+                $products = $builder
+                    ->orderBy($sortBy, $sortMethod)
+                    ->limit($limit, $offset);
+            } else {
+                $products = $builder
+                    ->where('stock.stock >', 0)
+                    ->orderBy($sortBy, $sortMethod)
+                    ->limit($limit, $offset);
+            }
             // Count total data
             $total_data = $builder->countAllResults(false);
             $total_page = ceil($total_data / $limit);
