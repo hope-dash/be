@@ -426,13 +426,21 @@ class TransactionController extends BaseController
             $builder->where('t.id_toko', $id_toko);
         }
 
+
         if ($date_start && $date_end) {
-            $builder->where("t.date_time BETWEEN '{$date_start}' AND '{$date_end}'");
+            $start_val = $date_start . ' 23:59:59'; // Sesuai logika asli Anda
+            $end_val = $date_end . ' 23:59:59';
+            $builder->where("t.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+
         } elseif ($date_start) {
-            $builder->where("t.date_time >= '{$date_start}'");
+            $start_val = $date_start . ' 23:59:59'; // Sesuai logika asli Anda
+            $builder->where("t.date_time >= '{$start_val}'");
+
         } elseif ($date_end) {
-            $builder->where("t.date_time <= '{$date_end}'");
+            $end_val = $date_end . ' 23:59:59';
+            $builder->where("t.date_time <= '{$end_val}'");
         }
+
 
         if (
             isset($total_min) && $total_min !== '' && is_numeric($total_min) &&
@@ -627,7 +635,7 @@ class TransactionController extends BaseController
                 SUM(sales_product.actual_total) - SUM(sales_product.total_modal) AS total_profit
             ')
                 ->join('sales_product', 'sales_product.id_transaction = transaction.id', 'inner')
-                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY','PARTIALLY_PAID'])
+                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
                 ->where('transaction.date_time >=', $date_start)
                 ->where('transaction.date_time <=', $date_end);
 
@@ -1909,7 +1917,7 @@ class TransactionController extends BaseController
             ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
             ->join('seri s', 'p.id_seri_barang = s.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY','PARTIALLY_PAID']);
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
 
         // Filter toko
         if (!empty($role) && !$id_toko) {
