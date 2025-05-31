@@ -957,7 +957,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-    public function topSoldProducts($limit = 5)
+    public function topSoldProducts()
     {
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
@@ -965,12 +965,14 @@ class TransactionController extends BaseController
         $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
         $page = max((int) ($this->request->getGet('page') ?: 1), 1);
         $offset = ($page - 1) * $limit;
+        $namaProduct = $this->request->getGet('namaProduct') ?? '';
 
         try {
             $query = $this->db->table('sales_product')
                 ->select('sales_product.kode_barang, product.nama_barang, model_barang.nama_model, 
                     COALESCE(seri.seri, "Tidak Ada Seri") AS seri, 
                     SUM(sales_product.jumlah) AS total_sold,  
+                    CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang,
                     (
                         SELECT COALESCE(SUM(stock.stock), 0) 
                         FROM stock 
@@ -984,6 +986,13 @@ class TransactionController extends BaseController
                 ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
                 ->groupBy(['sales_product.kode_barang', 'product.nama_barang', 'model_barang.nama_model', 'seri.seri'])
                 ->orderBy('total_sold', 'DESC');
+
+            if (!empty($namaProduct)) {
+                $query->groupStart()
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                    ->groupEnd();
+            }
 
             if ($date_start && $date_end) {
                 $start_val = $date_start . ' 00:00:00';
