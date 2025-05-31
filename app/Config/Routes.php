@@ -21,6 +21,7 @@ $routes->get('api/dropdown/suplier', 'SuplierController::dropdownSuplier');
 $routes->get('api/detail/toko/(:num)', 'TokoController::getDetailById/$1');
 $routes->get('api/dropdown/seri', 'BarangController::dropdownSeri');
 $routes->get('api/dropdown/seri-by-product', 'ProductController::getListSeribySearchProduct');
+$routes->get('api/product/(:num)', 'ProductController::getDetailById/$1');
 
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
@@ -66,7 +67,6 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //products
     $routes->post('product', 'ProductController::createProduct');
     $routes->post('product/image', 'ProductController::uploadImages');
-    $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
     $routes->get('product', 'ProductController::getAllProduct');
     $routes->post('product-stock', 'ProductController::getProductStock');
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
@@ -100,7 +100,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
 
     //reporting
     $routes->get('reporting/revenue-profit', 'TransactionController::calculateRevenueAndProfit');
-    $routes->get('reporting/debit-credit', 'TransactionController::calculateDebitAndCredit');
+    $routes->get('reporting/debit-credit', 'CashflowController::calculateDebitAndCredit');
     $routes->get('reporting/alokasi-pengeluaran', 'TransactionController::calculateExpenseAllocation');
     $routes->get('reporting/top-customers', 'TransactionController::topCustomers');
     $routes->get('reporting/top-products', 'TransactionController::topSoldProducts');

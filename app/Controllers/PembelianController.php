@@ -393,8 +393,19 @@ class PembelianController extends ResourceController
         }
 
         if ($date_start && $date_end) {
-            $builder->where("DATE(pembelian.created_at) BETWEEN '{$date_start}' AND '{$date_end}'");
+            $start_val = $date_start . ' 00:00:00';
+            $end_val = $date_end . ' 23:59:59';
+            $builder->where("pembelian.created_at BETWEEN '{$start_val}' AND '{$end_val}'");
+
+        } elseif ($date_start) {
+            $start_val = $date_start . ' 00:00:00';
+            $builder->where("pembelian.created_at >= '{$start_val}'");
+
+        } elseif ($date_end) {
+            $end_val = $date_end . ' 23:59:59';
+            $builder->where("pembelian.created_at <= '{$end_val}'");
         }
+
 
         // Clone for total count
         $totalBuilder = clone $builder;

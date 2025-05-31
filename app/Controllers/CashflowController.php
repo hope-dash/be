@@ -78,75 +78,155 @@ class CashflowController extends ResourceController
         return $this->jsonResponse->oneResp('Cashflow updated successfully', ['id' => $id], 200);
     }
 
-    public function listCashflow()
+    protected function buildCashflowFilterQuery(array $params, bool $withJoinToko = false)
     {
-        $sortBy = $this->request->getGet('sortBy') ?? 'id';
-        $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
-        $limit = (int) $this->request->getGet('limit') ?: 10;
-        $page = (int) $this->request->getGet('page') ?: 1;
+        $builder = $this->model->builder(); // Pastikan dapat Query Builder
 
-        $status = $this->request->getGet('status') ?: '';
-        $type = $this->request->getGet('type') ?: '';
-        $transaction = $this->request->getGet('transaction') ?: '';
-        $id_toko = $this->request->getGet('id_toko') ?: '';
-        $start_date = $this->request->getGet('date_start') ?: ''; // Tambah start_date
-        $end_date = $this->request->getGet('date_end') ?: ''; // Tambah end_date
-        $role = $this->request->getGet('role');
+        if ($withJoinToko) {
+            $builder->join('toko', 'toko.id = cashflow.id_toko', 'left');
+        }
 
-        $offset = ($page - 1) * $limit;
-        $builder = $this->model;
-        $builder = $builder->join('toko', 'toko.id = cashflow.id_toko', 'left')
-            ->select('cashflow.*, toko.toko_name')
-            ->orderBy('cashflow.date_time', 'DESC');
-
-        if (!empty($transaction)) {
-            if ($transaction == "credit") {
-                $builder = $builder->where('credit !=', 0);
-            } else if ($transaction == "debit") {
-                $builder = $builder->where('debit !=', 0);
+        // Filter transaction
+        if (!empty($params['transaction'])) {
+            if ($params['transaction'] === 'credit') {
+                $builder->where('credit !=', 0);
+            } elseif ($params['transaction'] === 'debit') {
+                $builder->where('debit !=', 0);
             }
         }
 
-        if (is_string($role)) {
-            $role = array_map('intval', explode(',', $role));
+        // Filter role (array of toko id)
+        if (!empty($params['role']) && empty($params['id_toko'])) {
+            $builder->whereIn('cashflow.id_toko', $params['role']);
         }
 
-        if (!empty($role) && !$id_toko) {
-            $builder->whereIn('id_toko', $role);
+        // Filter type
+        if (!empty($params['type'])) {
+            $types = array_map('trim', explode(',', $params['type']));
+            $builder->whereIn('type', $types);
         }
 
-        if (!empty($type)) {
-            $types = explode(',', $type);
-            $builder = $builder->whereIn('type', array_map('trim', $types));
-        }
-        if (!empty($status)) {
-            $builder = $builder->like('status', (string) $status, 'both');
+        // Filter status
+        if (!empty($params['status'])) {
+            $builder->like('status', $params['status'], 'both');
         }
 
-        if (!empty($id_toko)) {
-            $builder = $builder->like('id_toko', (string) $id_toko, 'both');
+        // Filter id_toko
+        if (!empty($params['id_toko'])) {
+            $builder->where('cashflow.id_toko', $params['id_toko']);
         }
 
-        if (!empty($start_date) && !empty($end_date)) {
-            $builder = $builder->where('date_time >=', $start_date)
-                ->where('date_time <=', $end_date);
-        } elseif (!empty($start_date)) {
-            $builder = $builder->where('date_time >=', $start_date);
-        } elseif (!empty($end_date)) {
-            $builder = $builder->where('date_time <=', $end_date);
+        // Filter date range
+        if (!empty($params['date_start']) && !empty($params['date_end'])) {
+            $start_val = $params['date_start'] . ' 00:00:00';
+            $end_val = $params['date_end'] . ' 23:59:59';
+            $builder->where("cashflow.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+        } elseif (!empty($params['date_start'])) {
+            $start_val = $params['date_start'] . ' 00:00:00';
+            $builder->where('cashflow.date_time >=', $start_val);
+        } elseif (!empty($params['date_end'])) {
+            $end_val = $params['date_end'] . ' 23:59:59';
+            $builder->where('cashflow.date_time <=', $end_val);
         }
 
-        // Perbaiki `countAllResults(false)`
-        $total_data = $builder->countAllResults(false);
-        $total_page = ceil($total_data / $limit);
+        return $builder;
+    }
 
-        $result = $builder->orderBy($sortBy, $sortMethod)
+
+    public function listCashflow()
+    {
+        $sortBy = $this->request->getGet('sortBy') ?? 'id';
+        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? 'asc');
+        $limit = (int) ($this->request->getGet('limit') ?: 10);
+        $page = (int) ($this->request->getGet('page') ?: 1);
+
+        $params = [
+            'transaction' => $this->request->getGet('transaction') ?? '',
+            'type' => $this->request->getGet('type') ?? '',
+            'status' => $this->request->getGet('status') ?? '',
+            'id_toko' => $this->request->getGet('id_toko') ?? '',
+            'date_start' => $this->request->getGet('date_start') ?? '',
+            'date_end' => $this->request->getGet('date_end') ?? '',
+            'role' => is_string($this->request->getGet('role'))
+                ? array_map('intval', explode(',', $this->request->getGet('role')))
+                : []
+        ];
+
+        $offset = ($page - 1) * $limit;
+
+        // Buat query builder dengan join toko
+        $builder = $this->buildCashflowFilterQuery($params, true);
+
+        // Clone builder untuk count dan sum (tidak perlu join toko, bisa dioptimalkan)
+        $builderCount = clone $builder;
+        $builderSum = clone $builder;
+
+        // Hitung total data (countAllResults(false) tanpa limit dan offset)
+        $total_data = $builderCount->countAllResults(false);
+        $total_page = ($limit > 0) ? ceil($total_data / $limit) : 1;
+
+        // Ambil data result dengan limit dan offset
+        $result = $builder
+            ->select('cashflow.*, toko.toko_name')
+            ->orderBy($sortBy, $sortMethod)
             ->limit($limit, $offset)
             ->get()
             ->getResult();
 
-        return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+        // Hitung sum debit dan credit (tanpa join toko)
+        $builderSumNoJoin = $this->buildCashflowFilterQuery($params, false);
+        $sum = $builderSumNoJoin
+            ->select('SUM(debit) AS debit, SUM(credit) AS credit')
+            ->get()
+            ->getRow();
 
+        return $this->jsonResponse->multiResp(
+            '',
+            ['sum' => $sum, 'result' => $result],
+            $total_data,
+            $total_page,
+            $page,
+            $limit,
+            200
+        );
     }
+
+    public function calculateDebitAndCredit()
+    {
+        $params = [
+            'date_start' => $this->request->getGet('date_start'),
+            'date_end' => $this->request->getGet('date_end'),
+            'id_toko' => $this->request->getGet('id_toko'),
+            'type' => $this->request->getGet('type'),
+            'transaction' => $this->request->getGet('transaction') ?? '',
+            'role' => $this->request->getGet('role') ? array_map('intval', explode(',', $this->request->getGet('role'))) : [],
+        ];
+
+        try {
+            // Ambil builder tanpa join toko karena tidak perlu untuk sum
+            $builder = $this->buildCashflowFilterQuery($params, false);
+
+            $result = $builder
+                ->select('SUM(debit) AS total_debit, SUM(credit) AS total_credit')
+                ->get()
+                ->getRow();
+
+            if ($result) {
+                return $this->jsonResponse->oneResp("Data berhasil diambil", [
+                    'total_debit' => $result->total_debit,
+                    'total_credit' => $result->total_credit
+                ], 200);
+            } else {
+                return $this->jsonResponse->error("Tidak ada data untuk kriteria ini", 404);
+            }
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+
+
+
+
 
 }

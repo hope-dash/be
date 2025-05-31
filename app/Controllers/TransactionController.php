@@ -13,6 +13,7 @@ use App\Models\ProductModel;
 use App\Models\CashflowModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTime;
+use PhpParser\Node\Scalar\Float_;
 
 class TransactionController extends BaseController
 {
@@ -428,12 +429,12 @@ class TransactionController extends BaseController
 
 
         if ($date_start && $date_end) {
-            $start_val = $date_start . ' 23:59:59'; // Sesuai logika asli Anda
+            $start_val = $date_start . ' 00:00:00';
             $end_val = $date_end . ' 23:59:59';
             $builder->where("t.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
 
         } elseif ($date_start) {
-            $start_val = $date_start . ' 23:59:59'; // Sesuai logika asli Anda
+            $start_val = $date_start . ' 00:00:00';
             $builder->where("t.date_time >= '{$start_val}'");
 
         } elseif ($date_end) {
@@ -627,107 +628,213 @@ class TransactionController extends BaseController
         $role = $this->request->getGet('role');
 
         try {
-            // Start building the query
-            $query = $this->db->table('transaction')
-                ->select('
-                SUM(sales_product.actual_total) AS total_revenue,
-                SUM(sales_product.total_modal) AS total_modal,
-                SUM(sales_product.actual_total) - SUM(sales_product.total_modal) AS total_profit
-            ')
-                ->join('sales_product', 'sales_product.id_transaction = transaction.id', 'inner')
-                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
-                ->where('transaction.date_time >=', $date_start)
-                ->where('transaction.date_time <=', $date_end);
-
-
+            $start_val = $date_start ? $date_start . ' 00:00:00' : null;
+            $end_val = $date_end ? $date_end . ' 23:59:59' : null;
             if (is_string($role)) {
                 $role = array_map('intval', explode(',', $role));
             }
 
-            if (!empty($role) && !$id_toko) {
-                $query->whereIn('transaction.id_toko', $role);
-            }
+            $mainResult = $this->getRevenueProfitData($start_val, $end_val, $id_toko, $role);
+            $gantungResult = $this->getTransactionGantung($start_val, $end_val, $id_toko, $role);
+            $waitingResult = $this->getWaitingPayment($start_val, $end_val, $id_toko, $role);
 
-            // Add store filter if provided
-            if ($id_toko) {
-                $query->where('transaction.id_toko', $id_toko);
-            }
+            $transaksi_gantung = floatval($gantungResult->transaction_gantung ?? 0);
 
-            // Execute the query
-            $result = $query->get()->getRow();
+            $data = [
+                'total_revenue' => ($mainResult->total_revenue ?? 0) - $transaksi_gantung,
+                'total_modal' => floatval($mainResult->total_modal ?? 0),
+                'total_profit' => ($mainResult->total_profit ?? 0) - $transaksi_gantung,
+                'transaction_gantung' => $transaksi_gantung,
+                'transaksi_waiting_payment' => floatval($waitingResult->transaksi_waiting_payment ?? 0)
+            ];
 
-            // Check if result is found
-            if ($result) {
-
-                return $this->jsonResponse->oneResp("Data berhasil diambil", $result, 200);
-            } else {
-                return $this->jsonResponse->error("Tidak ada data untuk rentang tanggal ini", 404);
-            }
+            return $this->jsonResponse->oneResp("Data berhasil diambil", $data, 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-    public function calculateDebitAndCredit()
+    private function getRevenueProfitData($start_val, $end_val, $id_toko, $role)
     {
-        $date_start = $this->request->getGet('date_start');
-        $date_end = $this->request->getGet('date_end');
-        $id_toko = $this->request->getGet('id_toko');
-        $type = $this->request->getGet('type');
-        $transaction = $this->request->getGet('transaction') ?: '';
-        $role = $this->request->getGet('role');
+        $query = $this->db->table('transaction')
+            ->select('
+            SUM(sales_product.actual_total) AS total_revenue,
+            SUM(sales_product.total_modal) AS total_modal,
+            SUM(sales_product.actual_total) - SUM(sales_product.total_modal) AS total_profit
+        ')
+            ->join('sales_product', 'sales_product.id_transaction = transaction.id', 'inner')
+            ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
 
-        try {
-            // Query untuk menghitung total debit dan kredit
-            $query = $this->db->table('cashflow')
-                ->select('SUM(debit) AS total_debit, SUM(credit) AS total_credit');
-
-            // Filter berdasarkan tanggal jika diberikan
-            if (!empty($date_start) && !empty($date_end)) {
-                $query->where('date_time >=', $date_start)
-                    ->where('date_time <=', $date_end);
-            }
-
-            if (is_string($role)) {
-                $role = array_map('intval', explode(',', $role));
-            }
-
-            if (!empty($role) && !$id_toko) {
-                $query->whereIn('id_toko', $role);
-            }
-
-            if ($id_toko) {
-                $query->where('id_toko', $id_toko);
-            }
-
-            if (!empty($type)) {
-                $types = explode(',', $type);
-                $query->whereIn('type', array_map('trim', $types));
-            }
-
-            if (!empty($transaction)) {
-                if ($transaction == "credit") {
-                    $query->where('credit !=', 0);
-                } else if ($transaction == "debit") {
-                    $query->where('debit !=', 0);
-                }
-            }
-
-            $result = $query->get()->getRow();
-
-            if ($result) {
-                return $this->jsonResponse->oneResp("Data berhasil diambil", [
-                    'total_debit' => $result->total_debit,
-                    'total_credit' => $result->total_credit
-                ], 200);
-            } else {
-                return $this->jsonResponse->error("Tidak ada data untuk kriteria ini", 404);
-            }
-
-        } catch (\Exception $e) {
-            return $this->jsonResponse->error($e->getMessage(), 400);
+        if ($start_val && $end_val) {
+            $query->where("transaction.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+        } elseif ($start_val) {
+            $query->where("transaction.date_time >= '{$start_val}'");
+        } elseif ($end_val) {
+            $query->where("transaction.date_time <= '{$end_val}'");
         }
+
+        if (!empty($role) && !$id_toko) {
+            $query->whereIn('transaction.id_toko', $role);
+        }
+        if ($id_toko) {
+            $query->where('transaction.id_toko', $id_toko);
+        }
+
+        return $query->get()->getRow();
     }
+    private function getTransactionGantung($start_val, $end_val, $id_toko, $role)
+    {
+        $query = $this->db->table('transaction')
+            ->select('SUM(amount) - SUM(total_payment) AS transaction_gantung')
+            ->where('status', 'PARTIALLY_PAID');
+
+        if ($start_val && $end_val) {
+            $query->where("date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+        } elseif ($start_val) {
+            $query->where("date_time >= '{$start_val}'");
+        } elseif ($end_val) {
+            $query->where("date_time <= '{$end_val}'");
+        }
+
+        if (!empty($role) && !$id_toko) {
+            $query->whereIn('id_toko', $role);
+        }
+        if ($id_toko) {
+            $query->where('id_toko', $id_toko);
+        }
+
+        return $query->get()->getRow();
+    }
+    private function getWaitingPayment($start_val, $end_val, $id_toko, $role)
+    {
+        $query = $this->db->table('transaction')
+            ->select('SUM(amount) AS transaksi_waiting_payment')
+            ->where('status', 'WAITING_PAYMENT');
+
+        if ($start_val && $end_val) {
+            $query->where("date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+        } elseif ($start_val) {
+            $query->where("date_time >= '{$start_val}'");
+        } elseif ($end_val) {
+            $query->where("date_time <= '{$end_val}'");
+        }
+
+        if (!empty($role) && !$id_toko) {
+            $query->whereIn('id_toko', $role);
+        }
+        if ($id_toko) {
+            $query->where('id_toko', $id_toko);
+        }
+
+        return $query->get()->getRow();
+    }
+    public function listSalesProductWithTransaction()
+    {
+        $sortBy = $this->request->getGet('sortBy') ?? 'sp.id';
+        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? 'asc');
+        $limit = (int) $this->request->getGet('limit') ?: 10;
+        $page = (int) $this->request->getGet('page') ?: 1;
+        $offset = ($page - 1) * $limit;
+
+        $id_toko = $this->request->getGet('id_toko');
+        $start_date = $this->request->getGet('date_start');
+        $end_date = $this->request->getGet('date_end');
+        $role = $this->request->getGet('role');
+        $search = $this->request->getGet('search');
+
+        $start_val = $start_date ? $start_date . ' 00:00:00' : null;
+        $end_val = $end_date ? $end_date . ' 23:59:59' : null;
+
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
+        }
+
+        // Builder utama untuk list dan sum
+        $baseBuilder = $this->db->table('sales_product sp')
+            ->join('transaction t', 'sp.id_transaction = t.id', 'left')
+            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
+
+        // Filter toko
+        if (!empty($role) && !$id_toko) {
+            $baseBuilder->whereIn('t.id_toko', $role);
+        }
+
+        if (!empty($id_toko)) {
+            $baseBuilder->like('t.id_toko', (string) $id_toko, 'both');
+        }
+
+        // Filter tanggal
+        if (!empty($start_date)) {
+            $baseBuilder->where('t.date_time >=', $start_date);
+        }
+
+        if (!empty($end_date)) {
+            $baseBuilder->where('t.date_time <=', $end_date);
+        }
+
+        // Filter search
+        if ($search) {
+            $baseBuilder->groupStart()
+                ->like('t.invoice', $search)
+                ->orLike('p.nama_barang', $search)
+                ->orLike('mb.nama_model', $search)
+                ->orLike('s.seri', $search)
+                ->groupEnd();
+        }
+
+        // Count total rows
+        $total_data = $baseBuilder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        // Ambil paginated result
+        $result = $baseBuilder->select("
+            sp.*,
+            t.invoice,
+            t.date_time,
+            t.status,
+            t.id_toko,
+            p.nama_barang,
+            mb.nama_model,
+            s.seri,
+            CONCAT(
+                COALESCE(p.nama_barang, ''), ' ',
+                COALESCE(mb.nama_model, ''), ' ',
+                COALESCE(s.seri, '')
+            ) AS nama_lengkap_barang
+        ")
+            ->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+        $mainResult = $this->getRevenueProfitData($start_val, $end_val, $id_toko, $role);
+        $gantungResult = $this->getTransactionGantung($start_val, $end_val, $id_toko, $role);
+        $waitingResult = $this->getWaitingPayment($start_val, $end_val, $id_toko, $role);
+        $transaksi_gantung = floatval($gantungResult->transaction_gantung ?? 0);
+
+        return $this->jsonResponse->multiResp(
+            '',
+            [
+                'sum' => [
+                    'total_revenue' => ($mainResult->total_revenue ?? 0) - $transaksi_gantung,
+                    'total_modal' => floatval($mainResult->total_modal ?? 0),
+                    'total_profit' => ($mainResult->total_profit ?? 0) - $transaksi_gantung,
+                    'transaction_gantung' => $transaksi_gantung,
+                    'transaksi_waiting_payment' => floatval($waitingResult->transaksi_waiting_payment ?? 0)
+                ],
+                'result' => $result
+            ],
+            $total_data,
+            $total_page,
+            $page,
+            $limit,
+            200
+        );
+    }
+
     public function calculateExpenseAllocation()
     {
         $date_start = $this->request->getGet('date_start');
@@ -739,10 +846,22 @@ class TransactionController extends BaseController
         try {
             $query = $this->db->table('cashflow')
                 ->select('type, SUM(credit) AS total_credit')
-                ->where('date_time >=', $date_start)
-                ->where('date_time <=', $date_end)
                 ->where('credit >', 0)
                 ->groupBy('type');
+
+            if ($date_start && $date_end) {
+                $start_val = $date_start . ' 00:00:00';
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+
+            } elseif ($date_start) {
+                $start_val = $date_start . ' 00:00:00';
+                $query->where("date_time >= '{$start_val}'");
+
+            } elseif ($date_end) {
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("date_time <= '{$end_val}'");
+            }
 
             if (is_string($role)) {
                 $role = array_map('intval', explode(',', $role));
@@ -793,12 +912,24 @@ class TransactionController extends BaseController
                 ->select('c.id AS customer_id, c.nama_customer, COUNT(DISTINCT t.id) AS total_transactions, SUM(t.amount) AS total_amount_spent')
                 ->join('transaction_meta tm', 't.id = tm.transaction_id AND tm.key = "customer_id" AND tm.value IS NOT NULL AND tm.value != ""', 'inner')
                 ->join('customer c', 'c.id = tm.value', 'left')
-                ->where('t.status', 'SUCCESS')
-                ->where('t.date_time >=', $date_start)
-                ->where('t.date_time <=', $date_end)
+                ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
                 ->groupBy('c.id, c.nama_customer')
                 ->orderBy('total_transactions', 'DESC')
                 ->limit($limit);
+
+            if ($date_start && $date_end) {
+                $start_val = $date_start . ' 00:00:00';
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("t.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+
+            } elseif ($date_start) {
+                $start_val = $date_start . ' 00:00:00';
+                $query->where("t.date_time >= '{$start_val}'");
+
+            } elseif ($date_end) {
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("t.date_time <= '{$end_val}'");
+            }
 
             if (is_string($role)) {
                 $role = array_map('intval', explode(',', $role));
@@ -831,8 +962,10 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $role = $this->request->getGet('role');
+        $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+        $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+        $offset = ($page - 1) * $limit;
 
-        // Ambil ID toko dari header 'role' (misalnya: 0,1,2)
         try {
             $query = $this->db->table('sales_product')
                 ->select('sales_product.kode_barang, product.nama_barang, model_barang.nama_model, 
@@ -848,13 +981,23 @@ class TransactionController extends BaseController
                 ->join('product', 'sales_product.kode_barang = product.id_barang')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id')
                 ->join('seri', 'product.id_seri_barang = seri.id', 'left')
-                ->where('transaction.date_time >=', $date_start)
-                ->where('transaction.date_time <=', $date_end)
-                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'RETUR', 'PARTIALY_PAID'])
+                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
                 ->groupBy(['sales_product.kode_barang', 'product.nama_barang', 'model_barang.nama_model', 'seri.seri'])
-                ->orderBy('total_sold', 'DESC')
-                ->limit($limit);
+                ->orderBy('total_sold', 'DESC');
 
+            if ($date_start && $date_end) {
+                $start_val = $date_start . ' 00:00:00';
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("transaction.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+
+            } elseif ($date_start) {
+                $start_val = $date_start . ' 00:00:00';
+                $query->where("transaction.date_time >= '{$start_val}'");
+
+            } elseif ($date_end) {
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("transaction.date_time <= '{$end_val}'");
+            }
 
             if (is_string($role)) {
                 $role = array_map('intval', explode(',', $role));
@@ -864,10 +1007,23 @@ class TransactionController extends BaseController
                 $query->whereIn('transaction.id_toko', $role);
             }
 
-            $results = $query->get()->getResult();
+            $total_data = $query->countAllResults(false); // Hitung total data
+            $query->limit($limit, $offset);
 
-            if ($results) {
-                return $this->jsonResponse->oneResp("Data berhasil diambil", $results, 200);
+            $result = $query->get()->getResultArray();
+
+            $total_page = ceil($total_data / $limit);
+
+            if ($result) {
+                return $this->jsonResponse->multiResp(
+                    'Success',
+                    $result,
+                    $total_data,
+                    $total_page,
+                    $page,
+                    $limit,
+                    200
+                );
             } else {
                 return $this->jsonResponse->error("Tidak ada data untuk kriteria ini", 404);
             }
@@ -888,10 +1044,22 @@ class TransactionController extends BaseController
                 ->select("DATE(date_time) AS tanggal, 
                       COUNT(id) AS sales, 
                       SUM(CASE WHEN status IN ('SUCCESS', 'RETUR', 'PAID') THEN total_payment ELSE 0 END) AS revenue")
-                ->where('date_time >=', $date_start)
-                ->where('date_time <=', $date_end)
                 ->groupBy('tanggal')
                 ->orderBy('tanggal', 'ASC');
+
+            if ($date_start && $date_end) {
+                $start_val = $date_start . ' 00:00:00';
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+
+            } elseif ($date_start) {
+                $start_val = $date_start . ' 00:00:00';
+                $query->where("date_time >= '{$start_val}'");
+
+            } elseif ($date_end) {
+                $end_val = $date_end . ' 23:59:59';
+                $query->where("date_time <= '{$end_val}'");
+            }
 
 
             if (is_string($role)) {
@@ -938,6 +1106,9 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
+
+
     public function updateTransactionStatusToRefunded($transactionId)
     {
         $token = $this->request->user;
@@ -1892,109 +2063,6 @@ class TransactionController extends BaseController
             'new_status' => $newStatus
         ], 200);
     }
-
-    public function listSalesProductWithTransaction()
-    {
-        $sortBy = $this->request->getGet('sortBy') ?? 'sp.id';
-        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? 'asc');
-        $limit = (int) $this->request->getGet('limit') ?: 10;
-        $page = (int) $this->request->getGet('page') ?: 1;
-        $offset = ($page - 1) * $limit;
-
-        $id_toko = $this->request->getGet('id_toko');
-        $start_date = $this->request->getGet('date_start');
-        $end_date = $this->request->getGet('date_end');
-        $role = $this->request->getGet('role');
-        $search = $this->request->getGet('search');
-
-        if (is_string($role)) {
-            $role = array_map('intval', explode(',', $role));
-        }
-
-        // Builder utama untuk list dan sum
-        $baseBuilder = $this->db->table('sales_product sp')
-            ->join('transaction t', 'sp.id_transaction = t.id', 'left')
-            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
-            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
-            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
-
-        // Filter toko
-        if (!empty($role) && !$id_toko) {
-            $baseBuilder->whereIn('t.id_toko', $role);
-        }
-
-        if (!empty($id_toko)) {
-            $baseBuilder->like('t.id_toko', (string) $id_toko, 'both');
-        }
-
-        // Filter tanggal
-        if (!empty($start_date)) {
-            $baseBuilder->where('t.date_time >=', $start_date);
-        }
-
-        if (!empty($end_date)) {
-            $baseBuilder->where('t.date_time <=', $end_date);
-        }
-
-        // Filter search
-        if ($search) {
-            $baseBuilder->groupStart()
-                ->like('t.invoice', $search)
-                ->orLike('p.nama_barang', $search)
-                ->orLike('mb.nama_model', $search)
-                ->orLike('s.seri', $search)
-                ->groupEnd();
-        }
-
-        // Clone base builder untuk hitung total & sum
-        $builder = clone $baseBuilder;
-        $sumBuilder = clone $baseBuilder;
-
-        // Count total rows
-        $total_data = $builder->countAllResults(false);
-        $total_page = ceil($total_data / $limit);
-
-        // Ambil paginated result
-        $result = $builder->select("
-            sp.*,
-            t.invoice,
-            t.date_time,
-            t.status,
-            t.id_toko,
-            p.nama_barang,
-            mb.nama_model,
-            s.seri,
-            CONCAT(
-                COALESCE(p.nama_barang, ''), ' ',
-                COALESCE(mb.nama_model, ''), ' ',
-                COALESCE(s.seri, '')
-            ) AS nama_lengkap_barang
-        ")
-            ->orderBy($sortBy, $sortMethod)
-            ->limit($limit, $offset)
-            ->get()
-            ->getResult();
-
-        // Ambil SUM
-        $sum = $sumBuilder->select('
-            SUM(sp.modal_system) AS total_modal_system,
-            SUM(sp.actual_total) AS total_actual_total
-        ')
-            ->get()
-            ->getRow();
-
-        return $this->jsonResponse->multiResp(
-            '',
-            ['sum' => $sum, 'result' => $result],
-            $total_data,
-            $total_page,
-            $page,
-            $limit,
-            200
-        );
-    }
-
     private function generateTransactionLog(int $userId, array $oldTransaction, array $newTransaction, array $oldItems, array $newItems): string
     {
         $logDescription = "Transaksi diperbarui oleh user {$userId}. ";
