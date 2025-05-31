@@ -176,13 +176,19 @@ class CashflowController extends ResourceController
         // Hitung sum debit dan credit (tanpa join toko)
         $builderSumNoJoin = $this->buildCashflowFilterQuery($params, false);
         $sum = $builderSumNoJoin
-            ->select('SUM(debit) AS debit, SUM(credit) AS credit')
+            ->select('SUM(debit) AS total_debit, SUM(credit) AS total_credit')
             ->get()
             ->getRow();
 
         return $this->jsonResponse->multiResp(
             '',
-            ['sum' => $sum, 'result' => $result],
+            [
+                'sum' => [
+                    'total_debit' => floatval($sum->total_debit),
+                    'total_credit' => floatval($sum->total_credit)
+                ],
+                'result' => $result
+            ],
             $total_data,
             $total_page,
             $page,
@@ -213,8 +219,8 @@ class CashflowController extends ResourceController
 
             if ($result) {
                 return $this->jsonResponse->oneResp("Data berhasil diambil", [
-                    'total_debit' => $result->total_debit,
-                    'total_credit' => $result->total_credit
+                    'total_debit' => floatval($result->total_debit),
+                    'total_credit' => floatval($result->total_credit)
                 ], 200);
             } else {
                 return $this->jsonResponse->error("Tidak ada data untuk kriteria ini", 404);

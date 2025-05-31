@@ -1043,7 +1043,7 @@ class TransactionController extends BaseController
             $query = $this->db->table('transaction')
                 ->select("DATE(date_time) AS tanggal, 
                       COUNT(id) AS sales, 
-                      SUM(CASE WHEN status IN ('SUCCESS', 'RETUR', 'PAID') THEN total_payment ELSE 0 END) AS revenue")
+                      SUM(CASE WHEN status IN ('SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID') THEN amount ELSE 0 END) AS revenue")
                 ->groupBy('tanggal')
                 ->orderBy('tanggal', 'ASC');
 
