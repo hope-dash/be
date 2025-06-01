@@ -641,9 +641,10 @@ class TransactionController extends BaseController
             $transaksi_gantung = floatval($gantungResult->transaction_gantung ?? 0);
 
             $data = [
-                'total_revenue' => ($mainResult->total_revenue ?? 0) - $transaksi_gantung,
+                'total_revenue' => floatval($mainResult->total_revenue ?? 0),
                 'total_modal' => floatval($mainResult->total_modal ?? 0),
-                'total_profit' => ($mainResult->total_profit ?? 0) - $transaksi_gantung,
+                'total_profit' => floatval($mainResult->total_profit ?? 0),
+                'total_beban' => floatval($mainResult->total_beban ?? 0),
                 'transaction_gantung' => $transaksi_gantung,
                 'transaksi_waiting_payment' => floatval($waitingResult->transaksi_waiting_payment ?? 0)
             ];
@@ -654,47 +655,128 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-    private function getRevenueProfitData($start_val, $end_val, $id_toko, $role)
+
+    public function getRevenueProfitData($start_val, $end_val, $id_toko = null, $role = null)
     {
-        $query = $this->db->table('transaction')
-            ->select('
-            SUM(sales_product.actual_total) AS total_revenue,
-            SUM(sales_product.total_modal) AS total_modal,
-            SUM(sales_product.actual_total) - SUM(sales_product.total_modal) AS total_profit
-        ')
-            ->join('sales_product', 'sales_product.id_transaction = transaction.id', 'inner')
-            ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
+        // Subquery untuk mengambil paid_at & partialy_paid_at terbaru per transaksi
+        $subPaid = "(SELECT transaction_id, MAX(value) as value FROM transaction_meta WHERE `key` = 'paid_at' GROUP BY transaction_id)";
+        $subPartial = "(SELECT transaction_id, MAX(value) as value FROM transaction_meta WHERE `key` = 'partialy_paid_at' GROUP BY transaction_id)";
+
+        // === 1. Revenue ===
+        $revenueQuery = $this->db->table('sales_product sp')
+            ->select('SUM(sp.actual_total) AS total_revenue')
+            ->join('transaction t', 't.id = sp.id_transaction')
+            ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
+            ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
 
         if ($start_val && $end_val) {
-            $query->where("transaction.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
+            $revenueQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
+            $revenueQuery->orWhere("DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
         } elseif ($start_val) {
-            $query->where("transaction.date_time >= '{$start_val}'");
+            $revenueQuery->where("DATE(tm_paid.value) >= '{$start_val}'", null, false);
+            $revenueQuery->orWhere("DATE(tm_partial.value) >= '{$start_val}'", null, false);
         } elseif ($end_val) {
-            $query->where("transaction.date_time <= '{$end_val}'");
+            $revenueQuery->where("DATE(tm_paid.value) <= '{$end_val}'", null, false);
+            $revenueQuery->orWhere("DATE(tm_partial.value) <= '{$end_val}'", null, false);
         }
 
-        if (!empty($role) && !$id_toko) {
-            $query->whereIn('transaction.id_toko', $role);
-        }
         if ($id_toko) {
-            $query->where('transaction.id_toko', $id_toko);
+            $revenueQuery->where('t.id_toko', $id_toko);
+        } elseif (!empty($role)) {
+            $revenueQuery->whereIn('t.id_toko', $role);
         }
 
-        return $query->get()->getRow();
+        $revenueResult = $revenueQuery->get()->getRow();
+        $total_revenue = $revenueResult->total_revenue ?? 0;
+
+        // === 2. Beban ===
+        $bebanQuery = $this->db->query(
+            "
+        SELECT SUM(
+            CASE 
+                -- Jika partialy_paid_at sesuai range → ini diprioritaskan
+                WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
+                    COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(CAST(tm_dp.value AS DECIMAL(20,2)), 0)
+                
+                -- Jika paid_at sesuai range dan partialy_paid_at tidak sesuai atau NULL
+                WHEN DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' AND 
+                    (tm_partial.value IS NULL OR DATE(tm_partial.value) NOT BETWEEN '{$start_val}' AND '{$end_val}') THEN
+                    COALESCE(CAST(tm_dp.value AS DECIMAL(20,2)), 0)
+
+                ELSE 0
+            END
+        ) AS total_beban
+        FROM transaction t
+        LEFT JOIN ({$subPaid}) tm_paid ON tm_paid.transaction_id = t.id
+        LEFT JOIN ({$subPartial}) tm_partial ON tm_partial.transaction_id = t.id
+        LEFT JOIN transaction_meta tm_grand ON tm_grand.transaction_id = t.id AND tm_grand.key = 'grand_total'
+        LEFT JOIN transaction_meta tm_dp ON tm_dp.transaction_id = t.id AND tm_dp.key = 'total_dp'
+        WHERE t.status IN ('SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID')
+        AND (
+            DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}'
+            OR DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')
+        " . (
+                $id_toko ? " AND t.id_toko = {$id_toko}" :
+                (!empty($role) ? " AND t.id_toko IN (" . implode(',', $role) . ")" : "")
+            )
+        );
+        $bebanResult = $bebanQuery->getRow();
+        $total_beban = $bebanResult->total_beban ?? 0;
+
+
+        // === 3. Modal ===
+        $modalQuery = $this->db->table('sales_product sp')
+            ->select('SUM(sp.total_modal) AS total_modal')
+            ->join('transaction t', 't.id = sp.id_transaction')
+            ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
+            ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
+
+        if ($start_val && $end_val) {
+            $modalQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
+        } elseif ($start_val) {
+            $modalQuery->where("DATE(tm_paid.value) >= '{$start_val}'", null, false);
+        } elseif ($end_val) {
+            $modalQuery->where("DATE(tm_paid.value) <= '{$end_val}'", null, false);
+        }
+
+        if ($id_toko) {
+            $modalQuery->where('t.id_toko', $id_toko);
+        } elseif (!empty($role)) {
+            $modalQuery->whereIn('t.id_toko', $role);
+        }
+
+        // Only count if paid OR partial is present, not both
+        $modalQuery->groupStart()
+            ->groupStart()
+            ->where('tm_paid.value IS NOT NULL', null, false)
+            ->where('tm_partial.value IS NULL', null, false)
+            ->groupEnd()
+            ->orGroupStart()
+            ->where('tm_paid.value IS NULL', null, false)
+            ->where('tm_partial.value IS NOT NULL', null, false)
+            ->groupEnd()
+            ->groupEnd();
+
+        $modalResult = $modalQuery->get()->getRow();
+        $total_modal = $modalResult->total_modal ?? 0;
+
+        // === 4. Final Result ===
+        $revenue = $total_revenue - $total_beban;
+
+        return (object) [
+            'total_revenue' => (float) $revenue,
+            'total_beban' => (float) $total_beban,
+            'total_modal' => (float) $total_modal,
+            'total_profit' => floatval($revenue - $total_modal)
+        ];
     }
     private function getTransactionGantung($start_val, $end_val, $id_toko, $role)
     {
         $query = $this->db->table('transaction')
             ->select('SUM(amount) - SUM(total_payment) AS transaction_gantung')
             ->where('status', 'PARTIALLY_PAID');
-
-        if ($start_val && $end_val) {
-            $query->where("date_time BETWEEN '{$start_val}' AND '{$end_val}'");
-        } elseif ($start_val) {
-            $query->where("date_time >= '{$start_val}'");
-        } elseif ($end_val) {
-            $query->where("date_time <= '{$end_val}'");
-        }
 
         if (!empty($role) && !$id_toko) {
             $query->whereIn('id_toko', $role);
@@ -710,14 +792,6 @@ class TransactionController extends BaseController
         $query = $this->db->table('transaction')
             ->select('SUM(amount) AS transaksi_waiting_payment')
             ->where('status', 'WAITING_PAYMENT');
-
-        if ($start_val && $end_val) {
-            $query->where("date_time BETWEEN '{$start_val}' AND '{$end_val}'");
-        } elseif ($start_val) {
-            $query->where("date_time >= '{$start_val}'");
-        } elseif ($end_val) {
-            $query->where("date_time <= '{$end_val}'");
-        }
 
         if (!empty($role) && !$id_toko) {
             $query->whereIn('id_toko', $role);
@@ -749,13 +823,27 @@ class TransactionController extends BaseController
             $role = array_map('intval', explode(',', $role));
         }
 
+        $subPaid = $this->db->table('transaction_meta')
+            ->select('transaction_id, MAX(value) AS value')
+            ->where('key', 'paid_at')
+            ->groupBy('transaction_id');
+
+        $subPartial = $this->db->table('transaction_meta')
+            ->select('transaction_id, MAX(value) AS value')
+            ->where('key', 'partialy_paid_at')
+            ->groupBy('transaction_id');
+
+
         // Builder utama untuk list dan sum
         $baseBuilder = $this->db->table('sales_product sp')
             ->join('transaction t', 'sp.id_transaction = t.id', 'left')
             ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
             ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+            ->join("({$subPaid->getCompiledSelect()}) tm_paid", 'tm_paid.transaction_id = t.id', 'left')
+            ->join("({$subPartial->getCompiledSelect()}) tm_partial", 'tm_partial.transaction_id = t.id', 'left')
             ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
+
 
         // Filter toko
         if (!empty($role) && !$id_toko) {
@@ -766,13 +854,20 @@ class TransactionController extends BaseController
             $baseBuilder->like('t.id_toko', (string) $id_toko, 'both');
         }
 
-        // Filter tanggal
-        if (!empty($start_date)) {
-            $baseBuilder->where('t.date_time >=', $start_date);
+        // Gunakan nilai 'value' dari transaction_meta sebagai tanggal bayar
+        $dateFilter = [];
+        if ($start_val && $end_val) {
+            $dateFilter[] = "(DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')";
+            $dateFilter[] = "(DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')";
+        } elseif ($start_val) {
+            $dateFilter[] = "(DATE(tm_paid.value) >= '{$start_val}')";
+            $dateFilter[] = "(DATE(tm_partial.value) >= '{$start_val}')";
+        } elseif ($end_val) {
+            $dateFilter[] = "(DATE(tm_paid.value) <= '{$end_val}')";
+            $dateFilter[] = "(DATE(tm_partial.value) <= '{$end_val}')";
         }
-
-        if (!empty($end_date)) {
-            $baseBuilder->where('t.date_time <=', $end_date);
+        if (!empty($dateFilter)) {
+            $baseBuilder->where('(' . implode(' OR ', $dateFilter) . ')');
         }
 
         // Filter search
@@ -799,6 +894,8 @@ class TransactionController extends BaseController
             p.nama_barang,
             mb.nama_model,
             s.seri,
+            tm_paid.value as paid_at,
+            tm_partial.value as dp_at,
             CONCAT(
                 COALESCE(p.nama_barang, ''), ' ',
                 COALESCE(mb.nama_model, ''), ' ',
@@ -834,7 +931,6 @@ class TransactionController extends BaseController
             200
         );
     }
-
     public function calculateExpenseAllocation()
     {
         $date_start = $this->request->getGet('date_start');
@@ -1023,19 +1119,17 @@ class TransactionController extends BaseController
 
             $total_page = ceil($total_data / $limit);
 
-            if ($result) {
-                return $this->jsonResponse->multiResp(
-                    'Success',
-                    $result,
-                    $total_data,
-                    $total_page,
-                    $page,
-                    $limit,
-                    200
-                );
-            } else {
-                return $this->jsonResponse->error("Tidak ada data untuk kriteria ini", 404);
-            }
+
+            return $this->jsonResponse->multiResp(
+                'Success',
+                $result,
+                $total_data,
+                $total_page,
+                $page,
+                $limit,
+                200
+            );
+
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
