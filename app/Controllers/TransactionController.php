@@ -655,7 +655,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function getRevenueProfitData($start_val, $end_val, $id_toko = null, $role = null)
     {
         // Subquery untuk mengambil paid_at & partialy_paid_at terbaru per transaksi
@@ -1402,6 +1401,7 @@ class TransactionController extends BaseController
     public function updateTransactionStatusToPartiallyPaid($transactionId)
     {
         $token = $this->request->user;
+
         $db = \Config\Database::connect();
         $db->transBegin();
 
@@ -1416,6 +1416,8 @@ class TransactionController extends BaseController
         }
 
         $data = $this->request->getJSON();
+        $metode = $data->metode_pembayaran;
+        $amount = $data->amount;
 
         // Validasi input
         $validation = \Config\Services::validation();
@@ -1428,7 +1430,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
 
-        $amount = $data->amount;
+
         $newTotalPayment = $transaction['total_payment'] + $amount;
 
         if ((float) $amount > (float) (90 * $transaction['amount'] / 100)) {
@@ -1447,7 +1449,7 @@ class TransactionController extends BaseController
             'status' => 'SUCCESS',
             'date_time' => date('Y-m-d H:i:s'),
             'id_toko' => $transaction['id_toko'],
-            'metode' => $data->metode_pembayaran
+            'metode' => $metode
         ];
 
         $db->table('cashflow')->insert($cashflowData);
@@ -1468,7 +1470,7 @@ class TransactionController extends BaseController
             [
                 'transaction_id' => (string) $transactionId,
                 'key' => 'metode_pembayaran_dp',
-                'value' => (string) $data->metode_pembayaran
+                'value' => (string) $metode
             ],
             [
                 'transaction_id' => (string) $transactionId,
@@ -1495,7 +1497,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => "Update transaksi {$transactionId} menjadi DP sebesar {$amount} menggunakan metode { (string) $data->metode_pembayaran}",
+                'description' => "Update transaksi {$transactionId} menjadi DP sebesar {$amount} menggunakan metode {$metode}",
             ]);
             return $this->jsonResponse->oneResp('Transaction status updated to partially paid', null, 200);
         }
