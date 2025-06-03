@@ -542,6 +542,7 @@ class ProductController extends ResourceController
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
             $suplier = $this->request->getGet('suplier') ?? '';
+            $stock = $this->request->getGet('stock') ?? '';
             $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
@@ -549,7 +550,8 @@ class ProductController extends ResourceController
             $builder = $this->productModel
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->join('suplier', 'suplier.id IN (product.suplier)', 'left')
+                ->join('suplier', 'FIND_IN_SET(suplier.id, product.suplier)', 'left')
+                ->join('stock', 'stock.id_barang = product.id_barang', 'left') // join stock
                 ->select([
                     'product.id',
                     'product.id_barang',
@@ -561,10 +563,38 @@ class ProductController extends ResourceController
                     'product.harga_jual_toko',
                     'model_barang.nama_model',
                     'COALESCE(seri.seri, "") as seri',
-                    '(SELECT SUM(stock.stock) FROM stock WHERE stock.id_barang = product.id_barang) as total_stock',
-                    '(SELECT SUM(stock.barang_cacat) FROM stock WHERE stock.id_barang = product.id_barang) as total_cacat',
-                    'GROUP_CONCAT(suplier.suplier_name) as suplier_names' // Get all supplier names
+                    'SUM(stock.stock) as total_stock',
+                    'SUM(stock.barang_cacat) as total_cacat',
+                    'GROUP_CONCAT(suplier.suplier_name) as suplier_names'
+                ])
+                ->groupBy([
+                    'product.id',
+                    'product.id_barang',
+                    'product.notes',
+                    'product.nama_barang',
+                    'product.harga_modal',
+                    'product.harga_jual',
+                    'product.harga_jual_toko',
+                    'model_barang.nama_model',
+                    'seri.seri'
                 ]);
+
+            if (!empty($stock)) {
+                switch ($stock) {
+                    case 'available':
+                        $builder->having('SUM(stock.stock) >', 5);
+                        break;
+                    case 'low_stock':
+                        $builder->having('SUM(stock.stock) >', 0);
+                        $builder->having('SUM(stock.stock) <=', 5);
+                        break;
+
+                    case 'out_stock':
+                        $builder->having('SUM(stock.stock) =', 0);
+                        break;
+                }
+            }
+
 
             // Apply filters
             if (!empty($namaProduct)) {
@@ -619,8 +649,8 @@ class ProductController extends ResourceController
                         'nama_model' => $item['nama_model'],
                         'seri' => $item['seri'],
                         'stock' => [],
-                        'total_stock' => 0,
-                        'total_cacat' => 0,
+                        'total_stock' => (int) $item['total_stock'],
+                        'total_cacat' => (int) $item['total_cacat'],
                         'stock_string' => ''
                     ];
                 }
@@ -646,14 +676,6 @@ class ProductController extends ResourceController
                             'toko_name' => $tokoName,
                             'dropship' => $dropship
                         ];
-
-                        if (!$dropship) {
-                            // Add to total stock & defective items
-                            $formattedProducts[$productId]['total_stock'] += $stockValue;
-                            $formattedProducts[$productId]['total_cacat'] += $barangCacat;
-                        }
-
-
                         // Save for stock_string
                         $stockStrings[] = "{$tokoName}=" . (!$dropship ? $stockValue : 'dropship');
                     }
