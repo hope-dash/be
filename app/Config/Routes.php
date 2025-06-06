@@ -104,6 +104,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/alokasi-pengeluaran', 'TransactionController::calculateExpenseAllocation');
     $routes->get('reporting/top-customers', 'TransactionController::topCustomers');
     $routes->get('reporting/top-products', 'TransactionController::topSoldProducts');
+    $routes->get('reporting/stock-allocation', 'TransactionController::listKeluarBarang');
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
     $routes->get('reporting/due-transaction', 'TransactionController::getUpcomingDueTransactions');
     $routes->get('reporting/revenue-profit-detail', 'TransactionController::listSalesProductWithTransaction');

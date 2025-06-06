@@ -6,8 +6,10 @@ use App\Models\CustomerModel;
 use App\Models\ModelBarangModel;
 use App\Models\ProductModel;
 use App\Models\ImageModel;
+use App\Models\SalesProductModel;
 use App\Models\StockModel;
 use App\Models\TokoModel;
+use App\Models\TransactionModel;
 use CodeIgniter\RESTful\ResourceController;
 use App\Models\JsonResponse;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -22,6 +24,8 @@ class ProductController extends ResourceController
     protected $db;
     protected $modelToko;
     protected $customer;
+    protected $SalesProductModel;
+    protected $transactions;
 
     public function __construct()
     {
@@ -34,6 +38,8 @@ class ProductController extends ResourceController
         $this->db = \Config\Database::connect();
         $this->modelToko = new TokoModel();
         $this->customer = new CustomerModel();
+        $this->transactions = new TransactionModel();
+        $this->SalesProductModel = new SalesProductModel();
     }
 
     public function createProduct()
@@ -547,11 +553,37 @@ class ProductController extends ResourceController
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
+            $subqueryTerjual = "
+                (
+                    SELECT 
+                        sales_product.kode_barang, 
+                        SUM(sales_product.jumlah) AS total_terjual
+                    FROM sales_product
+                    JOIN transaction ON transaction.id = sales_product.id_transaction
+                    WHERE transaction.status IN ('SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID')
+                    GROUP BY sales_product.kode_barang
+                ) AS terjual
+            ";
+
+            $subqueryHold = "
+                (
+                    SELECT 
+                        sales_product.kode_barang, 
+                        SUM(sales_product.jumlah) AS total_hold
+                    FROM sales_product
+                    JOIN transaction ON transaction.id = sales_product.id_transaction
+                    WHERE transaction.status = 'WAITING_PAYMENT'
+                    GROUP BY sales_product.kode_barang
+                ) AS hold
+            ";
+
             $builder = $this->productModel
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                 ->join('suplier', 'FIND_IN_SET(suplier.id, product.suplier)', 'left')
-                ->join('stock', 'stock.id_barang = product.id_barang', 'left') // join stock
+                ->join('stock', 'stock.id_barang = product.id_barang', 'left')
+                ->join($subqueryTerjual, 'terjual.kode_barang = product.id_barang', 'left')
+                ->join($subqueryHold, 'hold.kode_barang = product.id_barang', 'left')
                 ->select([
                     'product.id',
                     'product.id_barang',
@@ -565,7 +597,9 @@ class ProductController extends ResourceController
                     'COALESCE(seri.seri, "") as seri',
                     'SUM(stock.stock) as total_stock',
                     'SUM(stock.barang_cacat) as total_cacat',
-                    'GROUP_CONCAT(suplier.suplier_name) as suplier_names'
+                    'GROUP_CONCAT(suplier.suplier_name) as suplier_names',
+                    'COALESCE(terjual.total_terjual, 0) as total_terjual',
+                    'COALESCE(hold.total_hold, 0) as total_hold'
                 ])
                 ->groupBy([
                     'product.id',
@@ -576,8 +610,11 @@ class ProductController extends ResourceController
                     'product.harga_jual',
                     'product.harga_jual_toko',
                     'model_barang.nama_model',
-                    'seri.seri'
+                    'seri.seri',
+                    'terjual.total_terjual',
+                    'hold.total_hold'
                 ]);
+
 
             if (!empty($stock)) {
                 switch ($stock) {
@@ -651,6 +688,8 @@ class ProductController extends ResourceController
                         'stock' => [],
                         'total_stock' => (int) $item['total_stock'],
                         'total_cacat' => (int) $item['total_cacat'],
+                        'total_terjual' => (int) $item['total_terjual'],
+                        'total_hold' => (int) $item['total_hold'],
                         'stock_string' => ''
                     ];
                 }

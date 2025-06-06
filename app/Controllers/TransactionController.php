@@ -167,6 +167,9 @@ class TransactionController extends BaseController
             $metaData['refunded_amount'] = $data['refunded_amount'];
         }
 
+        if (!empty($data['complaint'])) {
+            $metaData['complaint'] = $data['complaint'];
+        }
 
         if (empty($data['customerId'])) {
             $metaData['customer_name'] = $data['customer_name'];
@@ -667,7 +670,7 @@ class TransactionController extends BaseController
             ->join('transaction t', 't.id = sp.id_transaction')
             ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
             ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
 
         if ($start_val && $end_val) {
             $revenueQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
@@ -692,36 +695,61 @@ class TransactionController extends BaseController
         // === 2. Beban ===
         $bebanQuery = $this->db->query(
             "
-        SELECT SUM(
-            CASE 
-                -- Jika partialy_paid_at sesuai range → ini diprioritaskan
-                WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
-                    COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(CAST(tm_dp.value AS DECIMAL(20,2)), 0)
-                
-                -- Jika paid_at sesuai range dan partialy_paid_at tidak sesuai atau NULL
-                WHEN DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' AND 
-                    (tm_partial.value IS NULL OR DATE(tm_partial.value) NOT BETWEEN '{$start_val}' AND '{$end_val}') THEN
-                    COALESCE(CAST(tm_dp.value AS DECIMAL(20,2)), 0)
+                   SELECT SUM(
+  CASE
+    -- STATUS PAID
+    WHEN t.status = 'PAID' THEN
+     CASE
+        -- Cek dulu kalau tm_paid dan tm_partial sama tanggal → hasil 0
+        WHEN DATE(tm_paid.value) = DATE(tm_partial.value) 
+            AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN 0
 
-                ELSE 0
-            END
-        ) AS total_beban
-        FROM transaction t
-        LEFT JOIN ({$subPaid}) tm_paid ON tm_paid.transaction_id = t.id
-        LEFT JOIN ({$subPartial}) tm_partial ON tm_partial.transaction_id = t.id
-        LEFT JOIN transaction_meta tm_grand ON tm_grand.transaction_id = t.id AND tm_grand.key = 'grand_total'
-        LEFT JOIN transaction_meta tm_dp ON tm_dp.transaction_id = t.id AND tm_dp.key = 'total_dp'
-        WHERE t.status IN ('SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID')
-        AND (
-            DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}'
-            OR DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')
-        " . (
-                $id_toko ? " AND t.id_toko = {$id_toko}" :
-                (!empty($role) ? " AND t.id_toko IN (" . implode(',', $role) . ")" : "")
-            )
+        -- paid_at masuk range → ambil DP (total_dp)
+        WHEN DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN COALESCE(tm_dp.value, 0)
+
+        -- partialy_paid_at masuk range → hitung grand_total - total_payment (DP partial)
+        WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
+            COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(tm_dp.value, 0)
+
+        ELSE 0
+      END
+
+
+    -- STATUS PARTIALLY_PAID
+    WHEN t.status = 'PARTIALLY_PAID' THEN
+      CASE
+        -- partialy_paid_at masuk range → hitung grand_total - total_dp
+        WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
+          COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(tm_dp.value, 0)
+
+
+        -- tidak ada partialy_paid_at, tapi paid_at masuk range → hitung grand_total - total_payment
+        WHEN (tm_partial.value IS NULL OR DATE(tm_partial.value) NOT BETWEEN '{$start_val}' AND '{$end_val}')
+             AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
+          COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(t.total_payment, 0)
+        ELSE 0
+      END
+
+    -- Status lain atau kondisi tidak terpenuhi → 0
+    ELSE 0
+  END
+) AS total_beban
+FROM transaction t
+LEFT JOIN ({$subPaid}) tm_paid ON tm_paid.transaction_id = t.id
+LEFT JOIN ({$subPartial}) tm_partial ON tm_partial.transaction_id = t.id
+LEFT JOIN transaction_meta tm_grand ON tm_grand.transaction_id = t.id AND tm_grand.key = 'grand_total'
+LEFT JOIN transaction_meta tm_dp ON tm_dp.transaction_id = t.id AND tm_dp.key = 'total_dp'
+WHERE t.status IN ('PAID', 'PARTIALLY_PAID')
+AND (
+  (DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')
+  OR (DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')
+)
+"
         );
         $bebanResult = $bebanQuery->getRow();
         $total_beban = $bebanResult->total_beban ?? 0;
+
+
 
 
         // === 3. Modal ===
@@ -730,7 +758,7 @@ class TransactionController extends BaseController
             ->join('transaction t', 't.id = sp.id_transaction')
             ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
             ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
 
         if ($start_val && $end_val) {
             $modalQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
@@ -841,7 +869,7 @@ class TransactionController extends BaseController
             ->join('seri s', 'p.id_seri_barang = s.id', 'left')
             ->join("({$subPaid->getCompiledSelect()}) tm_paid", 'tm_paid.transaction_id = t.id', 'left')
             ->join("({$subPartial->getCompiledSelect()}) tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID']);
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
 
 
         // Filter toko
@@ -874,6 +902,7 @@ class TransactionController extends BaseController
             $baseBuilder->groupStart()
                 ->like('t.invoice', $search)
                 ->orLike('p.nama_barang', $search)
+                ->orLike('p.id_barang', $search)
                 ->orLike('mb.nama_model', $search)
                 ->orLike('s.seri', $search)
                 ->groupEnd();
@@ -891,6 +920,7 @@ class TransactionController extends BaseController
             t.status,
             t.id_toko,
             p.nama_barang,
+            p.id_barang,
             mb.nama_model,
             s.seri,
             tm_paid.value as paid_at,
@@ -915,9 +945,9 @@ class TransactionController extends BaseController
             '',
             [
                 'sum' => [
-                    'total_revenue' => ($mainResult->total_revenue ?? 0) - $transaksi_gantung,
+                    'total_revenue' => ($mainResult->total_revenue ?? 0),
                     'total_modal' => floatval($mainResult->total_modal ?? 0),
-                    'total_profit' => ($mainResult->total_profit ?? 0) - $transaksi_gantung,
+                    'total_profit' => ($mainResult->total_profit ?? 0),
                     'transaction_gantung' => $transaksi_gantung,
                     'transaksi_waiting_payment' => floatval($waitingResult->transaksi_waiting_payment ?? 0)
                 ],
@@ -1007,7 +1037,7 @@ class TransactionController extends BaseController
                 ->select('c.id AS customer_id, c.nama_customer, COUNT(DISTINCT t.id) AS total_transactions, SUM(t.amount) AS total_amount_spent')
                 ->join('transaction_meta tm', 't.id = tm.transaction_id AND tm.key = "customer_id" AND tm.value IS NOT NULL AND tm.value != ""', 'inner')
                 ->join('customer c', 'c.id = tm.value', 'left')
-                ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
+                ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR'])
                 ->groupBy('c.id, c.nama_customer')
                 ->orderBy('total_transactions', 'DESC')
                 ->limit($limit);
@@ -1078,7 +1108,7 @@ class TransactionController extends BaseController
                 ->join('product', 'sales_product.kode_barang = product.id_barang')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id')
                 ->join('seri', 'product.id_seri_barang = seri.id', 'left')
-                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
+                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR'])
                 ->groupBy(['sales_product.kode_barang', 'product.nama_barang', 'model_barang.nama_model', 'seri.seri'])
                 ->orderBy('total_sold', 'DESC');
 
@@ -1134,6 +1164,69 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+    public function listKeluarBarang()
+    {
+        $role = $this->request->getGet('role');
+        $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+        $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+        $offset = ($page - 1) * $limit;
+        $kode = $this->request->getGet('kode') ?? '';
+
+        try {
+            $builder = $this->db->table('sales_product')
+                ->select([
+                    'sales_product.*',
+                    'transaction.status',
+                    'product.nama_barang',
+                    'model_barang.nama_model',
+                    'seri.seri',
+                    'toko.toko_name',
+                    'transaction.invoice',
+                    'transaction.date_time',
+                    'COALESCE(c.nama_customer, tm_name.value) AS customer_name',
+                    'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", COALESCE(seri.seri, "")) AS nama_lengkap_barang'
+                ])
+                ->join('transaction', 'transaction.id = sales_product.id_transaction', 'left')
+                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'WAITING_PAYMENT', 'RETUR'])
+                ->join('product', 'product.id_barang = sales_product.kode_barang', 'left')
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->join('toko', 'transaction.id_toko = toko.id', 'left')
+                ->join('transaction_meta tm_cust', 'transaction.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
+                ->join('customer c', 'c.id = tm_cust.value', 'left')
+                ->join('transaction_meta tm_name', 'tm_name.transaction_id = transaction.id AND tm_name.key = "customer_name"', 'left');
+
+            if (!empty($kode)) {
+                $builder->like('sales_product.kode_barang', $kode);
+            }
+
+            if (!empty($role)) {
+                if (is_string($role)) {
+                    $role = array_map('intval', explode(',', $role));
+                }
+                $builder->whereIn('transaction.id_toko', $role);
+            }
+
+            $total_data = $builder->countAllResults(false); // hitung total, tanpa reset query
+            $builder->limit($limit, $offset);
+            $result = $builder->get()->getResultArray();
+            $total_page = ceil($total_data / $limit);
+
+            return $this->jsonResponse->multiResp(
+                'Success',
+                $result,
+                $total_data,
+                $total_page,
+                $page,
+                $limit,
+                200
+            );
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
     public function getFinancialSummary()
     {
         $date_start = $this->request->getGet('date_start');
@@ -1216,10 +1309,8 @@ class TransactionController extends BaseController
         $token = $this->request->user;
         $db = \Config\Database::connect();
 
-        // Start a transaction
         $db->transBegin();
 
-        // Retrieve the transaction
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
             ->whereIn('status', ['cancel', 'need_refunded'])
@@ -1230,20 +1321,25 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction not found or not eligible for refund', null, 404);
         }
 
-        // Cek apakah ada refunded_amount di transaction_meta
-        $refundedAmount = $db->table('transaction_meta')
+        // Cek nilai refund
+        $refundedAmountMeta = $db->table('transaction_meta')
             ->where('transaction_id', $transactionId)
             ->where('key', 'refunded_amount')
             ->get()
             ->getRowArray();
 
-        if ($refundedAmount) {
-            $refundValue = (float) $refundedAmount['value']; // Gunakan nilai refunded_amount
-        } else {
-            $refundValue = (float) $transaction['total_payment']; // Jika tidak ada, gunakan total_payment
-        }
+        $refundValue = $refundedAmountMeta
+            ? (float) $refundedAmountMeta['value']
+            : (float) $transaction['total_payment'];
 
-        // Insert into cashflow
+        // Update nominal pembayaran
+        $db->table('transaction')
+            ->where('id', $transactionId)
+            ->update([
+                'total_payment' => $transaction['total_payment'] - $refundValue
+            ]);
+
+        // Insert ke cashflow
         $cashflowData = [
             'debit' => 0,
             'credit' => $refundValue,
@@ -1253,31 +1349,32 @@ class TransactionController extends BaseController
             'date_time' => date('Y-m-d H:i:s'),
             'id_toko' => $transaction['id_toko']
         ];
-
         $db->table('cashflow')->insert($cashflowData);
         $cashflowId = $db->insertID();
 
-        // Update transaction status to refunded
+        // Cek apakah ada complaint
+        $hasComplaint = $db->table('transaction_meta')
+            ->where('transaction_id', $transactionId)
+            ->where('key', 'complaint')
+            ->countAllResults() > 0;
+
+        $finalStatus = $hasComplaint ? 'RETUR' : 'REFUNDED';
+
+        // Update status transaksi
         $db->table('transaction')
             ->where('id', $transactionId)
-            ->update(['status' => 'REFUNDED', 'updated_by' => $token['user_id']]);
+            ->update([
+                'status' => $finalStatus,
+                'updated_by' => $token['user_id']
+            ]);
 
-        // Update transaction_meta for refunded_at and cashflow_id
+        // Simpan metadata tambahan
         $metaData = [
-            [
-                'transaction_id' => $transactionId,
-                'key' => 'refunded_at',
-                'value' => date('Y-m-d H:i:s')
-            ],
-            [
-                'transaction_id' => $transactionId,
-                'key' => 'cashflow_id',
-                'value' => (string) $cashflowId
-            ]
+            ['transaction_id' => $transactionId, 'key' => 'refunded_at', 'value' => date('Y-m-d H:i:s')],
+            ['transaction_id' => $transactionId, 'key' => 'cashflow_id', 'value' => (string) $cashflowId],
         ];
 
-        // Jika refunded_amount belum ada di transaction_meta, tambahkan
-        if (!$refundedAmount) {
+        if (!$refundedAmountMeta) {
             $metaData[] = [
                 'transaction_id' => $transactionId,
                 'key' => 'refunded_amount',
@@ -1289,7 +1386,6 @@ class TransactionController extends BaseController
             $db->table('transaction_meta')->insert($data);
         }
 
-        // Commit the transaction
         if ($db->transStatus() === false) {
             $db->transRollback();
             return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
@@ -1302,9 +1398,10 @@ class TransactionController extends BaseController
                 'target_id' => $transactionId,
                 'description' => "Refund transaksi $transactionId sebesar $refundValue",
             ]);
-            return $this->jsonResponse->oneResp('Transaction status updated to refunded', null, 200);
+            return $this->jsonResponse->oneResp("Transaction status updated to $finalStatus", null, 200);
         }
     }
+
     public function updateTransactionStatusToCancel($transactionId)
     {
         $token = $this->request->user;
@@ -1822,15 +1919,17 @@ class TransactionController extends BaseController
                 }
 
                 // Insert refund metadata
-                $metaData = [
-                    'transaction_id' => $transactionId,
-                    'key' => 'refunded_amount',
-                    'value' => $totalRefundAmount
+                $metas = [
+                    ['transaction_id' => $transactionId, 'key' => 'refunded_amount', 'value' => $totalRefundAmount],
+                    ['transaction_id' => $transactionId, 'key' => 'complaint', 'value' => true],
                 ];
 
-                if (!$db->table('transaction_meta')->insert($metaData)) {
-                    throw new \RuntimeException('Failed to insert refund metadata');
+                foreach ($metas as $meta) {
+                    if (!$db->table('transaction_meta')->insert($meta)) {
+                        throw new \RuntimeException('Failed to insert transaction metadata: ' . $meta['key']);
+                    }
                 }
+
 
                 // Update grand total
                 $grandTotal = $db->table('transaction_meta')
@@ -1964,20 +2063,6 @@ class TransactionController extends BaseController
                 'date_time' => date('Y-m-d H:i:s'),
             ];
 
-            // **8. Tambahkan logika status transaksi**
-            if ($transaction['status'] === 'PAID') {
-                if ($grandTotal > $transaction['amount']) {
-                    $updateTransaction['status'] = 'PARTIALLY_PAID';
-                } elseif ($grandTotal < $transaction['amount']) {
-                    $updateTransaction['status'] = 'NEED_REFUNDED';
-                }
-            }
-
-            if (!$this->transactions->update($transactionId, $updateTransaction)) {
-                throw new \Exception("Gagal memperbarui transaksi.");
-            }
-
-            // **9. Simpan meta tambahan jika terjadi refund**
             $metaData = [
                 'ppn' => $data->ppn,
                 'ppn_value' => $ppn_value,
@@ -1993,8 +2078,19 @@ class TransactionController extends BaseController
                 'customer_name' => $data->customer_name
             ];
 
-            if ($transaction['status'] === 'PAID' && $grandTotal < $transaction['total_payment']) {
-                $metaData['refunded_amount'] = $transaction['total_payment'] - $grandTotal;
+            // **8. Tambahkan logika status transaksi**
+            if ($transaction['status'] === 'PAID') {
+                if ($grandTotal > $transaction['amount']) {
+                    $updateTransaction['status'] = 'PARTIALLY_PAID';
+                } elseif ($grandTotal < $transaction['amount']) {
+                    $updateTransaction['status'] = 'NEED_REFUNDED';
+                    $metaData['refunded_amount'] = $transaction['total_payment'] - $grandTotal;
+                    $metaData['complaint'] = true;
+                }
+            }
+
+            if (!$this->transactions->update($transactionId, $updateTransaction)) {
+                throw new \Exception("Gagal memperbarui transaksi.");
             }
 
             $this->saveTransactionMeta($transactionId, $metaData);
