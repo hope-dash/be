@@ -695,62 +695,68 @@ class TransactionController extends BaseController
         // === 2. Beban ===
         $bebanQuery = $this->db->query(
             "
-                   SELECT SUM(
-  CASE
-    -- STATUS PAID
-    WHEN t.status = 'PAID' THEN
-     CASE
-        -- Cek dulu kalau tm_paid dan tm_partial sama tanggal → hasil 0
-        WHEN DATE(tm_paid.value) = DATE(tm_partial.value) 
-            AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN 0
+                 SELECT SUM(
+                    CASE
+                        -- STATUS PAID
+                        WHEN t.status = 'PAID' THEN
+                        CASE
+                            -- Jika tm_paid dan tm_partial tanggal sama → beban = 0
+                            WHEN DATE(tm_paid.value) = DATE(tm_partial.value) 
+                                AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN 0
 
-        -- paid_at masuk range → ambil DP (total_dp)
-        WHEN DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN COALESCE(tm_dp.value, 0)
+                            -- Jika paid_at dalam range → ambil DP
+                            WHEN DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN COALESCE(tm_dp.value, 0)
 
-        -- partialy_paid_at masuk range → hitung grand_total - total_payment (DP partial)
-        WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
-            COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(tm_dp.value, 0)
+                            -- Jika partialy_paid_at dalam range → grand_total - discount - DP
+                            WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
+                                COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) 
+                            - COALESCE(CAST(tm_disc.value AS DECIMAL(20,2)), 0)
+                            - COALESCE(tm_dp.value, 0)
 
-        ELSE 0
-      END
+                            ELSE 0
+                        END
 
+                        -- STATUS PARTIALLY_PAID
+                        WHEN t.status = 'PARTIALLY_PAID' THEN
+                        CASE
+                            -- Jika partialy_paid_at dalam range → grand_total - discount - DP
+                            WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
+                                COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) 
+                            - COALESCE(CAST(tm_disc.value AS DECIMAL(20,2)), 0)
+                            - COALESCE(tm_dp.value, 0)
 
-    -- STATUS PARTIALLY_PAID
-    WHEN t.status = 'PARTIALLY_PAID' THEN
-      CASE
-        -- partialy_paid_at masuk range → hitung grand_total - total_dp
-        WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
-          COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(tm_dp.value, 0)
+                            -- Jika tidak ada partialy_paid_at, tapi paid_at dalam range → grand_total - discount - total_payment
+                            WHEN (tm_partial.value IS NULL OR DATE(tm_partial.value) NOT BETWEEN '{$start_val}' AND '{$end_val}')
+                                AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
+                                COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0)
+                            - COALESCE(CAST(tm_disc.value AS DECIMAL(20,2)), 0)
+                            - COALESCE(t.total_payment, 0)
 
+                            ELSE 0
+                        END
 
-        -- tidak ada partialy_paid_at, tapi paid_at masuk range → hitung grand_total - total_payment
-        WHEN (tm_partial.value IS NULL OR DATE(tm_partial.value) NOT BETWEEN '{$start_val}' AND '{$end_val}')
-             AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
-          COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0) - COALESCE(t.total_payment, 0)
-        ELSE 0
-      END
+                        ELSE 0
+                    END
+                    ) AS total_beban
+                    FROM transaction t
+                    LEFT JOIN ({$subPaid}) tm_paid ON tm_paid.transaction_id = t.id
+                    LEFT JOIN ({$subPartial}) tm_partial ON tm_partial.transaction_id = t.id
+                    LEFT JOIN transaction_meta tm_grand 
+                    ON tm_grand.transaction_id = t.id AND tm_grand.key = 'grand_total'
+                    LEFT JOIN transaction_meta tm_dp 
+                    ON tm_dp.transaction_id = t.id AND tm_dp.key = 'total_dp'
+                    LEFT JOIN transaction_meta tm_disc 
+                    ON tm_disc.transaction_id = t.id AND tm_disc.key = 'discount'
+                    WHERE t.status IN ('PAID', 'PARTIALLY_PAID')
+                    AND (
+                        (DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')
+                        OR (DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')
+                    );
 
-    -- Status lain atau kondisi tidak terpenuhi → 0
-    ELSE 0
-  END
-) AS total_beban
-FROM transaction t
-LEFT JOIN ({$subPaid}) tm_paid ON tm_paid.transaction_id = t.id
-LEFT JOIN ({$subPartial}) tm_partial ON tm_partial.transaction_id = t.id
-LEFT JOIN transaction_meta tm_grand ON tm_grand.transaction_id = t.id AND tm_grand.key = 'grand_total'
-LEFT JOIN transaction_meta tm_dp ON tm_dp.transaction_id = t.id AND tm_dp.key = 'total_dp'
-WHERE t.status IN ('PAID', 'PARTIALLY_PAID')
-AND (
-  (DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')
-  OR (DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')
-)
-"
+            "
         );
         $bebanResult = $bebanQuery->getRow();
         $total_beban = $bebanResult->total_beban ?? 0;
-
-
-
 
         // === 3. Modal ===
         $modalQuery = $this->db->table('sales_product sp')
@@ -793,10 +799,10 @@ AND (
         $revenue = $total_revenue - $total_beban;
 
         return (object) [
-            'total_revenue' => (float) $revenue,
-            'total_beban' => (float) $total_beban,
-            'total_modal' => (float) $total_modal,
-            'total_profit' => floatval($revenue - $total_modal)
+            'total_revenue' => ceil($revenue),
+            'total_beban' => ceil($total_beban),
+            'total_modal' => ceil($total_modal),
+            'total_profit' => ceil($revenue - $total_modal)
         ];
     }
     private function getTransactionGantung($start_val, $end_val, $id_toko, $role)
