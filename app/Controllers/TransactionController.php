@@ -666,7 +666,7 @@ class TransactionController extends BaseController
 
         // === 1. Revenue ===
         $revenueQuery = $this->db->table('sales_product sp')
-            ->select('SUM(sp.actual_total) AS total_revenue')
+            ->select('SUM(sp.actual_total) AS total_revenue,SUM(sp.total_modal) AS total_modal')
             ->join('transaction t', 't.id = sp.id_transaction')
             ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
             ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
@@ -691,6 +691,7 @@ class TransactionController extends BaseController
 
         $revenueResult = $revenueQuery->get()->getRow();
         $total_revenue = $revenueResult->total_revenue ?? 0;
+        $total_modal = $revenueResult->total_modal ?? 0;
 
         // === 2. Beban ===
         $bebanQuery = $this->db->query(
@@ -757,43 +758,6 @@ class TransactionController extends BaseController
         );
         $bebanResult = $bebanQuery->getRow();
         $total_beban = $bebanResult->total_beban ?? 0;
-
-        // === 3. Modal ===
-        $modalQuery = $this->db->table('sales_product sp')
-            ->select('SUM(sp.total_modal) AS total_modal')
-            ->join('transaction t', 't.id = sp.id_transaction')
-            ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
-            ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
-
-        if ($start_val && $end_val) {
-            $modalQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
-        } elseif ($start_val) {
-            $modalQuery->where("DATE(tm_paid.value) >= '{$start_val}'", null, false);
-        } elseif ($end_val) {
-            $modalQuery->where("DATE(tm_paid.value) <= '{$end_val}'", null, false);
-        }
-
-        if ($id_toko) {
-            $modalQuery->where('t.id_toko', $id_toko);
-        } elseif (!empty($role)) {
-            $modalQuery->whereIn('t.id_toko', $role);
-        }
-
-        // Only count if paid OR partial is present, not both
-        $modalQuery->groupStart()
-            ->groupStart()
-            ->where('tm_paid.value IS NOT NULL', null, false)
-            ->where('tm_partial.value IS NULL', null, false)
-            ->groupEnd()
-            ->orGroupStart()
-            ->where('tm_paid.value IS NULL', null, false)
-            ->where('tm_partial.value IS NOT NULL', null, false)
-            ->groupEnd()
-            ->groupEnd();
-
-        $modalResult = $modalQuery->get()->getRow();
-        $total_modal = $modalResult->total_modal ?? 0;
 
         // === 4. Final Result ===
         $revenue = $total_revenue - $total_beban;
