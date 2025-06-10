@@ -663,6 +663,7 @@ class TransactionController extends BaseController
         // Subquery untuk mengambil paid_at & partialy_paid_at terbaru per transaksi
         $subPaid = "(SELECT transaction_id, MAX(value) as value FROM transaction_meta WHERE `key` = 'paid_at' GROUP BY transaction_id)";
         $subPartial = "(SELECT transaction_id, MAX(value) as value FROM transaction_meta WHERE `key` = 'partialy_paid_at' GROUP BY transaction_id)";
+        $subRefund = "(SELECT transaction_id, MAX(value) as value FROM transaction_meta WHERE `key` = 'refunded_at' GROUP BY transaction_id)";
 
         // === 1. Revenue ===
         $revenueQuery = $this->db->table('sales_product sp')
@@ -670,7 +671,8 @@ class TransactionController extends BaseController
             ->join('transaction t', 't.id = sp.id_transaction')
             ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
             ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
+            ->join("{$subRefund} tm_refund", 'tm_refund.transaction_id = t.id', 'left')
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR', 'REFUNDED']);
 
         if ($start_val && $end_val) {
             $revenueQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
@@ -691,6 +693,35 @@ class TransactionController extends BaseController
 
         $revenueResult = $revenueQuery->get()->getRow();
         $total_revenue = $revenueResult->total_revenue ?? 0;
+
+        // === 1. Revenue ===
+        $modalQuery = $this->db->table('sales_product sp')
+            ->select('SUM(sp.total_modal) AS total_modal')
+            ->join('transaction t', 't.id = sp.id_transaction')
+            ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
+            ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
+            ->join("{$subRefund} tm_refund", 'tm_refund.transaction_id = t.id', 'left')
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
+
+        if ($start_val && $end_val) {
+            $modalQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
+            $modalQuery->orWhere("DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
+        } elseif ($start_val) {
+            $modalQuery->where("DATE(tm_paid.value) >= '{$start_val}'", null, false);
+            $modalQuery->orWhere("DATE(tm_partial.value) >= '{$start_val}'", null, false);
+        } elseif ($end_val) {
+            $modalQuery->where("DATE(tm_paid.value) <= '{$end_val}'", null, false);
+            $modalQuery->orWhere("DATE(tm_partial.value) <= '{$end_val}'", null, false);
+        }
+
+        if ($id_toko) {
+            $modalQuery->where('t.id_toko', $id_toko);
+        } elseif (!empty($role)) {
+            $modalQuery->whereIn('t.id_toko', $role);
+        }
+
+        $modalResult = $modalQuery->get()->getRow();
+        $total_modal = $modalResult->total_modal ?? 0;
 
         // === 2. Beban ===
         $bebanQuery = $this->db->query(
@@ -734,7 +765,6 @@ class TransactionController extends BaseController
 
                             ELSE 0
                         END
-
                         ELSE 0
                     END
                     ) AS total_beban
@@ -747,63 +777,55 @@ class TransactionController extends BaseController
                     ON tm_dp.transaction_id = t.id AND tm_dp.key = 'total_dp'
                     LEFT JOIN transaction_meta tm_disc 
                     ON tm_disc.transaction_id = t.id AND tm_disc.key = 'discount'
-                    WHERE t.status IN ('PAID', 'PARTIALLY_PAID')
+                    WHERE t.status IN ('PAID', 'PARTIALLY_PAID','REFUNDED')
                     AND (
                         (DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')
                         OR (DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')
                     );
-
             "
         );
         $bebanResult = $bebanQuery->getRow();
         $total_beban = $bebanResult->total_beban ?? 0;
 
-        // === 3. Modal ===
-        $modalQuery = $this->db->table('sales_product sp')
-            ->select('SUM(sp.total_modal) AS total_modal')
-            ->join('transaction t', 't.id = sp.id_transaction')
-            ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
-            ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
+        $refunded_amount_today = $this->getTotalRefundedAmount($start_val, $end_val);
+        $total_beban += $refunded_amount_today;
 
-        if ($start_val && $end_val) {
-            $modalQuery->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
-        } elseif ($start_val) {
-            $modalQuery->where("DATE(tm_paid.value) >= '{$start_val}'", null, false);
-        } elseif ($end_val) {
-            $modalQuery->where("DATE(tm_paid.value) <= '{$end_val}'", null, false);
-        }
-
-        if ($id_toko) {
-            $modalQuery->where('t.id_toko', $id_toko);
-        } elseif (!empty($role)) {
-            $modalQuery->whereIn('t.id_toko', $role);
-        }
-
-        // Only count if paid OR partial is present, not both
-        $modalQuery->groupStart()
-            ->groupStart()
-            ->where('tm_paid.value IS NOT NULL', null, false)
-            ->where('tm_partial.value IS NULL', null, false)
-            ->groupEnd()
-            ->orGroupStart()
-            ->where('tm_paid.value IS NULL', null, false)
-            ->where('tm_partial.value IS NOT NULL', null, false)
-            ->groupEnd()
-            ->groupEnd();
-
-        $modalResult = $modalQuery->get()->getRow();
-        $total_modal = $modalResult->total_modal ?? 0;
 
         // === 4. Final Result ===
         $revenue = $total_revenue - $total_beban;
+        $modal_akhir = $total_modal;
+
 
         return (object) [
             'total_revenue' => ceil($revenue),
             'total_beban' => ceil($total_beban),
-            'total_modal' => ceil($total_modal),
-            'total_profit' => ceil($revenue - $total_modal)
+            'total_modal' => ceil($modal_akhir),
+            'total_profit' => ceil($revenue - $modal_akhir)
         ];
+    }
+    public function getTotalRefundedAmount($start_val, $end_val)
+    {
+        // Subquery ambil semua transaction_id yang refunded_at dalam rentang tanggal
+        $refundedSub = $this->db->table('transaction_meta tm1')
+            ->select('tm1.transaction_id')
+            ->where('tm1.key', 'refunded_at')
+            ->where("DATE(tm1.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false);
+
+        $refundedIds = array_map(fn($row) => $row->transaction_id, $refundedSub->get()->getResult());
+
+        if (empty($refundedIds)) {
+            return 0;
+        }
+
+        // Ambil dan jumlahkan semua refunded_amount untuk transaksi tadi
+        $refundedAmountQuery = $this->db->table('transaction_meta')
+            ->select('SUM(CAST(value AS UNSIGNED)) AS total_refunded')
+            ->where('`key`', 'refunded_amount')
+            ->whereIn('transaction_id', $refundedIds);
+
+        $result = $refundedAmountQuery->get()->getRow();
+
+        return (int) ($result->total_refunded ?? 0);
     }
     private function getTransactionGantung($start_val, $end_val, $id_toko, $role)
     {
