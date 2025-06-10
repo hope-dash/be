@@ -467,8 +467,6 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-
-
     public function getListSeribySearchProduct()
     {
         $namaProduct = $this->request->getGet('namaProduct') ?? '';
@@ -961,28 +959,45 @@ class ProductController extends ResourceController
 
     public function deleteByProductId($id)
     {
-        // Start a database transaction
-        $this->db->transStart();
-        $query = $this->productModel->where("id", $id)
-            ->first();
+        $token = $this->request->user;
 
-        if ($query) {
-            $stockDeleted = $this->stockModel->delete(['id_barang' => $query['id_barang']]);
-            $productDeleted = $this->productModel->delete($id);
+        $product = $this->productModel->where("id", $id)->first();
 
-
-            if ($stockDeleted && $productDeleted) {
-                $this->db->transComplete();
-                return $this->jsonResponse->oneResp("Data Deleted", "", 200);
-            } else {
-
-                $this->db->transRollback();
-                return $this->jsonResponse->error("Failed to delete data", 500);
-            }
-        } else {
+        if (!$product) {
             return $this->jsonResponse->error("Product Not Found", 404);
         }
 
+        try {
+            $this->db->transBegin();
+
+            $this->productModel->delete($id);
+
+            if ($this->db->transStatus() === false) {
+                throw new \Exception('Failed to execute database transaction.');
+            }
+
+            $this->db->transCommit();
+
+            $productIdentifier = $product['nama_barang'] . ' ' . $product['nama_model'] . ' ' . $product['seri'];
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'DELETE',
+                'target_table' => 'product',
+                'target_id' => $id,
+                'description' => "Produk '{$productIdentifier}' (ID Barang: {$product['id_barang']}) telah dihapus oleh User ID {$token['user_id']}.",
+                'detail' => [
+                    'deleted_data' => $product,
+                ],
+            ]);
+
+            return $this->jsonResponse->oneResp("Data Deleted Successfully", "", 200);
+
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+
+            return $this->jsonResponse->error("Failed to delete data due to a server error.", 500);
+        }
     }
     public function bulkUpload()
     {
