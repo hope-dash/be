@@ -961,7 +961,7 @@ class ProductController extends ResourceController
     {
         $token = $this->request->user;
 
-        $product = $this->productModel->where("id", $id)->first();
+        $product = $this->getProductDetailArray($id);
 
         if (!$product) {
             return $this->jsonResponse->error("Product Not Found", 404);
@@ -970,10 +970,10 @@ class ProductController extends ResourceController
         try {
             $this->db->transBegin();
 
-            $this->productModel->delete($id);
+            $deleted = $this->productModel->delete($id);
 
-            if ($this->db->transStatus() === false) {
-                throw new \Exception('Failed to execute database transaction.');
+            if (!$deleted) {
+                throw new \Exception('Delete query did not affect any rows.');
             }
 
             $this->db->transCommit();
@@ -985,7 +985,7 @@ class ProductController extends ResourceController
                 'action_type' => 'DELETE',
                 'target_table' => 'product',
                 'target_id' => $id,
-                'description' => "Produk '{$productIdentifier}' (ID Barang: {$product['id_barang']}) telah dihapus oleh User ID {$token['user_id']}.",
+                'description' => "Produk '{$productIdentifier}' (ID Barang: {$product['id_barang']}) dihapus.",
                 'detail' => [
                     'deleted_data' => $product,
                 ],
@@ -996,9 +996,10 @@ class ProductController extends ResourceController
         } catch (\Exception $e) {
             $this->db->transRollback();
 
-            return $this->jsonResponse->error("Failed to delete data due to a server error.", 500);
+            return $this->jsonResponse->error("Failed to delete data due to a server error: " . $e->getMessage(), 500);
         }
     }
+
     public function bulkUpload()
     {
         $token = $this->request->user;
