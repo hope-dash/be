@@ -110,6 +110,10 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/revenue-profit-detail', 'TransactionController::listSalesProductWithTransaction');
     $routes->get('reporting/log', 'LogAktivitasController::index');
 
+    $routes->post('closing', 'ClosingController::store');
+    $routes->get('closing', 'ClosingController::list');
+    $routes->get('closing/(:num)', 'ClosingController::getDetail/$1');
+
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
 });

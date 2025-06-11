@@ -658,6 +658,98 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
+    public function getSalesProductWithTransactionQuery($params = [])
+    {
+        $sortBy = $params['sortBy'] ?? 'sp.id';
+        $sortMethod = strtolower($params['sortMethod'] ?? 'asc');
+        $id_toko = $params['id_toko'] ?? null;
+        $start_date = $params['date_start'] ?? null;
+        $end_date = $params['date_end'] ?? null;
+        $role = $params['role'] ?? null;
+        $search = $params['search'] ?? null;
+
+        $start_val = $start_date ? $start_date . ' 00:00:00' : null;
+        $end_val = $end_date ? $end_date . ' 23:59:59' : null;
+
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
+        }
+
+        $subPaid = $this->db->table('transaction_meta')
+            ->select('transaction_id, MAX(value) AS value')
+            ->where('key', 'paid_at')
+            ->groupBy('transaction_id');
+
+        $subPartial = $this->db->table('transaction_meta')
+            ->select('transaction_id, MAX(value) AS value')
+            ->where('key', 'partialy_paid_at')
+            ->groupBy('transaction_id');
+
+        $builder = $this->db->table('sales_product sp')
+            ->join('transaction t', 'sp.id_transaction = t.id', 'left')
+            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+            ->join("({$subPaid->getCompiledSelect()}) tm_paid", 'tm_paid.transaction_id = t.id', 'left')
+            ->join("({$subPartial->getCompiledSelect()}) tm_partial", 'tm_partial.transaction_id = t.id', 'left')
+            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
+
+        if (!empty($role) && !$id_toko) {
+            $builder->whereIn('t.id_toko', $role);
+        }
+
+        if (!empty($id_toko)) {
+            $builder->like('t.id_toko', (string) $id_toko, 'both');
+        }
+
+        // Filter tanggal dari transaction_meta
+        $dateFilter = [];
+        if ($start_val && $end_val) {
+            $dateFilter[] = "(DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')";
+            $dateFilter[] = "(DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')";
+        } elseif ($start_val) {
+            $dateFilter[] = "(DATE(tm_paid.value) >= '{$start_val}')";
+            $dateFilter[] = "(DATE(tm_partial.value) >= '{$start_val}')";
+        } elseif ($end_val) {
+            $dateFilter[] = "(DATE(tm_paid.value) <= '{$end_val}')";
+            $dateFilter[] = "(DATE(tm_partial.value) <= '{$end_val}')";
+        }
+
+        if (!empty($dateFilter)) {
+            $builder->where('(' . implode(' OR ', $dateFilter) . ')');
+        }
+
+        if ($search) {
+            $builder->groupStart()
+                ->like('t.invoice', $search)
+                ->orLike('p.nama_barang', $search)
+                ->orLike('p.id_barang', $search)
+                ->orLike('mb.nama_model', $search)
+                ->orLike('s.seri', $search)
+                ->groupEnd();
+        }
+
+        return $builder->select("
+        sp.*,
+        t.invoice,
+        t.date_time,
+        t.status,
+        t.id_toko,
+        p.nama_barang,
+        p.id_barang,
+        mb.nama_model,
+        s.seri,
+        tm_paid.value as paid_at,
+        tm_partial.value as dp_at,
+        CONCAT(
+            COALESCE(p.nama_barang, ''), ' ',
+            COALESCE(mb.nama_model, ''), ' ',
+            COALESCE(s.seri, '')
+        ) AS nama_lengkap_barang
+    ")
+            ->orderBy($sortBy, $sortMethod);
+    }
     public function getRevenueProfitData($start_val, $end_val, $id_toko = null, $role = null)
     {
         // Subquery untuk mengambil paid_at & partialy_paid_at terbaru per transaksi
@@ -801,114 +893,33 @@ class TransactionController extends BaseController
     }
     public function listSalesProductWithTransaction()
     {
-        $sortBy = $this->request->getGet('sortBy') ?? 'sp.id';
-        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? 'asc');
         $limit = (int) $this->request->getGet('limit') ?: 10;
         $page = (int) $this->request->getGet('page') ?: 1;
         $offset = ($page - 1) * $limit;
 
-        $id_toko = $this->request->getGet('id_toko');
-        $start_date = $this->request->getGet('date_start');
-        $end_date = $this->request->getGet('date_end');
-        $role = $this->request->getGet('role');
-        $search = $this->request->getGet('search');
+        $params = [
+            'sortBy' => $this->request->getGet('sortBy'),
+            'sortMethod' => $this->request->getGet('sortMethod'),
+            'id_toko' => $this->request->getGet('id_toko'),
+            'date_start' => $this->request->getGet('date_start'),
+            'date_end' => $this->request->getGet('date_end'),
+            'role' => $this->request->getGet('role'),
+            'search' => $this->request->getGet('search'),
+        ];
 
-        $start_val = $start_date ? $start_date . ' 00:00:00' : null;
-        $end_val = $end_date ? $end_date . ' 23:59:59' : null;
+        $query = $this->getSalesProductWithTransactionQuery($params);
 
-        if (is_string($role)) {
-            $role = array_map('intval', explode(',', $role));
-        }
-
-        $subPaid = $this->db->table('transaction_meta')
-            ->select('transaction_id, MAX(value) AS value')
-            ->where('key', 'paid_at')
-            ->groupBy('transaction_id');
-
-        $subPartial = $this->db->table('transaction_meta')
-            ->select('transaction_id, MAX(value) AS value')
-            ->where('key', 'partialy_paid_at')
-            ->groupBy('transaction_id');
-
-
-        // Builder utama untuk list dan sum
-        $baseBuilder = $this->db->table('sales_product sp')
-            ->join('transaction t', 'sp.id_transaction = t.id', 'left')
-            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
-            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
-            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
-            ->join("({$subPaid->getCompiledSelect()}) tm_paid", 'tm_paid.transaction_id = t.id', 'left')
-            ->join("({$subPartial->getCompiledSelect()}) tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
-
-
-        // Filter toko
-        if (!empty($role) && !$id_toko) {
-            $baseBuilder->whereIn('t.id_toko', $role);
-        }
-
-        if (!empty($id_toko)) {
-            $baseBuilder->like('t.id_toko', (string) $id_toko, 'both');
-        }
-
-        // Gunakan nilai 'value' dari transaction_meta sebagai tanggal bayar
-        $dateFilter = [];
-        if ($start_val && $end_val) {
-            $dateFilter[] = "(DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')";
-            $dateFilter[] = "(DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')";
-        } elseif ($start_val) {
-            $dateFilter[] = "(DATE(tm_paid.value) >= '{$start_val}')";
-            $dateFilter[] = "(DATE(tm_partial.value) >= '{$start_val}')";
-        } elseif ($end_val) {
-            $dateFilter[] = "(DATE(tm_paid.value) <= '{$end_val}')";
-            $dateFilter[] = "(DATE(tm_partial.value) <= '{$end_val}')";
-        }
-        if (!empty($dateFilter)) {
-            $baseBuilder->where('(' . implode(' OR ', $dateFilter) . ')');
-        }
-
-        // Filter search
-        if ($search) {
-            $baseBuilder->groupStart()
-                ->like('t.invoice', $search)
-                ->orLike('p.nama_barang', $search)
-                ->orLike('p.id_barang', $search)
-                ->orLike('mb.nama_model', $search)
-                ->orLike('s.seri', $search)
-                ->groupEnd();
-        }
-
-        // Count total rows
-        $total_data = $baseBuilder->countAllResults(false);
+        $total_data = $query->countAllResults(false);
         $total_page = ceil($total_data / $limit);
 
-        // Ambil paginated result
-        $result = $baseBuilder->select("
-            sp.*,
-            t.invoice,
-            t.date_time,
-            t.status,
-            t.id_toko,
-            p.nama_barang,
-            p.id_barang,
-            mb.nama_model,
-            s.seri,
-            tm_paid.value as paid_at,
-            tm_partial.value as dp_at,
-            CONCAT(
-                COALESCE(p.nama_barang, ''), ' ',
-                COALESCE(mb.nama_model, ''), ' ',
-                COALESCE(s.seri, '')
-            ) AS nama_lengkap_barang
-        ")
-            ->orderBy($sortBy, $sortMethod)
-            ->limit($limit, $offset)
-            ->get()
-            ->getResult();
+        $result = $query->limit($limit, $offset)->get()->getResult();
 
-        $mainResult = $this->getRevenueProfitData($start_val, $end_val, $id_toko, $role);
-        $gantungResult = $this->getTransactionGantung($start_val, $end_val, $id_toko, $role);
-        $waitingResult = $this->getWaitingPayment($start_val, $end_val, $id_toko, $role);
+        $start_val = $params['date_start'] ? $params['date_start'] . ' 00:00:00' : null;
+        $end_val = $params['date_end'] ? $params['date_end'] . ' 23:59:59' : null;
+
+        $mainResult = $this->getRevenueProfitData($start_val, $end_val, $params['id_toko'], $params['role']);
+        $gantungResult = $this->getTransactionGantung($start_val, $end_val, $params['id_toko'], $params['role']);
+        $waitingResult = $this->getWaitingPayment($start_val, $end_val, $params['id_toko'], $params['role']);
         $transaksi_gantung = floatval($gantungResult->transaction_gantung ?? 0);
 
         return $this->jsonResponse->multiResp(
