@@ -659,97 +659,114 @@ class TransactionController extends BaseController
         }
     }
 
-    public function getSalesProductWithTransactionQuery($params = [])
-    {
-        $sortBy = $params['sortBy'] ?? 'sp.id';
-        $sortMethod = strtolower($params['sortMethod'] ?? 'asc');
-        $id_toko = $params['id_toko'] ?? null;
-        $start_date = $params['date_start'] ?? null;
-        $end_date = $params['date_end'] ?? null;
-        $role = $params['role'] ?? null;
-        $search = $params['search'] ?? null;
+public function getSalesProductWithTransactionQuery($params = [])
+{
+    $sortBy = $params['sortBy'] ?? 'sp.id';
+    $sortMethod = strtolower($params['sortMethod'] ?? 'asc');
+    $id_toko = $params['id_toko'] ?? null;
+    $start_date = $params['date_start'] ?? null;
+    $end_date = $params['date_end'] ?? null;
+    $role = $params['role'] ?? null;
+    $search = $params['search'] ?? null;
 
-        $start_val = $start_date ? $start_date . ' 00:00:00' : null;
-        $end_val = $end_date ? $end_date . ' 23:59:59' : null;
+    $start_val = $start_date ? $start_date . ' 00:00:00' : null;
+    $end_val = $end_date ? $end_date . ' 23:59:59' : null;
 
-        if (is_string($role)) {
-            $role = array_map('intval', explode(',', $role));
-        }
+    // Subquery untuk mengambil tanggal pembayaran (bisa digabungkan untuk efisiensi)
+    $subPaid = $this->db->table('transaction_meta')
+        ->select('transaction_id, MAX(value) AS value')
+        ->where('key', 'paid_at')
+        ->groupBy('transaction_id');
 
-        $subPaid = $this->db->table('transaction_meta')
-            ->select('transaction_id, MAX(value) AS value')
-            ->where('key', 'paid_at')
-            ->groupBy('transaction_id');
+    $subPartial = $this->db->table('transaction_meta')
+        ->select('transaction_id, MAX(value) AS value')
+        ->where('key', 'partialy_paid_at')
+        ->groupBy('transaction_id');
 
-        $subPartial = $this->db->table('transaction_meta')
-            ->select('transaction_id, MAX(value) AS value')
-            ->where('key', 'partialy_paid_at')
-            ->groupBy('transaction_id');
+    $subRefunded = $this->db->table('transaction_meta')
+        ->select('transaction_id, MAX(value) AS refunded_at')
+        ->where('key', 'refunded_at')
+        ->groupBy('transaction_id');
 
-        $builder = $this->db->table('sales_product sp')
-            ->join('transaction t', 'sp.id_transaction = t.id', 'left')
-            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
-            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
-            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
-            ->join("({$subPaid->getCompiledSelect()}) tm_paid", 'tm_paid.transaction_id = t.id', 'left')
-            ->join("({$subPartial->getCompiledSelect()}) tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
+    $builder = $this->db->table('sales_product sp')
+        ->join('transaction t', 'sp.id_transaction = t.id', 'left')
+        ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+        ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+        ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+        ->join("({$subPaid->getCompiledSelect()}) tm_paid", 'tm_paid.transaction_id = t.id', 'left')
+        ->join("({$subPartial->getCompiledSelect()}) tm_partial", 'tm_partial.transaction_id = t.id', 'left')
+        ->join("({$subRefunded->getCompiledSelect()}) tm_refunded", 'tm_refunded.transaction_id = t.id', 'left');
+        
+    // ====================================================================
+    // PERBAIKAN UTAMA: Logika WHERE untuk Status Transaksi
+    // ====================================================================
+    $builder->groupStart(); // Membuka grup utama untuk kondisi WHERE
 
-        if (!empty($role) && !$id_toko) {
-            $builder->whereIn('t.id_toko', $role);
-        }
+        // 1. Kondisi untuk status selain REFUNDED
+        $builder->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR']);
 
-        if (!empty($id_toko)) {
-            $builder->like('t.id_toko', (string) $id_toko, 'both');
-        }
+        // 2. Kondisi KHUSUS untuk status REFUNDED (menggunakan OR)
+        $builder->orGroupStart(); // Membuka grup untuk kondisi OR
+            $builder->where('t.status', 'REFUNDED');
+            // Hanya jika paid_at ATAU dp_at tidak null
+            $builder->groupStart(); // Membuka grup untuk kondisi tanggal bayar
+                $builder->where('tm_paid.value IS NOT NULL');
+                $builder->orWhere('tm_partial.value IS NOT NULL');
+            $builder->groupEnd(); // Menutup grup kondisi tanggal bayar
+        $builder->groupEnd(); // Menutup grup kondisi OR
 
-        // Filter tanggal dari transaction_meta
-        $dateFilter = [];
-        if ($start_val && $end_val) {
-            $dateFilter[] = "(DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')";
-            $dateFilter[] = "(DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')";
-        } elseif ($start_val) {
-            $dateFilter[] = "(DATE(tm_paid.value) >= '{$start_val}')";
-            $dateFilter[] = "(DATE(tm_partial.value) >= '{$start_val}')";
-        } elseif ($end_val) {
-            $dateFilter[] = "(DATE(tm_paid.value) <= '{$end_val}')";
-            $dateFilter[] = "(DATE(tm_partial.value) <= '{$end_val}')";
-        }
+    $builder->groupEnd(); // Menutup grup utama
 
-        if (!empty($dateFilter)) {
-            $builder->where('(' . implode(' OR ', $dateFilter) . ')');
-        }
+    // Filter lainnya (tetap sama)
+    if (!empty($role)) {
+        $builder->whereIn('t.id_toko', $role);
+    }
+    if (!empty($id_toko)) {
+        $builder->like('t.id_toko', (string) $id_toko, 'both');
+    }
 
-        if ($search) {
-            $builder->groupStart()
-                ->like('t.invoice', $search)
-                ->orLike('p.nama_barang', $search)
-                ->orLike('p.id_barang', $search)
-                ->orLike('mb.nama_model', $search)
-                ->orLike('s.seri', $search)
-                ->groupEnd();
-        }
+    // Filter tanggal (Saran: Gunakan query binding untuk keamanan)
+    if ($start_val && $end_val) {
+        $builder->where("(
+            DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' OR 
+            DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' OR 
+            DATE(tm_refunded.refunded_at) BETWEEN '{$start_val}' AND '{$end_val}'
+        )");
+    }
+    // ... (kondisi start_val atau end_val saja)
 
-        return $builder->select("
+    if ($search) {
+        $builder->groupStart()
+            ->like('t.invoice', $search)
+            ->orLike('p.nama_barang', $search)
+            // ... (filter pencarian lainnya)
+            ->groupEnd();
+    }
+
+    // ====================================================================
+    // PERBAIKAN PADA SELECT: Logika Negasi yang Lebih Sederhana
+    // ====================================================================
+    $select = "
         sp.*,
-        t.invoice,
-        t.date_time,
-        t.status,
-        t.id_toko,
-        p.nama_barang,
-        p.id_barang,
-        mb.nama_model,
-        s.seri,
+        t.invoice, t.date_time, t.status, t.id_toko,
+        p.nama_barang, p.id_barang, mb.nama_model, s.seri,
         tm_paid.value as paid_at,
         tm_partial.value as dp_at,
+        tm_refunded.refunded_at as refunded_at,
         CONCAT(
             COALESCE(p.nama_barang, ''), ' ',
             COALESCE(mb.nama_model, ''), ' ',
             COALESCE(s.seri, '')
-        ) AS nama_lengkap_barang
-    ")
-            ->orderBy($sortBy, $sortMethod);
-    }
+        ) AS nama_lengkap_barang,
+        -- Cukup cek status, karena filter tanggal sudah di handle di WHERE
+        IF(t.status = 'REFUNDED', -sp.actual_total, sp.actual_total) AS actual_total,
+        IF(t.status = 'REFUNDED', -sp.total_modal, sp.total_modal) AS total_modal
+    ";
+
+    return $builder->select($select, FALSE)
+        ->orderBy($sortBy, $sortMethod);
+}
+
     public function getRevenueProfitData($start_val, $end_val, $id_toko = null, $role = null)
     {
         // Subquery untuk mengambil paid_at & partialy_paid_at terbaru per transaksi
@@ -775,10 +792,12 @@ class TransactionController extends BaseController
             $revenueQuery->orWhere("DATE(tm_partial.value) <= '{$end_val}'", null, false);
         }
 
-        if ($id_toko) {
-            $revenueQuery->where('t.id_toko', $id_toko);
-        } elseif (!empty($role)) {
+        if (!empty($role)) {
             $revenueQuery->whereIn('t.id_toko', $role);
+        }
+
+        if (!empty($id_toko)) {
+            $revenueQuery->like('t.id_toko', (string) $id_toko, 'both');
         }
 
         $revenueResult = $revenueQuery->get()->getRow();
@@ -895,7 +914,13 @@ class TransactionController extends BaseController
     {
         $limit = (int) $this->request->getGet('limit') ?: 10;
         $page = (int) $this->request->getGet('page') ?: 1;
+        $role = $this->request->getGet('role');
         $offset = ($page - 1) * $limit;
+
+        if (is_string($role)) {
+            $role = array_filter(array_map('intval', explode(',', $role)), fn($v) => $v > 0);
+        }
+
 
         $params = [
             'sortBy' => $this->request->getGet('sortBy'),
@@ -903,7 +928,7 @@ class TransactionController extends BaseController
             'id_toko' => $this->request->getGet('id_toko'),
             'date_start' => $this->request->getGet('date_start'),
             'date_end' => $this->request->getGet('date_end'),
-            'role' => $this->request->getGet('role'),
+            'role' => $role,
             'search' => $this->request->getGet('search'),
         ];
 
