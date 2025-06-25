@@ -8,18 +8,24 @@ class ClosingDetailModel extends Model
 {
     protected $table = 'closing_detail';
     protected $primaryKey = 'id';
-
     protected $allowedFields = [
-        'closing_id',
-        'id_transaction',
-        'kode_barang',
-        'jumlah',
-        'harga_system',
-        'harga_jual',
-        'total',
-        'modal_system',
-        'total_modal',
-        'actual_per_piece',
-        'actual_total',
+        'transaction_closing_id',
+        'keterangan',
+        'tipe',
+        'tanggal',
+        'debit',
+        'credit',
+        'urutan',
+        'id_cashflow'
     ];
+    protected $useTimestamps = false;
+
+    // Ambil semua detail by closing ID
+    public function getDetailsByClosingId(int $closingId)
+    {
+        return $this->where('transaction_closing_id', $closingId)
+            ->orderBy('urutan', 'ASC')
+            ->findAll();
+    }
+
 }
