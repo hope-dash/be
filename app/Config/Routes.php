@@ -73,6 +73,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->delete('product/(:num)', 'ProductController::deleteByProductId/$1');
     $routes->post('bulk-product', 'ProductController::bulkUpload');
     $routes->get('model_barang/count', 'ProductController::getTotalByModelId');
+    $routes->get('seri_barang/count', 'ProductController::getTotalBySeriId');
 
 
     //Pembelian
@@ -111,9 +112,9 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/log', 'LogAktivitasController::index');
 
     $routes->group('closing', function ($routes) {
-        $routes->post('process', 'ClosingController::closeByRange');
-        $routes->delete('delete/(:date)', 'ClosingController::deleteByDate/$1');
-        $routes->get('detail', 'ClosingController::getClosingDetail');
+        $routes->post('process', 'ClosingController::closeMonthly');
+        $routes->post('rollback', 'ClosingController::rollbackClosingByMonth');
+        $routes->post('detail', 'ClosingController::getClosingDetailsByMonth');
         $routes->get('list', 'ClosingController::listClosings');
     });
 

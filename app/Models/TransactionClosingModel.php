@@ -10,6 +10,7 @@ class TransactionClosingModel extends Model
     protected $primaryKey = 'id';
     protected $allowedFields = [
         'transaction_id',
+        'transaction_status',
         'period_start',
         'period_end',
         'closing_status',

@@ -136,13 +136,31 @@ class ProductController extends ResourceController
             foreach ($images['image'] as $image) {
                 if ($image->isValid()) {
                     $mimeType = $image->getMimeType();
-                    $tempPath = $image->getTempName(); // file asli di /tmp
+                    $originalName = $image->getName();
+                    $tempPath = $image->getTempName();
+                    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
 
-                    // Nama acak untuk WebP
-                    $webpName = bin2hex(random_bytes(10)) . '.webp';
-                    $webpPath = ROOTPATH . 'public/hope/images/' . $webpName;
+                    if ($ext === 'webp') {
+                        // File sudah webp, langsung pindahkan ke tujuan
+                        $webpName = bin2hex(random_bytes(10)) . '.webp';
+                        $finalPath = ROOTPATH . 'public/hope/images/' . $webpName;
+                        $image->move(ROOTPATH . 'public/hope/images', $webpName);
 
-                    // Konversi dari temporary file langsung ke WebP
+                        $finalImagePath = 'hope/images/' . $webpName;
+                        $uploadedImagePaths[] = $finalImagePath;
+
+                        if (!in_array($finalImagePath, $existingImageUrls)) {
+                            $this->imageModel->insert([
+                                'type' => "product",
+                                'kode' => $kode,
+                                'url' => $finalImagePath,
+                            ]);
+                        }
+
+                        continue;
+                    }
+
+                    // Convert ke WebP
                     switch ($mimeType) {
                         case 'image/jpeg':
                             $source = imagecreatefromjpeg($tempPath);
@@ -153,9 +171,19 @@ class ProductController extends ResourceController
                             imagealphablending($source, true);
                             imagesavealpha($source, true);
                             break;
+                        case 'image/avif':
+                            if (function_exists('imagecreatefromavif')) {
+                                $source = imagecreatefromavif($tempPath);
+                            } else {
+                                return $this->jsonResponse->oneResp('AVIF not supported on this server', [], 400);
+                            }
+                            break;
                         default:
                             return $this->jsonResponse->oneResp('Unsupported image format', [], 400);
                     }
+
+                    $webpName = bin2hex(random_bytes(10)) . '.webp';
+                    $webpPath = ROOTPATH . 'public/hope/images/' . $webpName;
 
                     imagewebp($source, $webpPath, 80);
                     imagedestroy($source);
@@ -520,6 +548,25 @@ class ProductController extends ResourceController
 
             if (!empty($modelId)) {
                 $builder->where('id_model_barang', $modelId);
+            } else {
+                return $this->jsonResponse->error('Parameter model_id is required', 400);
+            }
+            $total = $builder->countAllResults(false);
+            return $this->jsonResponse->oneResp('Total data retrieved successfully', $total, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    public function getTotalBySeriId()
+    {
+        $seriId = $this->request->getGet('seri_id') ?? '';
+
+        try {
+            $builder = $this->productModel;
+
+            if (!empty($seriId)) {
+                $builder->where('id_seri_barang', $seriId);
             } else {
                 return $this->jsonResponse->error('Parameter model_id is required', 400);
             }

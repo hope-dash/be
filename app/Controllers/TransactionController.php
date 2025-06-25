@@ -1271,7 +1271,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function getFinancialSummary()
     {
         $date_start = $this->request->getGet('date_start');
@@ -1381,7 +1380,9 @@ class TransactionController extends BaseController
         $db->table('transaction')
             ->where('id', $transactionId)
             ->update([
-                'total_payment' => $transaction['total_payment'] - $refundValue
+                'total_payment' => $transaction['total_payment'] - $refundValue,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'closing' => $transaction['closing'] !== 0 ? 2 : 0
             ]);
 
         // Insert ke cashflow
@@ -1446,7 +1447,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp("Transaction status updated to $finalStatus", null, 200);
         }
     }
-
     public function updateTransactionStatusToCancel($transactionId)
     {
         $token = $this->request->user;
@@ -1455,89 +1455,104 @@ class TransactionController extends BaseController
         // Start a transaction
         $db->transBegin();
 
-        // Retrieve the transaction
-        $transaction = $db->table('transaction')
-            ->where('id', $transactionId)
-            ->whereIn('status', ['SUCCESS', 'PAID', 'WAITING_PAYMENT', 'PARTIALLY_PAID'])
-            ->get()
-            ->getRowArray();
+        try {
+            // Retrieve the transaction
+            $transaction = $db->table('transaction')
+                ->where('id', $transactionId)
+                ->whereIn('status', ['SUCCESS', 'PAID', 'WAITING_PAYMENT', 'PARTIALLY_PAID'])
+                ->get()
+                ->getRowArray();
 
-        if (!$transaction) {
-            return $this->jsonResponse->oneResp('Transaction not found or not eligible for cancellation', null, 404);
-        }
+            if (!$transaction) {
+                return $this->jsonResponse->oneResp('Transaction not found or not eligible for cancellation', null, 404);
+            }
 
-        // Update transaction status to CANCEL
-        $db->table('transaction')
-            ->where('id', $transactionId)
-            ->update(['status' => 'CANCEL', 'updated_by' => $token['user_id']]);
+            $data = $this->request->getJSON();
+            $validation = \Config\Services::validation();
+            $validation->setRules([
+                'cancel_reason' => 'required',
+                'barang_cacat' => 'required',
+            ]);
 
-        // Retrieve associated products
-        $products = $db->table('sales_product')
-            ->where('id_transaction', $transactionId)
-            ->get()
-            ->getResultArray();
-        $data = $this->request->getJSON();
-        $validation = \Config\Services::validation();
-        $validation->setRules([
-            'cancel_reason' => 'required',
-            'barang_cacat' => 'required',
-        ]);
-        $cancelReason = $data->cancel_reason;
-        $barangCacat = $data->barang_cacat;
+            if (!$validation->run((array) $data)) {
+                return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+            }
 
-        if ($barangCacat === "true") {
+            $cancelReason = $data->cancel_reason;
+            $barangCacat = $data->barang_cacat === "true";
+
+            // Determine new status based on current status
+            $newStatus = ($transaction['status'] === 'WAITING_PAYMENT') ? 'CANCEL' : 'NEED_REFUNDED';
+
+            // Update transaction status
+            $updateData = [
+                'status' => $newStatus,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'closing' => $transaction['closing'] !== 0 ? 2 : 0, // Set closing to 2 if already closed
+                'updated_by' => $token['user_id']
+            ];
+
+            $db->table('transaction')
+                ->where('id', $transactionId)
+                ->update($updateData);
+
+            // Retrieve associated products
+            $products = $db->table('sales_product')
+                ->where('id_transaction', $transactionId)
+                ->get()
+                ->getResultArray();
+
+            // Return products to stock
             foreach ($products as $product) {
+                $updateField = $barangCacat ? 'barang_cacat' : 'stock';
                 $db->table('stock')
                     ->where('id_barang', $product['kode_barang'])
                     ->where('id_toko', $transaction['id_toko'])
-                    ->set('barang_cacat', 'barang_cacat + ' . $product['jumlah'], false) // Increment stock
+                    ->set($updateField, "$updateField + " . $product['jumlah'], false)
                     ->update();
             }
-        } else {
-            foreach ($products as $product) {
-                $db->table('stock')
-                    ->where('id_barang', $product['kode_barang'])
-                    ->where('id_toko', $transaction['id_toko'])
-                    ->set('stock', 'stock + ' . $product['jumlah'], false) // Increment stock
-                    ->update();
+
+            // Save metadata
+            $metaData = [
+                [
+                    'transaction_id' => $transactionId,
+                    'key' => 'cancel_at',
+                    'value' => date('Y-m-d H:i:s')
+                ],
+                [
+                    'transaction_id' => $transactionId,
+                    'key' => 'cancel_reason',
+                    'value' => $cancelReason
+                ]
+            ];
+
+            foreach ($metaData as $data) {
+                $db->table('transaction_meta')->insert($data);
             }
-        }
 
-        if (!$this->validate($validation->getRules())) {
-            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
-        }
-
-        $metaData = [
-            [
-                'transaction_id' => $transactionId,
-                'key' => 'cancel_at',
-                'value' => date('Y-m-d H:i:s')
-            ],
-            [
-                'transaction_id' => $transactionId,
-                'key' => 'cancel_reason',
-                'value' => $cancelReason
-            ]
-        ];
-
-        foreach ($metaData as $data) {
-            $db->table('transaction_meta')->insert($data);
-        }
-
-        // Commit the transaction
-        if ($db->transStatus() === false) {
-            $db->transRollback();
-            return $this->jsonResponse->oneResp('Failed to update transaction', null, 500);
-        } else {
             $db->transCommit();
+
             log_aktivitas([
                 'user_id' => $token['user_id'],
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => "Update transaksi $transactionId menjadi cancel",
+                'description' => "Update transaksi $transactionId menjadi $newStatus",
             ]);
-            return $this->jsonResponse->oneResp('Transaction status updated to cancel', null, 200);
+
+            return $this->jsonResponse->oneResp(
+                "Transaction status updated to $newStatus",
+                null,
+                200
+            );
+
+        } catch (\Exception $e) {
+            $db->transRollback();
+            return $this->jsonResponse->oneResp(
+                'Failed to update transaction: ' . $e->getMessage(),
+                null,
+                500
+            );
         }
     }
     public function updateTransactionStatusToPartiallyPaid($transactionId)
@@ -1581,7 +1596,13 @@ class TransactionController extends BaseController
 
         $db->table('transaction')
             ->where('id', $transactionId)
-            ->update(['status' => 'PARTIALLY_PAID', 'updated_by' => $token['user_id'], 'total_payment' => $newTotalPayment]);
+            ->update([
+                'status' => 'PARTIALLY_PAID',
+                'updated_at' => date('Y-m-d H:i:s'),
+                'closing' => $transaction['closing'] !== 0 ? 2 : 0,
+                'updated_by' => $token['user_id'],
+                'total_payment' => $newTotalPayment
+            ]);
 
         $cashflowData = [
             'debit' => $amount,
@@ -1688,6 +1709,8 @@ class TransactionController extends BaseController
             ->update([
                 'status' => 'PAID',
                 'updated_by' => $token['user_id'],
+                'updated_at' => date('Y-m-d H:i:s'),
+                'closing' => $transaction['closing'] !== 0 ? 2 : 0,
                 'total_payment' => $newTotalPembayaran
             ]);
 
@@ -1944,6 +1967,8 @@ class TransactionController extends BaseController
                 ->where('id', $transactionId)
                 ->update([
                     'status' => $totalRefundAmount > 0 ? 'NEED_REFUNDED' : 'RETUR',
+                    'closing' => $transaction['closing'] !== 0 ? 2 : 0,
+                    'updated_at' => date('Y-m-d H:i:s'),
                     'updated_by' => $token['user_id']
                 ]);
 
@@ -2302,7 +2327,11 @@ class TransactionController extends BaseController
         }
 
         // Update status transaksi
-        $builder->where('id', $transactionId)->update(['status' => $newStatus, 'updated_by' => $token['user_id'],]);
+        $builder->where('id', $transactionId)->update([
+            'status' => $newStatus,
+            'updated_by' => $token['user_id'],
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
 
         return $this->jsonResponse->oneResp('Status transaksi berhasil diperbarui.', [
             'transaction_id' => $transactionId,

@@ -14,227 +14,446 @@ class ClosingController extends BaseController
         $this->db = \Config\Database::connect();
     }
 
-    public function closeByRange()
+    public function closeMonthly()
     {
-        $request = service('request');
-        $start = $request->getJSON()->start_date ?? null;
-        $end = $request->getJSON()->end_date ?? null;
+        $json = $this->request->getJSON();
+        $year = $json->year ?? null;
+        $month = $json->month ?? null;
 
-        if (!$start || !$end) {
+        if (!$year || !$month) {
             return $this->response->setJSON([
                 'status' => 'error',
-                'message' => 'start_date dan end_date dibutuhkan.'
+                'message' => 'year dan month dibutuhkan.'
             ])->setStatusCode(400);
         }
 
-        $startDate = $start . ' 00:00:00';
-        $endDate = $end . ' 23:59:59';
+        $startDate = date("$year-$month-01 00:00:00");
+        $endDate = date("Y-m-t 23:59:59", strtotime($startDate));
 
-        // Cari periode yang sudah pernah di closing
-        $existingPeriods = $this->db->query("SELECT period_start, period_end FROM transaction_closing GROUP BY period_start, period_end")->getResult();
+        $query1 = $this->db->table('transaction')
+            ->where('status !=', 'WAITING_PAYMENT')
+            ->where('closing', 0)
+            ->where('updated_at >=', $startDate)
+            ->where('updated_at <=', $endDate)
+            ->get()->getResult();
 
-        $excludedDates = [];
-        foreach ($existingPeriods as $p) {
-            $periodStart = $p->period_start;
-            $periodEnd = $p->period_end;
+        $query2 = $this->db->table('transaction')
+            ->where('closing', 2)
+            ->get()->getResult();
 
-            $range = new \DatePeriod(
-                new \DateTime($periodStart),
-                new \DateInterval('P1D'),
-                (new \DateTime($periodEnd))->modify('+1 day')
-            );
-
-            foreach ($range as $date) {
-                $excludedDates[] = $date->format('Y-m-d');
-            }
-        }
-
-        $rangeToProcess = [];
-        $period = new \DatePeriod(
-            new \DateTime($start),
-            new \DateInterval('P1D'),
-            (new \DateTime($end))->modify('+1 day')
-        );
-
-        foreach ($period as $date) {
-            $d = $date->format('Y-m-d');
-            if (!in_array($d, $excludedDates)) {
-                $rangeToProcess[] = $d;
-            }
-        }
-
-        if (empty($rangeToProcess)) {
-            return $this->response->setJSON([
-                'status' => 'error',
-                'message' => 'Tidak ada tanggal tersedia untuk di-closing dalam rentang yang diberikan.'
-            ])->setStatusCode(400);
-        }
-
-        // Kelompokkan jadi beberapa rentang (period)
-        $ranges = [];
-        $tempStart = null;
-        $prevDate = null;
-
-        foreach ($rangeToProcess as $date) {
-            if (!$tempStart) {
-                $tempStart = $date;
-            }
-            if ($prevDate && date('Y-m-d', strtotime($prevDate . ' +1 day')) != $date) {
-                $ranges[] = [
-                    'start' => $tempStart,
-                    'end' => $prevDate
-                ];
-                $tempStart = $date;
-            }
-            $prevDate = $date;
-        }
-        if ($tempStart && $prevDate) {
-            $ranges[] = ['start' => $tempStart, 'end' => $prevDate];
-        }
-
-        $result = [];
-        foreach ($ranges as $r) {
-            $response = $this->processClosing($r['start'], $r['end']);
-            $result[] = $response;
-        }
-
-        return $this->response->setJSON($result);
-    }
-
-    private function processClosing($start, $end)
-    {
-        $startDate = $start . ' 00:00:00';
-        $endDate = $end . ' 23:59:59';
-
-        $transaksi = $this->db->query("SELECT * FROM transaction WHERE closing != 1 AND status != 'waiting_payment' AND date_time BETWEEN ? AND ?", [$startDate, $endDate])->getResult();
+        $transactions = array_merge($query1, $query2);
 
         $results = [];
-        foreach ($transaksi as $trx) {
-            $invoice = $trx->invoice;
-            $trxId = $trx->id;
-            $status = strtoupper($trx->status);
-            $closingStatus = $trx->closing;
-            $tanggal = date('Y-m-d', strtotime($trx->date_time));
+        foreach ($transactions as $trx) {
+            $isAdjustment = ($trx->closing == 2);
+            $result = $this->processClosing($trx, $startDate, $endDate, $isAdjustment);
+            $results[] = $result;
+        }
 
-            $cashflows = $this->db->query("SELECT * FROM cashflow WHERE noted LIKE ? ORDER BY date_time ASC", ['%' . $invoice])->getResult();
-            $sales = $this->db->query("SELECT * FROM sales_product WHERE id_transaction = ?", [$trxId])->getResult();
+        return $this->response->setJSON([
+            'status' => 'success',
+            'month' => "$month/$year",
+            'results' => $results
+        ]);
+    }
 
-            $modalLama = $this->db->query("SELECT total_modal FROM transaction_closing WHERE transaction_id = ? ORDER BY id DESC LIMIT 1", [$trxId])->getRow('total_modal') ?? 0;
+    private function processClosing($trx, $start, $end, $isAdjustment = false)
+    {
+        $trxId = $trx->id;
+        $invoice = $trx->invoice;
+        $status = strtoupper($trx->status);
+        $closingStatus = $trx->closing;
+        $tanggal = date('Y-m-d', strtotime($trx->date_time));
+        $totalPayment = floatval($trx->total_payment);
 
-            $detail = [];
-            $totalDebit = 0;
-            $totalCredit = 0;
-            $totalModalBaru = 0;
-            $urutan = 1;
-            $modalSudahDitarik = false;
+        $cashflows = $this->db->query("SELECT * FROM cashflow WHERE noted LIKE ? ORDER BY date_time ASC", ['%' . $invoice])->getResult();
+        $sales = $this->db->table('sales_product')->where('id_transaction', $trxId)->get()->getResult();
+        $modalLama = $this->db->query("SELECT total_modal FROM transaction_closing WHERE transaction_id = ? ORDER BY id DESC LIMIT 1", [$trxId])->getRow('total_modal') ?? 0;
 
-            foreach ($cashflows as $cf) {
-                $desc = strtoupper($cf->noted);
-                $debit = floatval($cf->debit);
-                $credit = floatval($cf->credit);
+        $detail = [];
+        $totalDebit = 0;
+        $totalCredit = 0;
+        $totalModalBaru = 0;
+        $urutan = 1;
 
-                if (strpos($desc, 'REFUND') !== false) {
-                    $detail[] = ['keterangan' => 'Refund', 'debit' => 0, 'credit' => $credit, 'urutan' => $urutan++, 'tipe' => 'REFUND', 'id_cashflow' => $cf->id];
-                    $totalCredit += $credit;
-                } elseif (strpos($desc, 'ONGKOS') !== false) {
-                    $detail[] = ['keterangan' => 'Biaya Tambahan', 'debit' => 0, 'credit' => $credit, 'urutan' => $urutan++, 'tipe' => 'ONGKOS_KIRIM', 'id_cashflow' => $cf->id];
-                    $totalCredit += $credit;
-                } elseif (strpos($desc, 'DP') !== false || strpos($desc, 'PEMBAYARAN') !== false) {
-                    $tipe = strpos($desc, 'DP') !== false ? 'DP' : 'PEMBAYARAN';
-                    $detail[] = ['keterangan' => 'Pembayaran', 'debit' => $debit, 'credit' => 0, 'urutan' => $urutan++, 'tipe' => $tipe, 'id_cashflow' => $cf->id];
-                    $totalDebit += $debit;
+        // Proses cashflow (pembayaran dan refund)
+        foreach ($cashflows as $cf) {
+            $desc = strtoupper($cf->noted);
+            $debit = floatval($cf->debit);
+            $credit = floatval($cf->credit);
 
-                    if (!$modalSudahDitarik) {
-                        if ($status === 'REFUNDED') {
-                            $detail[] = ['keterangan' => 'Modal Refund', 'debit' => $modalLama, 'credit' => 0, 'urutan' => $urutan++, 'tipe' => 'MODAL_REFUND', 'id_cashflow' => null];
-                        } elseif ($status === 'RETUR' && $closingStatus == 2 && $modalLama > 0) {
-                            $detail[] = ['keterangan' => 'Pembatalan Modal Lama', 'debit' => $modalLama, 'credit' => 0, 'urutan' => $urutan++, 'tipe' => 'MODAL_CORRECTION', 'id_cashflow' => null];
-                        }
+            if (strpos($desc, 'REFUND') !== false && $credit > 0) {
+                $detail[] = [
+                    'keterangan' => 'Refund',
+                    'debit' => 0,
+                    'credit' => $credit,
+                    'urutan' => $urutan++,
+                    'tipe' => 'REFUND',
+                    'id_cashflow' => $cf->id
+                ];
+                $totalCredit += $credit;
+            } elseif (strpos($desc, 'ONGKOS') !== false && $credit > 0) {
+                $detail[] = [
+                    'keterangan' => 'Biaya Tambahan',
+                    'debit' => 0,
+                    'credit' => $credit,
+                    'urutan' => $urutan++,
+                    'tipe' => 'ONGKOS_KIRIM',
+                    'id_cashflow' => $cf->id
+                ];
+                $totalCredit += $credit;
+            } elseif ((strpos($desc, 'DP') !== false || strpos($desc, 'PEMBAYARAN') !== false) && $debit > 0) {
+                $tipe = strpos($desc, 'DP') !== false ? 'DP' : 'PEMBAYARAN';
+                $detail[] = [
+                    'keterangan' => 'Pembayaran',
+                    'debit' => $debit,
+                    'credit' => 0,
+                    'urutan' => $urutan++,
+                    'tipe' => $tipe,
+                    'id_cashflow' => $cf->id
+                ];
+                $totalDebit += $debit;
+            }
+        }
 
-                        foreach ($sales as $s) {
-                            $totalModalBaru += floatval($s->modal_system) * intval($s->jumlah);
-                        }
-
-                        $detail[] = ['keterangan' => 'Modal', 'debit' => 0, 'credit' => $totalModalBaru, 'urutan' => $urutan++, 'tipe' => 'MODAL', 'id_cashflow' => null];
-                        $modalSudahDitarik = true;
-                    }
-                }
+        // Hitung modal baru hanya jika ada pembayaran
+        if ($totalPayment > 0) {
+            foreach ($sales as $s) {
+                $totalModalBaru += floatval($s->modal_system) * intval($s->jumlah);
             }
 
-            $profit = $totalDebit - $totalCredit - $totalModalBaru + $modalLama;
-
-            $this->db->table('transaction_closing')->insert([
-                'transaction_id' => $trxId,
-                'period_start' => $start,
-                'period_end' => $end,
-                'closing_status' => $closingStatus,
-                'payment_count' => count($cashflows),
-                'total_debit' => $totalDebit,
-                'total_credit' => $totalCredit,
-                'total_profit' => $profit,
-                'total_modal' => $totalModalBaru,
-                'closing_date' => date('Y-m-d H:i:s'),
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
-            $closingId = $this->db->insertID();
-
-            foreach ($detail as $d) {
-                $this->db->table('closing_detail')->insert([
-                    'transaction_closing_id' => $closingId,
-                    'keterangan' => $d['keterangan'],
-                    'tipe' => $d['tipe'],
-                    'tanggal' => $tanggal,
-                    'debit' => $d['debit'],
-                    'credit' => $d['credit'],
-                    'urutan' => $d['urutan'],
-                    'id_cashflow' => $d['id_cashflow'],
-                ]);
+            if ($totalModalBaru > 0) {
+                $detail[] = [
+                    'keterangan' => 'Modal',
+                    'debit' => 0,
+                    'credit' => $totalModalBaru,
+                    'urutan' => $urutan++,
+                    'tipe' => 'MODAL',
+                    'id_cashflow' => null
+                ];
             }
+        }
 
-            $this->db->table('transaction')->update(['closing' => 1], ['id' => $trxId]);
-            $this->db->table('sales_product')->update(['closing' => 1], ['id_transaction' => $trxId]);
-            foreach ($cashflows as $cf) {
-                $this->db->table('cashflow')->update(['closing' => 1], ['id' => $cf->id]);
-            }
-
-            $results[] = [
-                'invoice' => $invoice,
-                'tanggal' => $tanggal,
-                'profit' => $profit,
-                'total_debit' => $totalDebit,
-                'total_credit' => $totalCredit,
-                'total_modal' => $totalModalBaru,
-                'detail' => $detail
+        // Handle kasus refund penuh (total_credit = total_debit dan status REFUNDED)
+        if ($status === 'REFUNDED' && $totalCredit > 0 && $totalCredit == $totalDebit && $totalModalBaru > 0) {
+            $detail[] = [
+                'keterangan' => 'Modal Refund',
+                'debit' => $totalModalBaru,
+                'credit' => 0,
+                'urutan' => $urutan++,
+                'tipe' => 'MODAL_REFUND',
+                'id_cashflow' => null
             ];
+            // Karena modal dikembalikan, net modal menjadi 0
+            $totalModalBaru = 0;
+        }
+
+        // Hitung profit akhir
+        $profit = $totalDebit - $totalCredit - $totalModalBaru + $modalLama;
+
+        // Insert ke transaction_closing
+        $this->db->table('transaction_closing')->insert([
+            'transaction_id' => $trxId,
+            'period_start' => $start,
+            'period_end' => $end,
+            'closing_status' => $closingStatus,
+            'payment_count' => count($cashflows),
+            'total_debit' => $totalDebit,
+            'total_credit' => $totalCredit,
+            'total_profit' => $profit,
+            'total_modal' => $totalModalBaru,
+            'closing_date' => date('Y-m-d H:i:s'),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        $closingId = $this->db->insertID();
+
+        // Urutkan detail
+        $detail = $this->customSortDetail($detail);
+
+        // Insert detail
+        foreach ($detail as $d) {
+            $this->db->table('closing_detail')->insert([
+                'transaction_closing_id' => $closingId,
+                'keterangan' => $d['keterangan'],
+                'tipe' => $d['tipe'],
+                'tanggal' => $tanggal,
+                'debit' => $d['debit'],
+                'credit' => $d['credit'],
+                'urutan' => $d['urutan'],
+                'id_cashflow' => $d['id_cashflow'],
+            ]);
+        }
+
+        // Update status closing
+        $this->db->table('transaction')->where('id', $trxId)->update(['closing' => 1]);
+        $this->db->table('sales_product')->where('id_transaction', $trxId)->update(['closing' => 1]);
+        foreach ($cashflows as $cf) {
+            $this->db->table('cashflow')->where('id', $cf->id)->update(['closing' => 1]);
         }
 
         return [
-            'period' => "$start to $end",
-            'data' => $results
+            'invoice' => $invoice,
+            'tanggal' => $tanggal,
+            'profit' => $profit,
+            'total_debit' => $totalDebit,
+            'total_credit' => $totalCredit,
+            'total_modal' => $totalModalBaru,
+            'detail' => $detail
         ];
+    }
+
+    private function customSortDetail(array $details): array
+    {
+        $order = [
+            'DP' => 1,
+            'PEMBAYARAN' => 2,
+            'MODAL' => 3,
+            'REFUND' => 4,
+            'MODAL_REFUND' => 5,
+            'MODAL_CORRECTION' => 6,
+            'ONGKOS_KIRIM' => 7
+        ];
+
+        usort($details, function ($a, $b) use ($order) {
+            $aOrder = $order[$a['tipe']] ?? 999;
+            $bOrder = $order[$b['tipe']] ?? 999;
+            return $aOrder === $bOrder ? $a['urutan'] <=> $b['urutan'] : $aOrder <=> $bOrder;
+        });
+
+        foreach ($details as $i => &$d) {
+            $d['urutan'] = $i + 1;
+        }
+
+        return $details;
     }
 
     public function listClosings()
     {
-        $closings = $this->db->table('transaction_closing')
-            ->select('period_start, period_end, COUNT(*) as jumlah_transaksi, SUM(total_profit) as total_profit, SUM(total_modal) as total_modal')
-            ->groupBy('period_start, period_end')
-            ->orderBy('period_start', 'desc')
+        $result = $this->db->table('transaction_closing')
+            ->select("DATE_FORMAT(period_start, '%Y-%m') as period")
+            ->groupBy("period")
+            ->orderBy("period", "desc")
             ->get()->getResult();
 
-        return $this->response->setJSON($closings);
-    }
-
-
-    public function getClosingDetail($id)
-    {
-        $closing = $this->db->table('transaction_closing')->where('id', $id)->get()->getRow();
-        $details = $this->db->table('closing_detail')->where('transaction_closing_id', $id)->orderBy('urutan')->get()->getResult();
+        $periods = array_map(function ($row) {
+            return $row->period;
+        }, $result);
 
         return $this->response->setJSON([
-            'summary' => $closing,
-            'detail' => $details
+            'status' => 'success',
+            'periods' => $periods
         ]);
     }
+
+    public function getClosingDetailsByMonth()
+    {
+        $json = $this->request->getJSON();
+        $year = $json->year ?? null;
+        $month = $json->month ?? null;
+
+        if (!$year || !$month) {
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'year dan month dibutuhkan.'
+            ])->setStatusCode(400);
+        }
+
+        $startDate = "$year-$month-01 00:00:00";
+        $endDate = date("Y-m-t 23:59:59", strtotime($startDate));
+
+        // Ambil data closing berdasarkan period_start
+        $closings = $this->db->table('transaction_closing')
+            ->where('period_start >=', $startDate)
+            ->where('period_start <=', $endDate)
+            ->get()->getResult();
+
+        if (empty($closings)) {
+            return $this->response->setJSON([
+                'status' => 'empty',
+                'message' => 'Tidak ada data closing untuk bulan tersebut.'
+            ]);
+        }
+
+        $closingIds = array_column($closings, 'id');
+
+        // Ambil detail dari semua closing
+        $detailRows = $this->db->table('closing_detail')
+            ->whereIn('transaction_closing_id', $closingIds)
+            ->orderBy('tanggal', 'asc')
+            ->orderBy('urutan', 'asc')
+            ->get()->getResult();
+
+        // Inisialisasi variabel summary
+        $summary = [
+            'total_debit' => 0,
+            'total_credit' => 0,
+            'total_modal' => 0,
+            'total_profit' => 0
+        ];
+
+        // Gabungkan detail ke transaksi
+        $grouped = [];
+        foreach ($closings as $closing) {
+            $grouped[$closing->id] = [
+                'invoice' => $this->getInvoice($closing->transaction_id),
+                'tanggal' => $this->getTanggal($closing->transaction_id),
+                'profit' => floatval($closing->total_profit),
+                'total_debit' => floatval($closing->total_debit),
+                'total_credit' => floatval($closing->total_credit),
+                'total_modal' => floatval($closing->total_modal),
+                'detail' => []
+            ];
+
+            // Hitung summary
+            $summary['total_debit'] += floatval($closing->total_debit);
+            $summary['total_credit'] += floatval($closing->total_credit);
+            $summary['total_modal'] += floatval($closing->total_modal);
+            $summary['total_profit'] += floatval($closing->total_profit);
+        }
+
+        foreach ($detailRows as $d) {
+            if (!isset($grouped[$d->transaction_closing_id]))
+                continue;
+
+            $grouped[$d->transaction_closing_id]['detail'][] = [
+                'keterangan' => $d->keterangan,
+                'debit' => floatval($d->debit),
+                'credit' => floatval($d->credit),
+                'urutan' => intval($d->urutan),
+                'tipe' => $d->tipe,
+                'id_cashflow' => $d->id_cashflow
+            ];
+        }
+
+        return $this->response->setJSON([
+            'status' => 'success',
+            'month' => "$month/$year",
+            'summary' => $summary, // Tambahkan summary di sini
+            'data' => array_values($grouped) // reset key agar jadi array numerik
+        ]);
+    }
+    // Ambil invoice
+    private function getInvoice($transactionId)
+    {
+        return $this->db->table('transaction')->select('invoice')->where('id', $transactionId)->get()->getRow('invoice');
+    }
+
+    // Ambil tanggal (dari date_time)
+    private function getTanggal($transactionId)
+    {
+        $trx = $this->db->table('transaction')->select('date_time')->where('id', $transactionId)->get()->getRow();
+        return $trx ? date('Y-m-d', strtotime($trx->date_time)) : null;
+    }
+
+    public function rollbackClosingByMonth()
+    {
+        $json = $this->request->getJSON();
+        $year = $json->year ?? null;
+        $month = $json->month ?? null;
+
+        if (!$year || !$month) {
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'year dan month dibutuhkan.'
+            ])->setStatusCode(400);
+        }
+
+        $startDate = "$year-$month-01 00:00:00";
+        $endDate = date("Y-m-t 23:59:59", strtotime($startDate));
+
+        // Mulai transaction database
+        $this->db->transBegin();
+
+        try {
+            // 1. Ambil semua data closing yang akan dirollback
+            $closings = $this->db->table('transaction_closing')
+                ->where('period_start >=', $startDate)
+                ->where('period_start <=', $endDate)
+                ->get()->getResult();
+
+            if (empty($closings)) {
+                return $this->response->setJSON([
+                    'status' => 'empty',
+                    'message' => 'Tidak ada data closing untuk bulan tersebut.'
+                ]);
+            }
+
+            $closingIds = array_column($closings, 'id');
+            $transactionIds = array_column($closings, 'transaction_id');
+
+            // 2. Ambil semua id_cashflow dari closing_detail yang akan dirollback
+            $cashflowIds = $this->db->table('closing_detail')
+                ->select('id_cashflow')
+                ->whereIn('transaction_closing_id', $closingIds)
+                ->where('id_cashflow IS NOT NULL')
+                ->get()
+                ->getResultArray();
+            $cashflowIds = array_column($cashflowIds, 'id_cashflow');
+
+            // 3. Hapus data di closing_detail
+            $this->db->table('closing_detail')
+                ->whereIn('transaction_closing_id', $closingIds)
+                ->delete();
+
+            // 4. Hapus data di transaction_closing
+            $this->db->table('transaction_closing')
+                ->whereIn('id', $closingIds)
+                ->delete();
+
+            // 5. Update status di tabel terkait
+            // a. Update transaction.closing = 0
+            $this->db->table('transaction')
+                ->whereIn('id', $transactionIds)
+                ->update(['closing' => 0]);
+
+            // b. Update sales_product.closing = 0
+            $this->db->table('sales_product')
+                ->whereIn('id_transaction', $transactionIds)
+                ->update(['closing' => 0]);
+
+            // c. Update cashflow.closing = 0 berdasarkan id_cashflow dari closing_detail
+            if (!empty($cashflowIds)) {
+                $this->db->table('cashflow')
+                    ->whereIn('id', $cashflowIds)
+                    ->update(['closing' => 0]);
+            }
+
+            // Commit transaction jika semua sukses
+            $this->db->transCommit();
+
+            return $this->response->setJSON([
+                'status' => 'success',
+                'message' => 'Rollback data closing bulan ' . $month . '/' . $year . ' berhasil',
+                'affected_transactions' => count($transactionIds),
+                'affected_cashflows' => count($cashflowIds)
+            ]);
+
+        } catch (\Exception $e) {
+            // Rollback transaction jika ada error
+            $this->db->transRollback();
+
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'Gagal melakukan rollback: ' . $e->getMessage()
+            ])->setStatusCode(500);
+        }
+    }
+
+    // Helper function untuk mendapatkan invoice berdasarkan transaction_ids
+    private function getInvoicesDetail(array $transactionIds): array
+    {
+        if (empty($transactionIds)) {
+            return [];
+        }
+
+        $result = $this->db->table('transaction')
+            ->select('invoice')
+            ->whereIn('id', $transactionIds)
+            ->get()
+            ->getResultArray();
+
+        return $result ?: [];
+    }
+
 }

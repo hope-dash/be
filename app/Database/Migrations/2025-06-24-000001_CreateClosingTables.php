@@ -21,6 +21,7 @@ class CreateClosingTables extends Migration
                 'unsigned' => TRUE,
                 'null' => TRUE,
             ],
+            'transaction_status' => ['type' => 'VARCHAR', 'constraint' => 50],
             'period_start' => [
                 'type' => 'DATE',
                 'null' => FALSE,
