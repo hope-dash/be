@@ -99,7 +99,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'product',
                 'target_id' => $stock['product_id'],
-                'description' => "Mengurangi stok produk {$kode_barang} pada toko {$id_toko} sebanyak {$jumlah}",
+                'description' => "Transaksi Mengurangi stok produk {$kode_barang} pada toko {$id_toko} sebanyak {$jumlah} ",
                 'detail' => [
                     'sebelum' => (int) $stock['stock'],
                     'dikurangi' => (int) $jumlah,
