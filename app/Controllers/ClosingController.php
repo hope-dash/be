@@ -56,6 +56,7 @@ class ClosingController extends BaseController
             'results' => $results
         ]);
     }
+
     private function processClosing($trx, $start, $end, $isAdjustment = false)
     {
         $trxId = $trx->id;
@@ -65,7 +66,7 @@ class ClosingController extends BaseController
         $tanggal = date('Y-m-d', strtotime($trx->date_time));
         $totalPayment = floatval($trx->total_payment);
 
-        // 1. Get unclosed cashflows only (closing = 0)
+        // 1. Get unclosed cashflows
         $cashflows = $this->db->query("SELECT * FROM cashflow WHERE noted LIKE ? AND closing = 0 ORDER BY date_time ASC", ['%' . $invoice])->getResult();
 
         // 2. Get sales products
@@ -74,7 +75,7 @@ class ClosingController extends BaseController
             ->get()
             ->getResult();
 
-        // 3. Check previous closing status
+        // 3. Get previous closing data
         $previousClosing = $this->db->table('transaction_closing')
             ->where('transaction_id', $trxId)
             ->orderBy('id', 'DESC')
@@ -82,14 +83,16 @@ class ClosingController extends BaseController
             ->getRow();
 
         $modalLama = $previousClosing ? $previousClosing->total_modal : 0;
-        $isDPPreviouslyClosed = $previousClosing && strpos($previousClosing->closing_status, 'DP') !== false;
+        $prevStatus = $previousClosing ? strtoupper(string: $previousClosing->transaction_status) : null;
+        $isDPPreviouslyClosed = $prevStatus === 'PARTIALLY_PAID';
 
         $detail = [];
         $urutan = 1;
+        $hasRefund = false;
 
-        // 4. Process unclosed cashflows
+        // 4. Process cashflows
         foreach ($cashflows as $cf) {
-            $desc = strtoupper($cf->noted);
+            $desc = strtoupper(trim($cf->noted));
             $debit = floatval($cf->debit);
             $credit = floatval($cf->credit);
 
@@ -102,6 +105,7 @@ class ClosingController extends BaseController
                     'tipe' => 'REFUND',
                     'id_cashflow' => $cf->id
                 ];
+                $hasRefund = true;
             } elseif ((strpos($desc, 'DP') !== false || strpos($desc, 'PEMBAYARAN') !== false) && $debit > 0) {
                 $tipe = strpos($desc, 'DP') !== false ? 'DP' : 'PEMBAYARAN';
                 $detail[] = [
@@ -112,10 +116,19 @@ class ClosingController extends BaseController
                     'tipe' => $tipe,
                     'id_cashflow' => $cf->id
                 ];
+            } elseif ((strpos($desc, 'ONGKIR') !== false || strpos($desc, 'ONGKOS KIRIM') !== false) && $credit > 0) {
+                $detail[] = [
+                    'keterangan' => 'Ongkos Kirim',
+                    'debit' => 0,
+                    'credit' => $credit,
+                    'urutan' => $urutan++,
+                    'tipe' => 'ONGKOS_KIRIM',
+                    'id_cashflow' => $cf->id
+                ];
             }
         }
 
-        // 5. Handle returns (closing = 2)
+        // 5. Handle returns
         $hasReturnedItems = $this->db->table('sales_product')
             ->where('id_transaction', $trxId)
             ->where('closing', 2)
@@ -132,8 +145,20 @@ class ClosingController extends BaseController
             ];
         }
 
-        // 6. Calculate new modal (only for non-DP and non-return cases)
-        if (!$isDPPreviouslyClosed && !$hasReturnedItems && $totalPayment > 0) {
+        // 6. Calculate new modal
+        $totalModalBaru = 0;
+        $hasIncomingPayment = false;
+        foreach ($cashflows as $cf) {
+            $desc = strtoupper(trim($cf->noted));
+            if ((strpos($desc, 'DP') !== false || strpos($desc, 'PEMBAYARAN') !== false) && floatval($cf->debit) > 0) {
+                $hasIncomingPayment = true;
+                break;
+            }
+        }
+
+        $shouldCountModal = !$isDPPreviouslyClosed && !$hasReturnedItems && $closingStatus == 0 && $hasIncomingPayment;
+
+        if ($shouldCountModal) {
             $totalModalBaru = array_reduce($sales, function ($carry, $s) {
                 return $carry + (floatval($s->modal_system) * intval($s->jumlah));
             }, 0);
@@ -150,43 +175,55 @@ class ClosingController extends BaseController
             }
         }
 
-        // 7. Handle refunded transactions
-        if ($status === 'REFUNDED' && $modalLama > 0 && !$hasReturnedItems) {
-            $detail[] = [
-                'keterangan' => 'Modal Refund',
-                'debit' => $modalLama,
-                'credit' => 0,
-                'urutan' => $urutan++,
-                'tipe' => 'MODAL_REFUND',
-                'id_cashflow' => null
-            ];
+        // 7. Handle refund with modal return
+        if ($status === 'REFUNDED' && $hasRefund) {
+            if ($closingStatus == 0) {
+                // Belum pernah closing
+                $totalModal = array_reduce($sales, function ($carry, $s) {
+                    return $carry + (floatval($s->modal_system) * intval($s->jumlah));
+                }, 0);
+                if ($totalModal > 0) {
+                    $detail[] = [
+                        'keterangan' => 'Pengembalian Modal',
+                        'debit' => $totalModal,
+                        'credit' => 0,
+                        'urutan' => $urutan++,
+                        'tipe' => 'MODAL_REFUND',
+                        'id_cashflow' => null
+                    ];
+                }
+            } elseif ($closingStatus == 2 && $modalLama > 0) {
+                // Sudah pernah closing, lakukan koreksi modal lama
+                $detail[] = [
+                    'keterangan' => 'Pengembalian Modal',
+                    'debit' => $modalLama,
+                    'credit' => 0,
+                    'urutan' => $urutan++,
+                    'tipe' => 'MODAL_REFUND',
+                    'id_cashflow' => null
+                ];
+            }
         }
 
-        // 8. Calculate totals from detail only
-        $totalDebit = array_reduce($detail, function ($carry, $item) {
-            return $carry + $item['debit'];
-        }, 0);
-
-        $totalCredit = array_reduce($detail, function ($carry, $item) {
-            return $carry + $item['credit'];
-        }, 0);
-
+        // 8. Totals
+        $totalDebit = array_sum(array_column($detail, 'debit'));
+        $totalCredit = array_sum(array_column($detail, 'credit'));
         $profit = $totalDebit - $totalCredit;
 
-        // 9. Save to database
+        // 9. Save closing
         $this->db->table('transaction_closing')->insert([
             'transaction_id' => $trxId,
             'period_start' => $start,
             'period_end' => $end,
             'closing_status' => $closingStatus,
+            'transaction_status' => $status,
             'payment_count' => count($cashflows),
             'total_debit' => $totalDebit,
             'total_credit' => $totalCredit,
             'total_profit' => $profit,
-            'total_modal' => $totalModalBaru ?? 0,
+            'total_modal' => $totalModalBaru,
             'closing_date' => date('Y-m-d H:i:s')
         ]);
-
         $closingId = $this->db->insertID();
 
         // 10. Save details
@@ -214,15 +251,23 @@ class ClosingController extends BaseController
         }
 
         // 12. Return response
-        return [
+        $response = [
             'invoice' => $invoice,
             'tanggal' => $tanggal,
             'profit' => $profit,
             'total_debit' => $totalDebit,
             'total_credit' => $totalCredit,
+            'transaction_status' => $status,
             'detail' => $this->customSortDetail($detail)
         ];
+
+        if (!$isDPPreviouslyClosed && $totalModalBaru > 0 && $status !== 'REFUNDED') {
+            $response['total_modal'] = $totalModalBaru;
+        }
+
+        return $response;
     }
+
 
     private function customSortDetail(array $details): array
     {
@@ -324,6 +369,7 @@ class ClosingController extends BaseController
                 'total_debit' => floatval($closing->total_debit),
                 'total_credit' => floatval($closing->total_credit),
                 'total_modal' => floatval($closing->total_modal),
+                'transaction_status' => $closing->transaction_status,
                 'detail' => []
             ];
 
@@ -344,6 +390,7 @@ class ClosingController extends BaseController
                 'credit' => floatval($d->credit),
                 'urutan' => intval($d->urutan),
                 'tipe' => $d->tipe,
+                'tanggal' => $d->tanggal,
                 'id_cashflow' => $d->id_cashflow
             ];
         }

@@ -94,7 +94,7 @@ class CreateClosingTables extends Migration
                 'null' => TRUE,
             ],
             'tipe' => [
-                'type' => "ENUM('PEMBAYARAN', 'REFUND', 'DP', 'ONGKOS_KIRIM')",
+                'type' => "ENUM('PEMBAYARAN', 'REFUND', 'DP', 'ONGKOS_KIRIM', 'MODAL', 'MODAL_REFUND', 'MODAL_CORRECTION')",
                 'null' => TRUE,
             ],
             'tanggal' => [

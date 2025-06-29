@@ -2301,30 +2301,6 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaksi tidak ditemukan atau status bukan PAID.', null, 404);
         }
 
-        // Jika status baru adalah IN_DELIVERY, lakukan pengecekan biaya pengiriman dan insert ke cashflow jika perlu
-        if ($newStatus === 'IN_DELIVERY') {
-            $biayaPengirimanMeta = $db->table('transaction_meta')
-                ->where('transaction_id', $transactionId)
-                ->where('key', 'biaya_pengiriman')
-                ->get()
-                ->getRowArray();
-
-            if ($biayaPengirimanMeta && is_numeric($biayaPengirimanMeta['value']) && (float) $biayaPengirimanMeta['value'] > 0) {
-                // Pastikan metode pembayaran ada di input, jika tidak bisa set default atau handle error
-                $metodePembayaran = isset($data->metode_pembayaran) ? $data->metode_pembayaran : 'unknown';
-
-                $db->table('cashflow')->insert([
-                    'debit' => 0,
-                    'credit' => (float) $biayaPengirimanMeta['value'],
-                    'noted' => "Biaya Pengiriman Transaksi " . $transaction['invoice'],
-                    'type' => 'Transaction',
-                    'status' => 'SUCCESS',
-                    'date_time' => date('Y-m-d H:i:s'),
-                    'id_toko' => $transaction['id_toko'],
-                    'metode' => $metodePembayaran
-                ]);
-            }
-        }
 
         // Update status transaksi
         $builder->where('id', $transactionId)->update([
