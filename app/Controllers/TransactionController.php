@@ -1005,6 +1005,166 @@ class TransactionController extends BaseController
             200
         );
     }
+
+    public function listSalesProductWithTransactionBaru()
+    {
+        $limit = (int) $this->request->getGet('limit') ?: 10;
+        $page = (int) $this->request->getGet('page') ?: 1;
+        $offset = ($page - 1) * $limit;
+
+        $sortBy = $this->request->getGet('sortBy') ?: 'transaction.created_at';
+        $sortMethod = $this->request->getGet('sortMethod') === 'desc' ? 'DESC' : 'ASC';
+        $idToko = $this->request->getGet('id_toko');
+        $search = $this->request->getGet('search');
+        $dateStart = $this->request->getGet('date_start');
+        $dateEnd = $this->request->getGet('date_end');
+        $status = $this->request->getGet('status');
+        $role = $this->request->getGet('role');
+
+
+        // Base builder for main query
+        $baseBuilder = $this->db->table('sales_product sp')
+            ->select("sp.*, transaction.invoice, transaction.date_time, transaction.status, transaction.id_toko,
+              p.nama_barang, p.id_barang, mb.nama_model, s.seri,
+              CONCAT(
+                  COALESCE(p.nama_barang, ''), ' ',
+                  COALESCE(mb.nama_model, ''), ' ',
+                  COALESCE(s.seri, '')
+              ) AS nama_lengkap_barang")
+            ->join('transaction', 'sp.id_transaction = transaction.id')
+            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+            ->join('seri s', 'p.id_seri_barang = s.id', 'left');
+
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
+        }
+
+        if (!empty($role) && !$idToko) {
+            $baseBuilder->whereIn('transaction.id_toko', $role);
+        }
+        if ($idToko) {
+            $baseBuilder->where('sales_product.id_toko', $idToko);
+        }
+
+        if ($dateStart) {
+            $baseBuilder->where('transaction.date_time >=', $dateStart . ' 00:00:00');
+        }
+
+        if ($dateEnd) {
+            $baseBuilder->where('transaction.date_time <=', $dateEnd . ' 23:59:59');
+        }
+
+        if ($search) {
+            $baseBuilder->groupStart()
+                ->like('sp.kode_barang', $search)
+                ->orLike('transaction.invoice', $search)
+                ->orLike('p.nama_barang', $search)
+                ->orLike('mb.nama_model', $search)
+                ->orLike('s.seri', $search)
+                ->groupEnd();
+        }
+
+        if ($status === 'paid') {
+            $baseBuilder->whereIn('transaction.status', [
+                'SUCCESS',
+                'PAID',
+                'PACKING',
+                'IN_DELIVERY',
+                'PARTIALLY_PAID',
+                'RETUR'
+            ]);
+        } elseif ($status === 'unpaid') {
+            $baseBuilder->where('transaction.status', 'WAITING_PAYMENT');
+        }
+
+        // clone query for count
+        $countBuilder = clone $baseBuilder;
+
+        // total data
+        $total_data = $countBuilder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        // data paginated
+        $result = $baseBuilder
+            ->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+        // Create a separate builder for sum query
+        $sumBuilder = $this->db->table('sales_product')
+            ->join('transaction', 'sales_product.id_transaction = transaction.id');
+
+        if (is_string($role)) {
+            $role = array_map('intval', explode(',', $role));
+        }
+
+        if (!empty($role) && !$idToko) {
+            $baseBuilder->whereIn('transaction.id_toko', $role);
+        }
+        if ($idToko) {
+            $baseBuilder->where('sales_product.id_toko', $idToko);
+        }
+
+        if ($dateStart) {
+            $baseBuilder->where('transaction.date_time >=', $dateStart . ' 00:00:00');
+        }
+
+        if ($dateEnd) {
+            $baseBuilder->where('transaction.date_time <=', $dateEnd . ' 23:59:59');
+        }
+
+        if ($search) {
+            $baseBuilder->groupStart()
+                ->like('sp.kode_barang', $search)
+                ->orLike('transaction.invoice', $search)
+                ->orLike('p.nama_barang', $search)
+                ->orLike('mb.nama_model', $search)
+                ->orLike('s.seri', $search)
+                ->groupEnd();
+        }
+
+        if ($status === 'paid') {
+            $baseBuilder->whereIn('transaction.status', [
+                'SUCCESS',
+                'PAID',
+                'PACKING',
+                'IN_DELIVERY',
+                'PARTIALLY_PAID',
+                'RETUR'
+            ]);
+        } elseif ($status === 'unpaid') {
+            $baseBuilder->where('transaction.status', 'WAITING_PAYMENT');
+        }
+
+        // sum actual_total dan total_modal
+        $sumData = $sumBuilder
+            ->select([
+                'SUM(sales_product.actual_total) AS total_actual',
+                'SUM(sales_product.total_modal) AS total_modal'
+            ])
+            ->get()
+            ->getRow();
+
+        return $this->jsonResponse->multiResp(
+            '',
+            [
+                'sum' => [
+                    'total_modal' => floatval($sumData->total_modal ?? 0),
+                    'total_actual' => floatval($sumData->total_actual ?? 0),
+                ],
+                'result' => $result
+            ],
+            $total_data,
+            $total_page,
+            $page,
+            $limit,
+            200
+        );
+    }
+
+
     public function calculateExpenseAllocation()
     {
         $date_start = $this->request->getGet('date_start');

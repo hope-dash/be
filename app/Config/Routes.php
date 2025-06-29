@@ -110,6 +110,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('reporting/due-transaction', 'TransactionController::getUpcomingDueTransactions');
     $routes->get('reporting/revenue-profit-detail', 'TransactionController::listSalesProductWithTransaction');
     $routes->get('reporting/log', 'LogAktivitasController::index');
+    $routes->get('reporting/sales-product', 'TransactionController::listSalesProductWithTransactionBaru');
 
     $routes->group('closing', function ($routes) {
         $routes->post('process', 'ClosingController::closeMonthly');
