@@ -63,7 +63,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-    private function checkAndUpdateStock($user_id, $id_toko, $kode_barang, $jumlah)
+    private function checkAndUpdateStock($user_id, $id_toko, $kode_barang, $jumlah, $insertID)
     {
         // Ambil data stok dari toko
         $stock = $this->stockModel
@@ -99,7 +99,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'product',
                 'target_id' => $stock['product_id'],
-                'description' => "Transaksi Mengurangi stok produk {$kode_barang} pada toko {$id_toko} sebanyak {$jumlah} ",
+                'description' => "Mengurangi stok produk {$kode_barang} pada toko {$id_toko} sebanyak {$jumlah} untuk transaksi {$insertID}",
                 'detail' => [
                     'sebelum' => (int) $stock['stock'],
                     'dikurangi' => (int) $jumlah,
@@ -227,6 +227,22 @@ class TransactionController extends BaseController
             // Hitung Discount Rate
             $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
 
+            $transactionData = [
+                'amount' => $grandTotal,
+                'status' => 'WAITING_PAYMENT',
+                'po' => $data->po,
+                'id_toko' => $data->id_toko,
+                "created_by" => $token['user_id'],
+                'date_time' => date('Y-m-d H:i:s')
+            ];
+
+            if (!$this->transactions->insert($transactionData)) {
+                throw new \Exception("Gagal menyimpan transaksi.");
+            }
+
+            $insertID = $this->transactions->insertID();
+            $invoice = "INV/" . date('y/m/d') . '/' . $insertID;
+
             $salesData = [];
             foreach ($data->item as $item) {
                 if (!isset($productMap[$item->kode_barang])) {
@@ -235,7 +251,7 @@ class TransactionController extends BaseController
 
                 $product = $productMap[$item->kode_barang];
 
-                $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $item->kode_barang, $item->jumlah);
+                $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $item->kode_barang, $item->jumlah, $insertID);
 
 
                 // Harga modal setelah diskon
@@ -254,21 +270,7 @@ class TransactionController extends BaseController
                 ];
             }
 
-            $transactionData = [
-                'amount' => $grandTotal,
-                'status' => 'WAITING_PAYMENT',
-                'po' => $data->po,
-                'id_toko' => $data->id_toko,
-                "created_by" => $token['user_id'],
-                'date_time' => date('Y-m-d H:i:s')
-            ];
 
-            if (!$this->transactions->insert($transactionData)) {
-                throw new \Exception("Gagal menyimpan transaksi.");
-            }
-
-            $insertID = $this->transactions->insertID();
-            $invoice = "INV/" . date('y/m/d') . '/' . $insertID;
 
             if (!$this->transactions->update($insertID, ['invoice' => $invoice])) {
                 throw new \Exception("Gagal memperbarui nomor invoice.");
@@ -918,7 +920,6 @@ class TransactionController extends BaseController
             'total_profit' => ceil($revenue - $total_modal)
         ];
     }
-
     private function getTransactionGantung($start_val, $end_val, $id_toko, $role)
     {
         $query = $this->db->table('transaction')
@@ -1005,7 +1006,6 @@ class TransactionController extends BaseController
             200
         );
     }
-
     public function listSalesProductWithTransactionBaru()
     {
         $limit = (int) $this->request->getGet('limit') ?: 10;
@@ -1163,8 +1163,6 @@ class TransactionController extends BaseController
             200
         );
     }
-
-
     public function calculateExpenseAllocation()
     {
         $date_start = $this->request->getGet('date_start');
@@ -1506,8 +1504,6 @@ class TransactionController extends BaseController
         }
     }
 
-
-
     public function updateTransactionStatusToRefunded($transactionId)
     {
         $token = $this->request->user;
@@ -1641,14 +1637,14 @@ class TransactionController extends BaseController
             $cancelReason = $data->cancel_reason;
             $barangCacat = $data->barang_cacat === "true";
 
-            // Determine new status based on current status
+            // Tentukan status baru
             $newStatus = ($transaction['status'] === 'WAITING_PAYMENT') ? 'CANCEL' : 'NEED_REFUNDED';
 
-            // Update transaction status
+            // Update status transaksi
             $updateData = [
                 'status' => $newStatus,
                 'updated_at' => date('Y-m-d H:i:s'),
-                'closing' => $transaction['closing'] !== 0 ? 2 : 0, // Set closing to 2 if already closed
+                'closing' => $transaction['closing'] !== 0 ? 2 : 0,
                 'updated_by' => $token['user_id']
             ];
 
@@ -1656,23 +1652,51 @@ class TransactionController extends BaseController
                 ->where('id', $transactionId)
                 ->update($updateData);
 
-            // Retrieve associated products
+            // Ambil produk terkait transaksi
             $products = $db->table('sales_product')
                 ->where('id_transaction', $transactionId)
                 ->get()
                 ->getResultArray();
 
-            // Return products to stock
+            // Ambil semua kode_barang
+            $kodeBarangList = array_column($products, 'kode_barang');
+
+            // Ambil mapping kode_barang -> id dari tabel product
+            $productRows = $db->table('product')
+                ->select('id_barang, id')
+                ->whereIn('id_barang', $kodeBarangList)
+                ->get()
+                ->getResultArray();
+
+            $productMap = [];
+            foreach ($productRows as $p) {
+                $productMap[$p['id_barang']] = $p['id'];
+            }
+
+            // Kembalikan stok & log aktivitas
             foreach ($products as $product) {
                 $updateField = $barangCacat ? 'barang_cacat' : 'stock';
+
                 $db->table('stock')
                     ->where('id_barang', $product['kode_barang'])
                     ->where('id_toko', $transaction['id_toko'])
-                    ->set($updateField, "$updateField + " . $product['jumlah'], false)
+                    ->set($updateField, "$updateField + {$product['jumlah']}", false)
                     ->update();
+
+                $idProduct = $productMap[$product['kode_barang']] ?? null;
+                if ($idProduct) {
+                    log_aktivitas([
+                        'user_id' => $token['user_id'],
+                        'action_type' => 'UPDATE',
+                        'target_table' => 'product',
+                        'target_id' => $idProduct,
+                        'description' => "Mengembalikan stok produk {$product['kode_barang']} pada toko {$transaction['id_toko']} sebanyak {$product['jumlah']} $updateField dari transaksi $transactionId.",
+                        'detail' => []
+                    ]);
+                }
             }
 
-            // Save metadata
+            // Simpan metadata pembatalan
             $metaData = [
                 [
                     'transaction_id' => $transactionId,
@@ -1692,12 +1716,13 @@ class TransactionController extends BaseController
 
             $db->transCommit();
 
+            // Log aktivitas transaksi
             log_aktivitas([
                 'user_id' => $token['user_id'],
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => "Update transaksi $transactionId menjadi $newStatus",
+                'description' => "Update transaksi $transactionId menjadi $newStatus karena $cancelReason",
             ]);
 
             return $this->jsonResponse->oneResp(
@@ -1715,6 +1740,7 @@ class TransactionController extends BaseController
             );
         }
     }
+
     public function updateTransactionStatusToPartiallyPaid($transactionId)
     {
         $token = $this->request->user;
@@ -2255,7 +2281,7 @@ class TransactionController extends BaseController
                 $diffJumlah = $newJumlah - $oldJumlah;
 
                 if ($diffJumlah > 0) {
-                    $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $kode_barang, $diffJumlah);
+                    $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $kode_barang, $diffJumlah, $transactionId);
                 } elseif ($diffJumlah < 0) {
                     $this->restoreStock($token['user_id'], $data->id_toko, $kode_barang, abs($diffJumlah));
                 }
@@ -2385,7 +2411,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'product',
                 'target_id' => $stok['product_id'],
-                'description' => "Mengembalikan stok produk {$kodeBarang} pada toko {$idToko} sebanyak {$jumlah}.",
+                'description' => "Mengembalikan stok produk {$kodeBarang} pada toko {$idToko} sebanyak {$jumlah} dari transaksi.",
                 'detail' => [
                     'stok_sebelum' => (int) $stok['stock'],
                     'jumlah_ditambah' => (int) $jumlah,
