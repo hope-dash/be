@@ -399,6 +399,7 @@ class ClosingController extends BaseController
 
             $closingData = [
                 'invoice' => $closing->invoice,
+                'id_toko' => $closing->id_toko,
                 'tanggal' => date('Y-m-d', strtotime($closing->date_time)),
                 'profit' => floatval($closing->total_profit),
                 'total_debit' => floatval($closing->total_debit),
