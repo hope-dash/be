@@ -65,6 +65,7 @@ class ClosingController extends BaseController
         $closingStatus = $trx->closing;
         $tanggal = date('Y-m-d', strtotime($trx->date_time));
         $totalPayment = floatval($trx->total_payment);
+        $idToko = $trx->id_toko ?? null;
 
         // 1. Get unclosed cashflows
         $cashflows = $this->db->query("SELECT * FROM cashflow WHERE noted LIKE ? AND closing = 0 ORDER BY date_time ASC", ['%' . $invoice])->getResult();
@@ -213,6 +214,7 @@ class ClosingController extends BaseController
         // 9. Save closing
         $this->db->table('transaction_closing')->insert([
             'transaction_id' => $trxId,
+            'id_toko' => $idToko,
             'period_start' => $start,
             'period_end' => $end,
             'closing_status' => $closingStatus,
@@ -329,11 +331,17 @@ class ClosingController extends BaseController
         $startDate = "$year-$month-01 00:00:00";
         $endDate = date("Y-m-t 23:59:59", strtotime($startDate));
 
-        // Ambil data closing berdasarkan period_start
-        $closings = $this->db->table('transaction_closing')
-            ->where('period_start >=', $startDate)
-            ->where('period_start <=', $endDate)
-            ->get()->getResult();
+        // Get all needed data in optimized queries
+        $query = $this->db->table('transaction_closing tc')
+            ->select('tc.*, t.toko_name, tr.invoice, tr.date_time')
+            ->join('toko t', 'tc.id_toko = t.id', 'left')
+            ->join('transaction tr', 'tc.transaction_id = tr.id', 'left')
+            ->where('tc.period_start >=', $startDate)
+            ->where('tc.period_start <=', $endDate)
+            ->orderBy('t.toko_name', 'asc')
+            ->orderBy('tr.date_time', 'asc');
+
+        $closings = $query->get()->getResult();
 
         if (empty($closings)) {
             return $this->response->setJSON([
@@ -342,65 +350,83 @@ class ClosingController extends BaseController
             ]);
         }
 
+        // Get all details in one query
         $closingIds = array_column($closings, 'id');
-
-        // Ambil detail dari semua closing
-        $detailRows = $this->db->table('closing_detail')
+        $details = $this->db->table('closing_detail')
             ->whereIn('transaction_closing_id', $closingIds)
-            ->orderBy('tanggal', 'asc')
+            ->orderBy('transaction_closing_id', 'asc')
             ->orderBy('urutan', 'asc')
-            ->get()->getResult();
+            ->get()
+            ->getResult();
 
-        // Inisialisasi variabel summary
-        $summary = [
-            'total_debit' => 0,
-            'total_credit' => 0,
-            'total_modal' => 0,
-            'total_profit' => 0
+        // Index details by closing_id for faster lookup
+        $detailsIndex = [];
+        foreach ($details as $detail) {
+            $detailsIndex[$detail->transaction_closing_id][] = $detail;
+        }
+
+        // Prepare response structure
+        $response = [
+            'status' => 'success',
+            'month' => "$month/$year",
+            'summary' => [
+                'total_debit' => 0,
+                'total_credit' => 0,
+                'total_modal' => 0,
+                'total_profit' => 0
+            ],
+            'data' => []
         ];
 
-        // Gabungkan detail ke transaksi
-        $grouped = [];
+        $storesData = [];
+
         foreach ($closings as $closing) {
-            $grouped[$closing->id] = [
-                'invoice' => $this->getInvoice($closing->transaction_id),
-                'tanggal' => $this->getTanggal($closing->transaction_id),
+            $storeId = $closing->id_toko ?? 0;
+            $tokoName = $closing->toko_name ?? 'Unknown';
+
+            if (!isset($storesData[$storeId])) {
+                $storesData[$storeId] = [
+                    'toko' => $tokoName,
+                    'summary' => [
+                        'total_debit' => 0,
+                        'total_credit' => 0,
+                        'total_modal' => 0,
+                        'total_profit' => 0
+                    ],
+                    'data' => []
+                ];
+            }
+
+            $closingData = [
+                'invoice' => $closing->invoice,
+                'tanggal' => date('Y-m-d', strtotime($closing->date_time)),
                 'profit' => floatval($closing->total_profit),
                 'total_debit' => floatval($closing->total_debit),
                 'total_credit' => floatval($closing->total_credit),
                 'total_modal' => floatval($closing->total_modal),
                 'transaction_status' => $closing->transaction_status,
-                'detail' => []
+                'detail' => $detailsIndex[$closing->id] ?? []
             ];
 
-            // Hitung summary
-            $summary['total_debit'] += floatval($closing->total_debit);
-            $summary['total_credit'] += floatval($closing->total_credit);
-            $summary['total_modal'] += floatval($closing->total_modal);
-            $summary['total_profit'] += floatval($closing->total_profit);
+            // Add to store data
+            $storesData[$storeId]['data'][] = $closingData;
+
+            // Update store summary
+            $storesData[$storeId]['summary']['total_debit'] += $closingData['total_debit'];
+            $storesData[$storeId]['summary']['total_credit'] += $closingData['total_credit'];
+            $storesData[$storeId]['summary']['total_modal'] += $closingData['total_modal'];
+            $storesData[$storeId]['summary']['total_profit'] += $closingData['profit'];
+
+            // Update global summary
+            $response['summary']['total_debit'] += $closingData['total_debit'];
+            $response['summary']['total_credit'] += $closingData['total_credit'];
+            $response['summary']['total_modal'] += $closingData['total_modal'];
+            $response['summary']['total_profit'] += $closingData['profit'];
         }
 
-        foreach ($detailRows as $d) {
-            if (!isset($grouped[$d->transaction_closing_id]))
-                continue;
+        $response['data'] = array_values($storesData);
 
-            $grouped[$d->transaction_closing_id]['detail'][] = [
-                'keterangan' => $d->keterangan,
-                'debit' => floatval($d->debit),
-                'credit' => floatval($d->credit),
-                'urutan' => intval($d->urutan),
-                'tipe' => $d->tipe,
-                'tanggal' => $d->tanggal,
-                'id_cashflow' => $d->id_cashflow
-            ];
-        }
-
-        return $this->response->setJSON([
-            'status' => 'success',
-            'month' => "$month/$year",
-            'summary' => $summary, // Tambahkan summary di sini
-            'data' => array_values($grouped) // reset key agar jadi array numerik
-        ]);
+        return $this->response->setJSON($response);
     }
     // Ambil invoice
     private function getInvoice($transactionId)

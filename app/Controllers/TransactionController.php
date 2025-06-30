@@ -1006,6 +1006,7 @@ class TransactionController extends BaseController
             200
         );
     }
+
     public function listSalesProductWithTransactionBaru()
     {
         $limit = (int) $this->request->getGet('limit') ?: 10;
@@ -1021,16 +1022,15 @@ class TransactionController extends BaseController
         $status = $this->request->getGet('status');
         $role = $this->request->getGet('role');
 
-
         // Base builder for main query
         $baseBuilder = $this->db->table('sales_product sp')
             ->select("sp.*, transaction.invoice, transaction.date_time, transaction.status, transaction.id_toko,
-              p.nama_barang, p.id_barang, mb.nama_model, s.seri,
-              CONCAT(
-                  COALESCE(p.nama_barang, ''), ' ',
-                  COALESCE(mb.nama_model, ''), ' ',
-                  COALESCE(s.seri, '')
-              ) AS nama_lengkap_barang")
+          p.nama_barang, p.id_barang, mb.nama_model, s.seri,
+          CONCAT(
+              COALESCE(p.nama_barang, ''), ' ',
+              COALESCE(mb.nama_model, ''), ' ',
+              COALESCE(s.seri, '')
+          ) AS nama_lengkap_barang")
             ->join('transaction', 'sp.id_transaction = transaction.id')
             ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
@@ -1044,7 +1044,7 @@ class TransactionController extends BaseController
             $baseBuilder->whereIn('transaction.id_toko', $role);
         }
         if ($idToko) {
-            $baseBuilder->where('sales_product.id_toko', $idToko);
+            $baseBuilder->where('sp.id_toko', $idToko); // Fixed: changed from sales_product to sp
         }
 
         if ($dateStart) {
@@ -1092,67 +1092,21 @@ class TransactionController extends BaseController
             ->get()
             ->getResult();
 
-        // Create a separate builder for sum query
-        $sumBuilder = $this->db->table('sales_product')
-            ->join('transaction', 'sales_product.id_transaction = transaction.id');
+        // Hitung manual total_actual dan total_modal dari data yang muncul
+        $total_actual = 0;
+        $total_modal = 0;
 
-        if (is_string($role)) {
-            $role = array_map('intval', explode(',', $role));
+        foreach ($result as $item) {
+            $total_actual += floatval($item->actual_total ?? 0);
+            $total_modal += floatval($item->total_modal ?? 0);
         }
-
-        if (!empty($role) && !$idToko) {
-            $baseBuilder->whereIn('transaction.id_toko', $role);
-        }
-        if ($idToko) {
-            $baseBuilder->where('sales_product.id_toko', $idToko);
-        }
-
-        if ($dateStart) {
-            $baseBuilder->where('transaction.date_time >=', $dateStart . ' 00:00:00');
-        }
-
-        if ($dateEnd) {
-            $baseBuilder->where('transaction.date_time <=', $dateEnd . ' 23:59:59');
-        }
-
-        if ($search) {
-            $baseBuilder->groupStart()
-                ->like('sp.kode_barang', $search)
-                ->orLike('transaction.invoice', $search)
-                ->orLike('p.nama_barang', $search)
-                ->orLike('mb.nama_model', $search)
-                ->orLike('s.seri', $search)
-                ->groupEnd();
-        }
-
-        if ($status === 'paid') {
-            $baseBuilder->whereIn('transaction.status', [
-                'SUCCESS',
-                'PAID',
-                'PACKING',
-                'IN_DELIVERY',
-                'PARTIALLY_PAID',
-                'RETUR'
-            ]);
-        } elseif ($status === 'unpaid') {
-            $baseBuilder->where('transaction.status', 'WAITING_PAYMENT');
-        }
-
-        // sum actual_total dan total_modal
-        $sumData = $sumBuilder
-            ->select([
-                'SUM(sales_product.actual_total) AS total_actual',
-                'SUM(sales_product.total_modal) AS total_modal'
-            ])
-            ->get()
-            ->getRow();
 
         return $this->jsonResponse->multiResp(
             '',
             [
                 'sum' => [
-                    'total_modal' => floatval($sumData->total_modal ?? 0),
-                    'total_actual' => floatval($sumData->total_actual ?? 0),
+                    'total_modal' => $total_modal,
+                    'total_actual' => $total_actual,
                 ],
                 'result' => $result
             ],
