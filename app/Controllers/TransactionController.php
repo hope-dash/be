@@ -244,6 +244,8 @@ class TransactionController extends BaseController
             $invoice = "INV/" . date('y/m/d') . '/' . $insertID;
 
             $salesData = [];
+            $total_modal = 0;
+            $total_actual = 0;
             foreach ($data->item as $item) {
                 if (!isset($productMap[$item->kode_barang])) {
                     throw new \Exception("Produk {$item->kode_barang} tidak ditemukan.");
@@ -257,6 +259,9 @@ class TransactionController extends BaseController
                 // Harga modal setelah diskon
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
                 $total_actual = $actual_per_piece * $item->jumlah;
+                $total_modal += $product['harga_modal'] * $item->jumlah;
+                $total_actual += $actual_per_piece * $item->jumlah;
+
 
                 $salesData[] = [
                     'kode_barang' => $item->kode_barang,
@@ -270,10 +275,14 @@ class TransactionController extends BaseController
                 ];
             }
 
-
-
-            if (!$this->transactions->update($insertID, ['invoice' => $invoice])) {
-                throw new \Exception("Gagal memperbarui nomor invoice.");
+            if (
+                !$this->transactions->update($insertID, [
+                    'invoice' => $invoice,
+                    'actual_total' => $total_actual,
+                    'total_modal' => $total_modal
+                ])
+            ) {
+                throw new \Exception("Gagal memperbarui nomor invoice dan total.");
             }
 
             $this->saveTransactionMeta($insertID, [
@@ -290,7 +299,6 @@ class TransactionController extends BaseController
                 'biaya_pengiriman' => $data->biaya_pengiriman,
                 'customer_name' => $data->customer_name
             ]);
-
 
 
             foreach ($salesData as &$item) {
@@ -646,9 +654,9 @@ class TransactionController extends BaseController
             $transaksi_gantung = floatval($gantungResult->transaction_gantung ?? 0);
 
             $data = [
-                'total_revenue' => floatval($mainResult->total_revenue ?? 0),
+                'total_revenue' => floatval($mainResult->total_amount ?? 0),
                 'total_modal' => floatval($mainResult->total_modal ?? 0),
-                'total_profit' => floatval($mainResult->total_profit ?? 0),
+                'total_profit' => floatval($mainResult->total_actual - $mainResult->total_modal ?? 0),
                 'total_beban' => floatval($mainResult->total_beban ?? 0),
                 'transaction_gantung' => $transaksi_gantung,
                 'transaksi_waiting_payment' => floatval($waitingResult->transaksi_waiting_payment ?? 0)
@@ -781,144 +789,43 @@ class TransactionController extends BaseController
     }
     public function getRevenueProfitData($start_val, $end_val, $id_toko = null, $role = null)
     {
-        // Subquery paid_at, partialy_paid_at, refunded_at
-        $subPaid = "(SELECT transaction_id, MAX(value) as value FROM transaction_meta WHERE `key` = 'paid_at' GROUP BY transaction_id)";
-        $subPartial = "(SELECT transaction_id, MAX(value) as value FROM transaction_meta WHERE `key` = 'partialy_paid_at' GROUP BY transaction_id)";
-        $subRefunded = "(SELECT transaction_id, MAX(value) AS refunded_at FROM transaction_meta WHERE `key` = 'refunded_at' GROUP BY transaction_id)";
+        $db = \Config\Database::connect();
 
-        // === Revenue & Modal termasuk REFUNDED ===
-        $revenueQuery = $this->db->table('sales_product sp')
-            ->join('transaction t', 't.id = sp.id_transaction')
-            ->join("{$subPaid} tm_paid", 'tm_paid.transaction_id = t.id', 'left')
-            ->join("{$subPartial} tm_partial", 'tm_partial.transaction_id = t.id', 'left')
-            ->join("{$subRefunded} tm_refunded", 'tm_refunded.transaction_id = t.id', 'left');
+        $builder = $db->table('transaction t');
+        $builder->select('
+        SUM(t.amount) AS total_amount,
+        SUM(t.actual_total) AS total_actual,
+        SUM(t.total_modal) AS total_modal
+        ');
+        $builder->join('transaction_meta tm_paid', "t.id = tm_paid.transaction_id AND tm_paid.key = 'paid_at'", 'left');
+        $builder->join('transaction_meta tm_partial', "t.id = tm_partial.transaction_id AND tm_partial.key = 'partialy_paid_at'", 'left');
 
+        $builder->whereNotIn('t.status', ['WAITING_PAYMENT', 'REFUNDED']);
 
-
-        // WHERE Status transaksi & logika DP/Paid/Refunded
-        $revenueQuery->groupStart();
-        // Status normal
-        $revenueQuery->whereIn('t.status', [
-            'SUCCESS',
-            'PAID',
-            'PACKING',
-            'IN_DELIVERY',
-            'PARTIALLY_PAID',
-            'RETUR'
-        ]);
-
-        // Status REFUNDED (hanya kalau ada DP atau Paid)
-        $revenueQuery->orGroupStart();
-        $revenueQuery->where('t.status', 'REFUNDED');
-        $revenueQuery->groupStart();
-        $revenueQuery->where('tm_paid.value IS NOT NULL');
-        $revenueQuery->orWhere('tm_partial.value IS NOT NULL');
-        $revenueQuery->groupEnd();
-        $revenueQuery->groupEnd();
-        $revenueQuery->groupEnd();
-
-        // Filter tanggal berdasarkan paid_at / partialy_paid_at / refunded_at
-        $revenueQuery->groupStart()
-            ->where("DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false)
-            ->orWhere("DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}'", null, false)
-            ->orWhere("DATE(tm_refunded.refunded_at) BETWEEN '{$start_val}' AND '{$end_val}'", null, false)
+        // Filter tanggal berdasarkan paid_at dan partialy_paid_at
+        $builder->groupStart()
+            ->groupStart()
+            ->where('tm_partial.value IS NULL')
+            ->where("DATE(tm_paid.value) >=", $start_val)
+            ->where("DATE(tm_paid.value) <=", $end_val)
+            ->groupEnd()
+            ->orGroupStart()
+            ->where('tm_partial.value IS NOT NULL')
+            ->where("DATE(tm_partial.value) >=", $start_val)
+            ->where("DATE(tm_partial.value) <=", $end_val)
+            ->groupEnd()
             ->groupEnd();
 
+        // Filter toko (role banyak atau id_toko tunggal)
         if (!empty($role)) {
-            $revenueQuery->whereIn('t.id_toko', $role);
+            $builder->whereIn('t.id_toko', $role);
         }
 
         if (!empty($id_toko)) {
-            $revenueQuery->like('t.id_toko', (string) $id_toko, 'both');
+            $builder->like('t.id_toko', (string) $id_toko, 'both');
         }
 
-        // SELECT revenue & modal dengan logika REFUNDED dikurangkan
-        $revenueQuery->select("
-            SUM(
-                IF(DATE(tm_refunded.refunded_at) BETWEEN '{$start_val}' AND '{$end_val}',
-                    0,
-                    sp.actual_total
-                )
-            ) AS total_revenue,
-            SUM(
-                IF(DATE(tm_refunded.refunded_at) BETWEEN '{$start_val}' AND '{$end_val}',
-                    0,
-                    sp.total_modal
-                )
-            ) AS total_modal
-        ", false);
-
-        $revenueResult = $revenueQuery->get()->getRow();
-        $total_revenue = $revenueResult->total_revenue ?? 0;
-        $total_modal = $revenueResult->total_modal ?? 0;
-
-        // === Beban (tidak berubah) ===
-        $bebanQuery = $this->db->query(
-            "
-            SELECT SUM(
-                CASE
-                    WHEN t.status = 'PAID' THEN
-                        CASE
-                            WHEN DATE(tm_paid.value) = DATE(tm_partial.value)
-                                AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN 0
-
-                            WHEN DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN COALESCE(tm_dp.value, 0)
-
-                            WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
-                                COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0)
-                                - COALESCE(CAST(tm_disc.value AS DECIMAL(20,2)), 0)
-                                - COALESCE(tm_dp.value, 0)
-
-                            ELSE 0
-                        END
-
-                    WHEN t.status = 'PARTIALLY_PAID' THEN
-                        CASE
-                            WHEN DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
-                                COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0)
-                                - COALESCE(CAST(tm_disc.value AS DECIMAL(20,2)), 0)
-                                - COALESCE(tm_dp.value, 0)
-
-                            WHEN (tm_partial.value IS NULL OR DATE(tm_partial.value) NOT BETWEEN '{$start_val}' AND '{$end_val}')
-                                AND DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}' THEN
-                                COALESCE(CAST(tm_grand.value AS DECIMAL(20,2)), 0)
-                                - COALESCE(CAST(tm_disc.value AS DECIMAL(20,2)), 0)
-                                - COALESCE(t.total_payment, 0)
-
-                            ELSE 0
-                        END
-
-                    ELSE 0
-                END
-            ) AS total_beban
-            FROM transaction t
-            LEFT JOIN ({$subPaid}) tm_paid ON tm_paid.transaction_id = t.id
-            LEFT JOIN ({$subPartial}) tm_partial ON tm_partial.transaction_id = t.id
-            LEFT JOIN transaction_meta tm_grand 
-                ON tm_grand.transaction_id = t.id AND tm_grand.key = 'grand_total'
-            LEFT JOIN transaction_meta tm_dp 
-                ON tm_dp.transaction_id = t.id AND tm_dp.key = 'total_dp'
-            LEFT JOIN transaction_meta tm_disc 
-                ON tm_disc.transaction_id = t.id AND tm_disc.key = 'discount'
-            WHERE t.status IN ('PAID', 'PARTIALLY_PAID')
-            AND (
-                (DATE(tm_paid.value) BETWEEN '{$start_val}' AND '{$end_val}')
-                OR (DATE(tm_partial.value) BETWEEN '{$start_val}' AND '{$end_val}')
-            );
-        "
-        );
-        $bebanResult = $bebanQuery->getRow();
-        $total_beban = $bebanResult->total_beban ?? 0;
-
-        // === Final ===
-        $revenue = $total_revenue - $total_beban;
-
-        return (object) [
-            'total_revenue' => ceil($revenue),
-            'total_beban' => ceil($total_beban),
-            'total_modal' => ceil($total_modal),
-            'total_profit' => ceil($revenue - $total_modal)
-        ];
+        return $builder->get()->getRow();
     }
     private function getTransactionGantung($start_val, $end_val, $id_toko, $role)
     {
@@ -1006,7 +913,6 @@ class TransactionController extends BaseController
             200
         );
     }
-
     public function listSalesProductWithTransactionBaru()
     {
         $limit = (int) $this->request->getGet('limit') ?: 10;
@@ -1044,7 +950,7 @@ class TransactionController extends BaseController
             $baseBuilder->whereIn('transaction.id_toko', $role);
         }
         if ($idToko) {
-            $baseBuilder->where('sp.id_toko', $idToko); // Fixed: changed from sales_product to sp
+            $baseBuilder->where('sp.id_toko', $idToko); // Fixed: changed to alias sp
         }
 
         if ($dateStart) {
@@ -1078,29 +984,27 @@ class TransactionController extends BaseController
             $baseBuilder->where('transaction.status', 'WAITING_PAYMENT');
         }
 
-        // clone query for count
+        // Clone builder for count
         $countBuilder = clone $baseBuilder;
-
-        // total data
         $total_data = $countBuilder->countAllResults(false);
         $total_page = ceil($total_data / $limit);
 
-        // data paginated
+        // Clone builder for sum
+        $sumBuilder = clone $baseBuilder;
+        $sumBuilder->select('SUM(sp.actual_total) as total_actual, SUM(sp.total_modal) as total_modal');
+        $sumResult = $sumBuilder->get()->getRow();
+
+        $total_actual = floatval($sumResult->total_actual ?? 0);
+        $total_modal = floatval($sumResult->total_modal ?? 0);
+
+        // Query paginated data
         $result = $baseBuilder
             ->orderBy($sortBy, $sortMethod)
             ->limit($limit, $offset)
             ->get()
             ->getResult();
 
-        // Hitung manual total_actual dan total_modal dari data yang muncul
-        $total_actual = 0;
-        $total_modal = 0;
-
-        foreach ($result as $item) {
-            $total_actual += floatval($item->actual_total ?? 0);
-            $total_modal += floatval($item->total_modal ?? 0);
-        }
-
+        // Return response
         return $this->jsonResponse->multiResp(
             '',
             [
@@ -1108,7 +1012,7 @@ class TransactionController extends BaseController
                     'total_modal' => $total_modal,
                     'total_actual' => $total_actual,
                 ],
-                'result' => $result
+                'result' => $result,
             ],
             $total_data,
             $total_page,
@@ -1117,6 +1021,7 @@ class TransactionController extends BaseController
             200
         );
     }
+
     public function calculateExpenseAllocation()
     {
         $date_start = $this->request->getGet('date_start');
