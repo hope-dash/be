@@ -8,7 +8,7 @@ class TransactionModel extends Model
 {
     protected $table = 'transaction';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['amount', 'total_payment', 'po', 'status', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by'];
+    protected $allowedFields = ['amount', 'total_payment', 'po', 'status', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by','actual_total','total_modal'];
 
     protected $statuses = [
         'SUCCESS' => 'Success',

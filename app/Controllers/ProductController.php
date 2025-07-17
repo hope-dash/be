@@ -516,7 +516,8 @@ class ProductController extends ResourceController
 
             $builder->where('seri.seri IS NOT NULL')
                 ->where('model_barang.nama_model IS NOT NULL')
-                ->where('product.nama_barang IS NOT NULL');
+                ->where('product.nama_barang IS NOT NULL')
+                ->where('seri.deleted_at IS NULL');
 
             if (!empty($namaProduct)) {
                 $builder->groupStart()

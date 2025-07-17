@@ -222,7 +222,12 @@ class TransactionController extends BaseController
             }
 
             // Menghitung Total, PPN, dan Grand Total
-            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals($data->item, $data->discount, $data->ppn, $data->biaya_pengiriman);
+            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals(
+                $data->item,
+                $data->discount,
+                $data->ppn,
+                $data->biaya_pengiriman
+            );
 
             // Hitung Discount Rate
             $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
@@ -232,7 +237,7 @@ class TransactionController extends BaseController
                 'status' => 'WAITING_PAYMENT',
                 'po' => $data->po,
                 'id_toko' => $data->id_toko,
-                "created_by" => $token['user_id'],
+                'created_by' => $token['user_id'],
                 'date_time' => date('Y-m-d H:i:s')
             ];
 
@@ -241,11 +246,12 @@ class TransactionController extends BaseController
             }
 
             $insertID = $this->transactions->insertID();
-            $invoice = "INV/" . date('y/m/d') . '/' . $insertID;
+            $invoice = "INV" . date('ymd') . $insertID;
 
             $salesData = [];
             $total_modal = 0;
             $total_actual = 0;
+
             foreach ($data->item as $item) {
                 if (!isset($productMap[$item->kode_barang])) {
                     throw new \Exception("Produk {$item->kode_barang} tidak ditemukan.");
@@ -253,15 +259,21 @@ class TransactionController extends BaseController
 
                 $product = $productMap[$item->kode_barang];
 
-                $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $item->kode_barang, $item->jumlah, $insertID);
+                $this->checkAndUpdateStock(
+                    $token['user_id'],
+                    $data->id_toko,
+                    $item->kode_barang,
+                    $item->jumlah,
+                    $insertID
+                );
 
-
-                // Harga modal setelah diskon
+                // Perhitungan harga aktual setelah diskon
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
-                $total_actual = $actual_per_piece * $item->jumlah;
-                $total_modal += $product['harga_modal'] * $item->jumlah;
-                $total_actual += $actual_per_piece * $item->jumlah;
+                $actual_total = $actual_per_piece * $item->jumlah;
 
+                // Akumulasi total
+                $total_modal += $product['harga_modal'] * $item->jumlah;
+                $total_actual += $actual_total;
 
                 $salesData[] = [
                     'kode_barang' => $item->kode_barang,
@@ -271,7 +283,7 @@ class TransactionController extends BaseController
                     'modal_system' => $product['harga_modal'],
                     'total_modal' => $product['harga_modal'] * $item->jumlah,
                     'actual_per_piece' => $actual_per_piece,
-                    'actual_total' => $total_actual
+                    'actual_total' => $actual_total
                 ];
             }
 
@@ -290,7 +302,7 @@ class TransactionController extends BaseController
                 'ppn_value' => $ppn_value,
                 'totalAmount' => $totalAmount,
                 'discount' => $data->discount,
-                'discount_rate' => $discount_rate, // Simpan discount rate untuk referensi
+                'discount_rate' => $discount_rate,
                 'source' => $data->source,
                 'customerId' => $customerId,
                 'jatuh_tempo' => $data->jatuh_tempo,
@@ -299,7 +311,6 @@ class TransactionController extends BaseController
                 'biaya_pengiriman' => $data->biaya_pengiriman,
                 'customer_name' => $data->customer_name
             ]);
-
 
             foreach ($salesData as &$item) {
                 $item['id_transaction'] = $insertID;
@@ -332,6 +343,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
+
     public function countTransaction()
     {
         $data = $this->request->getJSON();
@@ -593,7 +605,7 @@ class TransactionController extends BaseController
                 sp.total,
                 sp.modal_system as harga_modal,
                 sp.total_modal,
-                CONCAT(p.nama_barang, ' ', model_barang.nama_model, ' ', COALESCE(seri.seri, '')) as nama_lengkap_barang,
+                CONCAT(p.nama_barang, ' ', model_barang.nama_model, ' ', COALESCE(seri.seri, '')) as nama_lengkap_barang
             ")
             ->where('sp.id_transaction', $id);
 
@@ -655,8 +667,9 @@ class TransactionController extends BaseController
 
             $data = [
                 'total_revenue' => floatval($mainResult->total_amount ?? 0),
+                'total_actual' => floatval($mainResult->total_actual ?? 0),
                 'total_modal' => floatval($mainResult->total_modal ?? 0),
-                'total_profit' => floatval($mainResult->total_actual - $mainResult->total_modal ?? 0),
+                'total_profit' => floatval($mainResult->total_amount - $mainResult->total_modal ?? 0),
                 'total_beban' => floatval($mainResult->total_beban ?? 0),
                 'transaction_gantung' => $transaksi_gantung,
                 'transaksi_waiting_payment' => floatval($waitingResult->transaksi_waiting_payment ?? 0)
@@ -791,38 +804,25 @@ class TransactionController extends BaseController
     {
         $db = \Config\Database::connect();
 
-        $builder = $db->table('transaction t');
+
+        $builder = $db->table('transaction');
         $builder->select('
-        SUM(t.amount) AS total_amount,
-        SUM(t.actual_total) AS total_actual,
-        SUM(t.total_modal) AS total_modal
+            SUM(total_payment) AS total_amount,
+            SUM(actual_total) AS total_actual,
+            SUM(total_modal) AS total_modal
         ');
-        $builder->join('transaction_meta tm_paid', "t.id = tm_paid.transaction_id AND tm_paid.key = 'paid_at'", 'left');
-        $builder->join('transaction_meta tm_partial', "t.id = tm_partial.transaction_id AND tm_partial.key = 'partialy_paid_at'", 'left');
+        $builder->whereNotIn('transaction.status', ['WAITING_PAYMENT', 'REFUNDED']);
 
-        $builder->whereNotIn('t.status', ['WAITING_PAYMENT', 'REFUNDED']);
-
-        // Filter tanggal berdasarkan paid_at dan partialy_paid_at
-        $builder->groupStart()
-            ->groupStart()
-            ->where('tm_partial.value IS NULL')
-            ->where("DATE(tm_paid.value) >=", $start_val)
-            ->where("DATE(tm_paid.value) <=", $end_val)
-            ->groupEnd()
-            ->orGroupStart()
-            ->where('tm_partial.value IS NOT NULL')
-            ->where("DATE(tm_partial.value) >=", $start_val)
-            ->where("DATE(tm_partial.value) <=", $end_val)
-            ->groupEnd()
-            ->groupEnd();
+        $builder->where('DATE(updated_at) >=', $start_val);
+        $builder->where('DATE(updated_at) <=', $end_val);
 
         // Filter toko (role banyak atau id_toko tunggal)
         if (!empty($role)) {
-            $builder->whereIn('t.id_toko', $role);
+            $builder->whereIn('transaction.id_toko', $role);
         }
 
         if (!empty($id_toko)) {
-            $builder->like('t.id_toko', (string) $id_toko, 'both');
+            $builder->like('transaction.id_toko', (string) $id_toko, 'both');
         }
 
         return $builder->get()->getRow();
@@ -1635,7 +1635,7 @@ class TransactionController extends BaseController
 
         $newTotalPayment = $transaction['total_payment'] + $amount;
 
-        if ((float) $amount > (float) (90 * $transaction['amount'] / 100)) {
+        if ((float) $amount > (float) (95 * $transaction['amount'] / 100)) {
             return $this->jsonResponse->oneResp('Jumlah Pembayaran tidak valid', null, 400);
         }
 
