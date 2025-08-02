@@ -22,6 +22,7 @@ $routes->get('api/detail/toko/(:num)', 'TokoController::getDetailById/$1');
 $routes->get('api/dropdown/seri', 'BarangController::dropdownSeri');
 $routes->get('api/dropdown/seri-by-product', 'ProductController::getListSeribySearchProduct');
 $routes->get('api/product/(:num)', 'ProductController::getDetailById/$1');
+$routes->post('api/closing/auto-monthly', 'ClosingController::autoCloseMonthly');
 
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
@@ -97,6 +98,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('transaction/paid/(:num)', 'TransactionController::updateTransactionStatusToFullyPaid/$1');
     $routes->post('transaction/complaint/(:num)', 'TransactionController::complainProduct/$1');
     $routes->post('transaction/update-status/(:num)', 'TransactionController::updateTransactionStatus/$1');
+    $routes->post('transaction/notes/', 'TransactionController::createUpdateNotesTransaction');
 
 
     //reporting

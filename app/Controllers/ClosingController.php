@@ -57,6 +57,50 @@ class ClosingController extends BaseController
         ]);
     }
 
+    public function autoCloseMonthly()
+    {
+        $now = new \DateTime();
+        $now->modify('first day of last month');
+        $year = $now->format('Y');
+        $month = $now->format('m');
+
+        if (!$year || !$month) {
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'year dan month dibutuhkan.'
+            ])->setStatusCode(400);
+        }
+
+        $startDate = date("$year-$month-01 00:00:00");
+        $endDate = date("Y-m-t 23:59:59", strtotime($startDate));
+
+        $query1 = $this->db->table('transaction')
+            ->where('status !=', 'WAITING_PAYMENT')
+            ->where('closing', 0)
+            ->where('updated_at >=', $startDate)
+            ->where('updated_at <=', $endDate)
+            ->get()->getResult();
+
+        $query2 = $this->db->table('transaction')
+            ->where('closing', 2)
+            ->get()->getResult();
+
+        $transactions = array_merge($query1, $query2);
+
+        $results = [];
+        foreach ($transactions as $trx) {
+            $isAdjustment = ($trx->closing == 2);
+            $result = $this->processClosing($trx, $startDate, $endDate, $isAdjustment);
+            $results[] = $result;
+        }
+
+        return $this->response->setJSON([
+            'status' => 'success',
+            'month' => "$month/$year",
+            'results' => $results
+        ]);
+    }
+
     private function processClosing($trx, $start, $end, $isAdjustment = false)
     {
         $trxId = $trx->id;

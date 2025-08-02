@@ -553,6 +553,7 @@ class TransactionController extends BaseController
                 tm_alamat.value AS alamat,
                 tm_pengiriman.value AS pengiriman,
                 tm_biaya_pengiriman.value AS biaya_pengiriman,
+                tm_notes.value AS notes,
             ")
             ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
@@ -576,6 +577,7 @@ class TransactionController extends BaseController
             ->join('transaction_meta tm_alamat', 't.id = tm_alamat.transaction_id AND tm_alamat.key = "alamat"', 'left')
             ->join('transaction_meta tm_pengiriman', 't.id = tm_pengiriman.transaction_id AND tm_pengiriman.key = "pengiriman"', 'left')
             ->join('transaction_meta tm_biaya_pengiriman', 't.id = tm_biaya_pengiriman.transaction_id AND tm_biaya_pengiriman.key = "biaya_pengiriman"', 'left')
+            ->join('transaction_meta tm_notes', 't.id = tm_notes.transaction_id AND tm_notes.key = "notes"', 'left')
             ->where('t.id', $id);
 
 
@@ -644,6 +646,30 @@ class TransactionController extends BaseController
 
 
         return $this->jsonResponse->oneResp('Success', $transaction, 200);
+    }
+
+    public function createUpdateNotesTransaction()
+    {
+        $transactionId = $this->request->getVar('transaction_id');
+        $notes = $this->request->getVar('notes');
+        $key = 'notes';
+
+        // Cek data sudah ada atau belum
+        $existingMeta = $this->transactionMeta
+            ->where('transaction_id', $transactionId)
+            ->where('key', $key)
+            ->first();
+
+        if ($existingMeta) {
+            $result = $this->transactionMeta->update($existingMeta['id'], ['value' => $notes]);
+        } else {
+            $result = $this->transactionMeta->insert([
+                'transaction_id' => $transactionId,
+                'key' => $key,
+                'value' => $notes
+            ]);
+        }
+        return $this->jsonResponse->oneResp('Success', $result, 200);
     }
     public function calculateRevenueAndProfit()
     {
