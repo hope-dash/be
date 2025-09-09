@@ -31,7 +31,10 @@ class TokoController extends BaseController
                 'alamat' => 'required',
                 'phone_number' => 'required|numeric|min_length[10]|max_length[15]',
                 'email_toko' => 'required|valid_email',
-                'image_logo' => 'permit_empty|valid_url',  // validasi URL jika ada
+                'image_logo' => 'permit_empty|valid_url',
+                'bank' => 'required|string',
+                'nama_pemilik' => 'required|string',
+                'nomer_rekening' => 'required|numeric',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -45,6 +48,9 @@ class TokoController extends BaseController
                 "email_toko" => $data->email_toko,
                 "created_by" => $token['user_id'],
                 "image_logo" => isset($data->image_logo) ? $data->image_logo : null,
+                "bank" => $data->bank,
+                "nama_pemilik" => $data->nama_pemilik,
+                "nomer_rekening" => $data->nomer_rekening,
             ];
 
             $this->modelToko->insert($tokoData);
@@ -68,7 +74,10 @@ class TokoController extends BaseController
                 'alamat' => 'required',
                 'phone_number' => 'required|numeric|min_length[10]|max_length[15]',
                 'email_toko' => 'required|valid_email',
-                'image_logo' => 'permit_empty|valid_url',  // validasi URL jika ada
+                'image_logo' => 'permit_empty|valid_url',
+                'bank' => 'required|string',
+                'nama_pemilik' => 'required|string',
+                'nomer_rekening' => 'required|numeric',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -82,6 +91,9 @@ class TokoController extends BaseController
                 "email_toko" => $data->email_toko,
                 "updated_by" => $token['user_id'],
                 "image_logo" => isset($data->image_logo) ? $data->image_logo : null,
+                "bank" => $data->bank,
+                "nama_pemilik" => $data->nama_pemilik,
+                "nomer_rekening" => $data->nomer_rekening,
             ];
 
             $this->modelToko->update($id, $tokoData);

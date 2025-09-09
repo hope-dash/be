@@ -973,7 +973,7 @@ class ProductController extends ResourceController
                 $builder->where('toko.id', $id_toko);
             }
 
-            $productsQuery = $builder
+            $productsQuery = $builder->where('stock.stock >', 0)
                 ->orderBy($sortBy, $sortMethod)
                 ->limit($limit, $offset);
 

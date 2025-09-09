@@ -9,7 +9,7 @@ class TokoModel extends Model
     protected $table = 'toko';
     protected $primaryKey = 'id';
     protected $useAutoIncrement = true;
-    protected $allowedFields = ["toko_name", "alamat", "phone_number", "email_toko", "image_logo"];
+    protected $allowedFields = ["toko_name", "alamat", "phone_number", "email_toko", "image_logo","bank", "nama_pemilik", "nomer_rekening"];
     protected $useSoftDeletes = true;
     protected $protectFields = true;
 
