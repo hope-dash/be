@@ -941,13 +941,10 @@ class ProductController extends ResourceController
                 'COALESCE(seri.seri, "") as seri',
                 'stock.stock',
                 'toko.toko_name',
+                'product.harga_jual_toko',
+                'product.harga_jual'
             ];
 
-            if ($customer) {
-                $selectFields[] = "product.harga_jual_toko as harga_jual";
-            } else {
-                $selectFields[] = "product.harga_jual";
-            }
 
             $builder = $this->productModel
                 ->join('stock', 'stock.id_barang = product.id_barang', 'left')
