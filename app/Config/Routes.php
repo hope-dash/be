@@ -12,7 +12,8 @@ $routes->options('api/(:any)', function () {
 
 $routes->post('api/login', 'UserController::login');
 $routes->post('api/register-be', 'UserController::create_be');
-$routes->post('api/pricelist', 'ProductController::getProductStock');
+$routes->post('api/pricelist', 'ProductController::getProductStockForPricelist');
+$routes->post('api/login/customer', 'CustomerController::checkSpecialCustomer');
 $routes->get('api/dropdown/toko', 'TokoController::dropdownToko');
 $routes->get('api/dropdown/model_barang', 'BarangController::dropdownModel');
 $routes->get('api/dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
@@ -20,6 +21,8 @@ $routes->get('api/dropdown/suplier', 'SuplierController::dropdownSuplier');
 $routes->get('api/detail/toko/(:num)', 'TokoController::getDetailById/$1');
 $routes->get('api/dropdown/seri', 'BarangController::dropdownSeri');
 $routes->get('api/dropdown/seri-by-product', 'ProductController::getListSeribySearchProduct');
+$routes->get('api/product/(:num)', 'ProductController::getDetailById/$1');
+$routes->post('api/closing/auto-monthly', 'ClosingController::autoCloseMonthly');
 
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
@@ -65,14 +68,21 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //products
     $routes->post('product', 'ProductController::createProduct');
     $routes->post('product/image', 'ProductController::uploadImages');
-    $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
     $routes->get('product', 'ProductController::getAllProduct');
     $routes->post('product-stock', 'ProductController::getProductStock');
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
     $routes->delete('product/(:num)', 'ProductController::deleteByProductId/$1');
     $routes->post('bulk-product', 'ProductController::bulkUpload');
     $routes->get('model_barang/count', 'ProductController::getTotalByModelId');
+    $routes->get('seri_barang/count', 'ProductController::getTotalBySeriId');
 
+
+    //Pembelian
+    $routes->post('transaction/belanja', 'PembelianController::createPembelian');
+    $routes->put('transaction/belanja/cancel/(:num)', 'PembelianController::cancelPembelian/$1');
+    $routes->post('transaction/belanja/execute/(:num)', 'PembelianController::executePembelian/$1');
+    $routes->get('transaction/belanja', 'PembelianController::listPembelian');
+    $routes->get('transaction/belanja/(:num)', 'PembelianController::getPembelianById/$1');
 
     //transaction
     $routes->post('transaction', 'TransactionController::createTransaction');
@@ -88,18 +98,28 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('transaction/paid/(:num)', 'TransactionController::updateTransactionStatusToFullyPaid/$1');
     $routes->post('transaction/complaint/(:num)', 'TransactionController::complainProduct/$1');
     $routes->post('transaction/update-status/(:num)', 'TransactionController::updateTransactionStatus/$1');
+    $routes->post('transaction/notes/', 'TransactionController::createUpdateNotesTransaction');
 
 
     //reporting
     $routes->get('reporting/revenue-profit', 'TransactionController::calculateRevenueAndProfit');
-    $routes->get('reporting/debit-credit', 'TransactionController::calculateDebitAndCredit');
+    $routes->get('reporting/debit-credit', 'CashflowController::calculateDebitAndCredit');
     $routes->get('reporting/alokasi-pengeluaran', 'TransactionController::calculateExpenseAllocation');
     $routes->get('reporting/top-customers', 'TransactionController::topCustomers');
     $routes->get('reporting/top-products', 'TransactionController::topSoldProducts');
+    $routes->get('reporting/stock-allocation', 'TransactionController::listKeluarBarang');
     $routes->get('reporting/arus-kas', 'TransactionController::getFinancialSummary');
     $routes->get('reporting/due-transaction', 'TransactionController::getUpcomingDueTransactions');
     $routes->get('reporting/revenue-profit-detail', 'TransactionController::listSalesProductWithTransaction');
+    $routes->get('reporting/log', 'LogAktivitasController::index');
+    $routes->get('reporting/sales-product', 'TransactionController::listSalesProductWithTransactionBaru');
 
+    $routes->group('closing', function ($routes) {
+        $routes->post('process', 'ClosingController::closeMonthly');
+        $routes->post('rollback', 'ClosingController::rollbackClosingByMonth');
+        $routes->post('detail', 'ClosingController::getClosingDetailsByMonth');
+        $routes->get('list', 'ClosingController::listClosings');
+    });
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
 });

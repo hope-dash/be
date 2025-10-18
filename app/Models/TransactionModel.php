@@ -8,7 +8,7 @@ class TransactionModel extends Model
 {
     protected $table = 'transaction';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['amount', 'total_payment', 'po', 'status', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by'];
+    protected $allowedFields = ['amount', 'total_payment', 'po', 'status', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by','actual_total','total_modal'];
 
     protected $statuses = [
         'SUCCESS' => 'Success',
@@ -19,8 +19,10 @@ class TransactionModel extends Model
         'NEED_REFUNDED' => 'Need to Refund',
         'RETUR' => 'Retur',
         'PAID' => 'Paid',
-        'PACKING' => 'packing',
-        'IN_DELIVERY' => '⁠in delivery',
+        'PACKING' => 'Packing',
+        'IN_DELIVERY' => 'In Delivery',
+        'PARTIALLY_PAID' => 'DP',
+
     ];
 
     protected $useTimestamps = true;

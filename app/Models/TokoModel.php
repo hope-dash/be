@@ -6,17 +6,16 @@ use CodeIgniter\Model;
 
 class TokoModel extends Model
 {
-    protected $table            = 'toko';
-    protected $primaryKey       = 'id';
+    protected $table = 'toko';
+    protected $primaryKey = 'id';
     protected $useAutoIncrement = true;
-    protected $allowedFields    = ["toko_name", "alamat", "phone_number", "email_toko"];
-    protected $useSoftDeletes   = true;
-    protected $protectFields    = true;
+    protected $allowedFields = ["toko_name", "alamat", "phone_number", "email_toko", "image_logo","bank", "nama_pemilik", "nomer_rekening"];
+    protected $useSoftDeletes = true;
+    protected $protectFields = true;
 
     protected $useTimestamps = true;
-    protected $dateFormat    = 'datetime';
-    protected $createdField  = 'created_at';
-    protected $updatedField  = 'updated_at';
-    protected $deletedField  = 'deleted_at';
-
+    protected $dateFormat = 'datetime';
+    protected $createdField = 'created_at';
+    protected $updatedField = 'updated_at';
+    protected $deletedField = 'deleted_at';
 }

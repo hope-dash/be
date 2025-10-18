@@ -26,7 +26,7 @@ class CustomerController extends BaseController
             $validation->setRules([
                 'nama_customer' => 'required',
                 'alamat' => 'required',
-                'no_hp_customer' => 'required|min_length[10]|max_length[15]',
+                'no_hp_customer' => 'required|min_length[10]|max_length[15]|is_unique[customer.no_hp_customer]',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -35,9 +35,12 @@ class CustomerController extends BaseController
 
             $customerData = [
                 'nama_customer' => $data->nama_customer,
+                'username' => $data->username ?? NULL,
+                'type' => $data->type ?? 'regular',
                 'alamat' => $data->alamat,
                 'no_hp_customer' => $data->no_hp_customer,
             ];
+
 
             $query = $this->customer->insert($customerData);
 
@@ -62,7 +65,7 @@ class CustomerController extends BaseController
             $validation->setRules([
                 'nama_customer' => 'required',
                 'alamat' => 'required',
-                'no_hp_customer' => 'required|min_length[10]|max_length[15]',
+                'no_hp_customer' => "required|min_length[10]|max_length[15]|is_unique[customer.no_hp_customer,id,{$id}]",
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -71,6 +74,8 @@ class CustomerController extends BaseController
 
             $customerData = [
                 'nama_customer' => $data->nama_customer,
+                'username' => $data->username ?? NULL,
+                'type' => $data->type ?? 'regular',
                 'alamat' => $data->alamat,
                 'no_hp_customer' => $data->no_hp_customer,
             ];
@@ -156,10 +161,48 @@ class CustomerController extends BaseController
                 ->get()
                 ->getResult();
 
-            return $this->jsonResponse->multiResp('', $result ?: [], $total_data, $total_page, 200);
+            return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
+    public function checkSpecialCustomer()
+    {
+        try {
+            $data = $this->request->getJSON();
+
+            $validation = \Config\Services::validation();
+            $validation->setRules([
+                'username' => 'required',
+                'phone_number' => 'required|min_length[10]|max_length[15]',
+            ]);
+
+            if (!$this->validate($validation->getRules())) {
+                return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+            }
+
+            $username = $data->username;
+            $phone_number = $data->phone_number;
+
+            $customer = $this->customer
+                ->where('username', $username)
+                ->where('no_hp_customer', $phone_number)
+                ->where('type', 'special')
+                ->where('deleted_at', null)
+                ->first();
+
+            if (!$customer) {
+                return $this->jsonResponse->error("Customer not found or not special", 404);
+            }
+
+            return $this->jsonResponse->oneResp("Customer found", $customer);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
 
 }
