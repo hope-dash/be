@@ -183,7 +183,7 @@ class TokoController extends BaseController
             $tokoParam = $this->request->getGet('role');
             $tokoIds = array_filter(array_map('trim', explode(',', $tokoParam)));
 
-            $query = $this->modelToko->select('id, toko_name');
+            $query = $this->modelToko->select('id, toko_name, phone_number');
             if (!empty($tokoIds)) {
                 $query->whereIn('id', $tokoIds);
             }
@@ -193,7 +193,8 @@ class TokoController extends BaseController
             $formattedResult = array_map(function ($row) {
                 return [
                     'label' => $row->toko_name,
-                    'value' => $row->id
+                    'value' => $row->id,
+                    'phone_number' => $row->phone_number
                 ];
             }, $result);
 
