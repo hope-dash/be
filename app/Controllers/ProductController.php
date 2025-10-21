@@ -941,13 +941,13 @@ class ProductController extends ResourceController
                     'product.id',
                     'product.id_barang',
                     'product.nama_barang',
-                    // Harga tetap diambil, nanti dipilih di PHP
+
                     'product.harga_modal',
                     'product.harga_jual',
                     'product.harga_jual_toko',
                     'product.id_model_barang',
                     'product.id_seri_barang',
-                    // 🔥 Ambil nama_model & seri langsung dari JOIN
+
                     'model_barang.nama_model as nama_model',
                     'seri.seri as seri',
                 ])
@@ -957,10 +957,8 @@ class ProductController extends ResourceController
             // Filter teks
             if (!empty($namaProduct)) {
                 $productBuilder->groupStart()
-                    ->like('product.nama_barang', $namaProduct, 'both')
-                    ->orLike('model_barang.nama_model', $namaProduct, 'both')
-                    ->orLike('seri.seri', $namaProduct, 'both')
-                    ->orLike('product.id_barang', $namaProduct, 'both')
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
             if (!empty($seri))
