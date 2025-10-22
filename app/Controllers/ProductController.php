@@ -619,12 +619,10 @@ class ProductController extends ResourceController
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
             // === Filter ===
-            if (!empty($namaProduct)) {
+             if (!empty($namaProduct)) {
                 $builder->groupStart()
-                    ->like('product.nama_barang', $namaProduct, 'both')
-                    ->orLike('model_barang.nama_model', $namaProduct, 'both')
-                    ->orLike('seri.seri', $namaProduct, 'both')
-                    ->orLike('product.id_barang', $namaProduct, 'both')
+                    ->like("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, ''))", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
 
