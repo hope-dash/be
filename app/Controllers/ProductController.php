@@ -421,65 +421,92 @@ class ProductController extends ResourceController
 
     private function getProductDetailArray($id)
     {
+        // 🔹 Ambil data produk + relasi model & seri
         $product = $this->productModel
-            ->select('product.*, product.id_model_barang as id_model, model_barang.nama_model, seri.seri')
-            ->join('model_barang', 'model_barang.id = product.id_model_barang')
+            ->select('
+            product.*,
+            product.id_model_barang AS id_model,
+            model_barang.nama_model,
+            seri.seri
+        ')
+            ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
             ->join('seri', 'seri.id = product.id_seri_barang', 'left')
             ->where('product.id', $id)
             ->first();
 
-        if (!$product)
+        if (!$product) {
             return null;
-
-        $product = (array) $product;
-
-        // Ambil stock
-        $stockData = $this->productModel
-            ->select("stock.id, stock.stock, IF(stock.dropship = 1, 1, 0) AS dropship, stock.id_toko, stock.barang_cacat, toko.toko_name")
-            ->join('stock', 'stock.id_barang = product.id_barang', 'left')
-            ->join('toko', 'toko.id = stock.id_toko', 'left')
-            ->where('product.id', $id)
-            ->get()
-            ->getResultArray();
-
-        foreach ($stockData as &$row) {
-            $row['dropship'] = (bool) $row['dropship'];
         }
-        unset($row);
 
-        $product['stock'] = $stockData;
+        $p = (array) $product;
 
-        // Ambil images
-        $existingImages = $this->imageModel->where('type', 'product')
-            ->where('kode', $id)
-            ->findAll();
-        $product['images'] = array_column($existingImages, 'url');
+        // 🔹 Tambahkan kode_barang dan nama_lengkap_barang
+        $p['kode_barang'] = $p['id_barang'] ?? null;
+        $p['nama_lengkap_barang'] = trim(implode(' ', array_filter([
+            $p['nama_barang'] ?? '',
+            $p['nama_model'] ?? '',
+            $p['seri'] ?? ''
+        ])));
 
-        // Dropship & supplier
-        $product['dropship'] = (bool) ($product['dropship'] ?? false);
-        $product['suplier'] = !empty($product['suplier']) ? explode(',', $product['suplier']) : [];
-
-        // Ambil supplier details
-        if (!empty($product['suplier'])) {
-            $supplierNames = $this->db->table('suplier')
-                ->select('id, suplier_name')
-                ->whereIn('id', $product['suplier'])
-                ->get()
-                ->getResultArray();
-
-            $product['supplier_details'] = [];
-            foreach ($supplierNames as $supplier) {
-                $product['supplier_details'][] = [
-                    'id' => $supplier['id'],
-                    'name' => $supplier['suplier_name'],
+        // 🔹 Ambil stok (langsung dari tabel stock untuk efisiensi)
+        $p['stock'] = array_map(
+            function ($s) {
+                return [
+                    'id' => $s['id'],
+                    'stock' => $s['stock'],
+                    'dropship' => (bool) $s['dropship'],
+                    'id_toko' => $s['id_toko'],
+                    'barang_cacat' => $s['barang_cacat'],
+                    'toko_name' => $s['toko_name']
                 ];
-            }
-        } else {
-            $product['supplier_details'] = [];
-        }
+            },
+            $this->db->table('stock')
+                ->select('
+            stock.id,
+            stock.stock,
+            stock.dropship,
+            stock.id_toko,
+            stock.barang_cacat,
+            toko.toko_name
+        ')
+                ->join('toko', 'toko.id = stock.id_toko', 'left')
+                ->where('stock.id_barang', $p['id_barang'])
+                ->get()
+                ->getResultArray()
+        );
 
-        return $product;
+        // 🔹 Ambil gambar (hanya ambil URL langsung)
+        $p['images'] = array_column(
+            $this->imageModel
+                ->where(['type' => 'product', 'kode' => $id])
+                ->findAll(),
+            'url'
+        );
+
+        // 🔹 Normalisasi field dropship & supplier
+        $p['dropship'] = (bool) ($p['dropship'] ?? false);
+        $p['suplier'] = !empty($p['suplier'])
+            ? explode(',', $p['suplier'])
+            : [];
+
+        // 🔹 Ambil supplier details (jika ada)
+        $p['supplier_details'] = !empty($p['suplier'])
+            ? array_map(
+                fn($s) => [
+                    'id' => $s['id'],
+                    'name' => $s['suplier_name']
+                ],
+                $this->db->table('suplier')
+                    ->select('id, suplier_name')
+                    ->whereIn('id', $p['suplier'])
+                    ->get()
+                    ->getResultArray()
+            )
+            : [];
+
+        return $p;
     }
+
 
     public function getDetailById($id = null)
     {
@@ -619,7 +646,7 @@ class ProductController extends ResourceController
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
             // === Filter ===
-             if (!empty($namaProduct)) {
+            if (!empty($namaProduct)) {
                 $builder->groupStart()
                     ->like("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, ''))", $namaProduct)
                     ->orLike("product.id_barang", $namaProduct)
