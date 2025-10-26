@@ -63,52 +63,85 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-    private function checkAndUpdateStock($user_id, $id_toko, $kode_barang, $jumlah, $insertID)
+    private function checkAndUpdateStockBatch($user_id, $id_toko, $items, $insertID)
     {
-        // Ambil data stok dari toko
-        $stock = $this->stockModel
-            ->select('stock.*, product.id AS product_id')
+        $kodeBarangList = array_column($items, 'kode_barang');
+        $stockLogs = [];
+
+        // Ambil semua stock sekaligus
+        $stocks = $this->stockModel
+            ->select('stock.*, product.id AS product_id, stock.id_barang')
             ->join('product', 'product.id_barang = stock.id_barang')
             ->where('stock.id_toko', $id_toko)
-            ->where('stock.id_barang', $kode_barang)
+            ->whereIn('stock.id_barang', $kodeBarangList)
             ->get()
-            ->getRowArray();
+            ->getResultArray();
 
-
-        if (!$stock) {
-            throw new \Exception("Stok untuk produk {$kode_barang} tidak ditemukan.");
+        $stockMap = [];
+        foreach ($stocks as $stock) {
+            $stockMap[$stock['id_barang']] = $stock;
         }
 
-        if (!empty($stock['dropship']) && (int) $stock['dropship'] === 1) {
-            return true;
+        // Validasi stok tersedia
+        foreach ($items as $item) {
+            if (!isset($stockMap[$item->kode_barang])) {
+                throw new \Exception("Stok untuk produk {$item->kode_barang} tidak ditemukan.");
+            }
+
+            $stock = $stockMap[$item->kode_barang];
+
+            if (!empty($stock['dropship']) && (int) $stock['dropship'] === 1) {
+                continue;
+            }
+
+            if ((int) $stock['stock'] < $item->jumlah) {
+                throw new \Exception("Stok tidak mencukupi untuk produk {$item->kode_barang}. Stok tersedia: {$stock['stock']}, dibutuhkan: {$item->jumlah}");
+            }
         }
 
-        if ((int) $stock['stock'] < $jumlah) {
-            throw new \Exception("Stok tidak mencukupi untuk produk {$kode_barang}.");
+        // Update stock dalam batch dengan logging
+        foreach ($items as $item) {
+            if (isset($stockMap[$item->kode_barang]) && empty($stockMap[$item->kode_barang]['dropship'])) {
+
+                $stock = $stockMap[$item->kode_barang];
+                $oldStock = (int) $stock['stock'];
+                $newStock = $oldStock - $item->jumlah;
+
+                $this->stockModel
+                    ->where('id_toko', $id_toko)
+                    ->where('id_barang', $item->kode_barang)
+                    ->set('stock', $newStock)
+                    ->update();
+
+                // Simpan data log untuk nanti
+                $stockLogs[] = [
+                    'kode_barang' => $item->kode_barang,
+                    'product_id' => $stock['product_id'],
+                    'old_stock' => $oldStock,
+                    'reduced' => $item->jumlah,
+                    'new_stock' => $newStock
+                ];
+
+                // LOG SEKARANG - hanya sekali untuk setiap produk
+                log_aktivitas([
+                    'user_id' => $user_id,
+                    'action_type' => 'UPDATE',
+                    'target_table' => 'product',
+                    'target_id' => $stock['product_id'],
+                    'description' => "Mengurangi stok produk {$item->kode_barang} pada toko {$id_toko} sebanyak {$item->jumlah} untuk update transaksi {$insertID}",
+                    'detail' => [
+                        'sebelum' => $oldStock,
+                        'dikurangi' => (int) $item->jumlah,
+                        'sisa' => $newStock,
+                        'kode_barang' => $item->kode_barang,
+                        'transaction_id' => $insertID,
+                        'reason' => 'Penyesuaian stok untuk update transaksi'
+                    ]
+                ]);
+            }
         }
 
-        $result = $this->stockModel
-            ->where('id_toko', $id_toko)
-            ->where('id_barang', $kode_barang)
-            ->set('stock', 'stock - ' . $jumlah, false)
-            ->update();
-
-        if ($result) {
-            log_aktivitas([
-                'user_id' => $user_id,
-                'action_type' => 'UPDATE',
-                'target_table' => 'product',
-                'target_id' => $stock['product_id'],
-                'description' => "Mengurangi stok produk {$kode_barang} pada toko {$id_toko} sebanyak {$jumlah} untuk transaksi {$insertID}",
-                'detail' => [
-                    'sebelum' => (int) $stock['stock'],
-                    'dikurangi' => (int) $jumlah,
-                    'sisa' => (int) $stock['stock'] - $jumlah,
-                ]
-            ]);
-        }
-
-        return $result;
+        return $stockLogs;
     }
     private function getOrCreateCustomer($customer_name, $customer_phone, $customer_alamat)
     {
@@ -128,74 +161,59 @@ class TransactionController extends BaseController
 
         return $customer['id'];
     }
-    private function calculateTransactionTotals($items, $discount, $ppn, $pengiriman)
+    private function calculateTransactionTotals($items, $discount, $ppn, $pengiriman, $freeOngkir = false)
     {
-        $totalAmount = 0;
-        foreach ($items as $item) {
-            $totalAmount += $item->jumlah * $item->harga_jual;
-        }
+        $totalAmount = array_reduce($items, function ($carry, $item) {
+            return $carry + ($item->jumlah * $item->harga_jual);
+        }, 0);
 
         $totalPpn = ($totalAmount * $ppn) / 100;
-        $grandTotal = $totalAmount + $totalPpn + $pengiriman - $discount;
 
-        return [$totalAmount, $totalPpn, $grandTotal];
+        // Hitung potongan ongkir jika free ongkir
+        $potongan_ongkir = $freeOngkir ? $pengiriman : 0;
+        $grandTotal = $totalAmount + $totalPpn + $pengiriman - $discount - $potongan_ongkir;
+
+        return [$totalAmount, $totalPpn, $grandTotal, $potongan_ongkir];
     }
     private function saveTransactionMeta($transactionId, $data)
     {
         $metaData = [
             'ppn' => $data['ppn'],
             'ppn_value' => $data['ppn_value'],
-            'grand_total' => $data['totalAmount'],
+            'totalAmount' => $data['totalAmount'],
             'discount' => $data['discount'],
+            'discount_rate' => $data['discount_rate'] ?? null,
             'alamat' => $data['alamat'],
             'pengiriman' => $data['pengiriman'],
+            'biaya_pengiriman' => $data['biaya_pengiriman'],
+            'free_ongkir' => $data['free_ongkir'] ?? false,
+            'potongan_ongkir' => $data['potongan_ongkir'] ?? 0,
+            'source' => $data['source'] ?? null,
+            'customerId' => empty($data['customerId']) ? null : $data['customerId'],
+            'customer_name' => empty($data['customerId']) ? $data['customer_name'] : null,
+            'jatuh_tempo' => $data['jatuh_tempo'] ?? null,
+            'refunded_amount' => $data['refunded_amount'] ?? null,
+            'complaint' => $data['complaint'] ?? null,
         ];
 
-        if (!empty($data['jatuh_tempo'])) {
-            $metaData['jatuh_tempo'] = $data['jatuh_tempo'];
-        }
+        // Filter null values
+        $metaData = array_filter($metaData, function ($value) {
+            return $value !== null;
+        });
 
-        if (!empty($data['biaya_pengiriman'])) {
-            $metaData['biaya_pengiriman'] = $data['biaya_pengiriman'];
-        }
-
-        if (!empty($data['source'])) {
-            $metaData['source'] = $data['source'];
-        }
-
-        if (!empty($data['refunded_amount'])) {
-            $metaData['refunded_amount'] = $data['refunded_amount'];
-        }
-
-        if (!empty($data['complaint'])) {
-            $metaData['complaint'] = $data['complaint'];
-        }
-
-        if (empty($data['customerId'])) {
-            $metaData['customer_name'] = $data['customer_name'];
-        } else {
-            $metaData['customer_id'] = $data['customerId'];
-        }
-
+        $batchData = [];
         foreach ($metaData as $key => $value) {
-            // Cek apakah data meta sudah ada
-            $existingMeta = $this->transactionMeta
-                ->where('transaction_id', $transactionId)
-                ->where('key', $key)
-                ->first();
+            $batchData[] = [
+                'transaction_id' => $transactionId,
+                'key' => $key,
+                'value' => is_bool($value) ? ($value ? '1' : '0') : (string) $value
+            ];
+        }
 
-
-            if ($existingMeta) {
-                // Jika sudah ada, update data
-                $this->transactionMeta->update($existingMeta['id'], ['value' => $value]);
-            } else {
-                // Jika belum ada, insert data baru
-                $this->transactionMeta->insert([
-                    'transaction_id' => $transactionId,
-                    'key' => $key,
-                    'value' => $value
-                ]);
-            }
+        // Hapus data meta lama dan insert baru
+        $this->transactionMeta->where('transaction_id', $transactionId)->delete();
+        if (!empty($batchData)) {
+            $this->transactionMeta->insertBatch($batchData);
         }
     }
     public function createTransaction()
@@ -207,38 +225,40 @@ class TransactionController extends BaseController
         $db->transStart();
 
         try {
+            // 1. Prepare data
             $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
 
+            // 2. Get products in batch
             $kodeBarangList = array_column($data->item, 'kode_barang');
             $products = $this->ProductModel->whereIn('id_barang', $kodeBarangList)->findAll();
 
-            if (empty($products)) {
-                throw new \Exception("Tidak ada produk yang ditemukan.");
+            if (count($products) !== count($kodeBarangList)) {
+                throw new \Exception("Beberapa produk tidak ditemukan.");
             }
 
-            $productMap = [];
-            foreach ($products as $product) {
-                $productMap[$product['id_barang']] = $product;
-            }
+            $productMap = array_column($products, null, 'id_barang');
 
-            // Menghitung Total, PPN, dan Grand Total
-            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals(
+            // 3. Calculate totals dengan free_ongkir
+            $freeOngkir = isset($data->free_ongkir) ? (bool) $data->free_ongkir : false;
+            [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir] = $this->calculateTransactionTotals(
                 $data->item,
                 $data->discount,
                 $data->ppn,
-                $data->biaya_pengiriman
+                $data->biaya_pengiriman,
+                $freeOngkir
             );
 
-            // Hitung Discount Rate
             $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
 
+            // 4. Create transaction
             $transactionData = [
                 'amount' => $grandTotal,
                 'status' => 'WAITING_PAYMENT',
                 'po' => $data->po,
                 'id_toko' => $data->id_toko,
                 'created_by' => $token['user_id'],
-                'date_time' => date('Y-m-d H:i:s')
+                'date_time' => date('Y-m-d H:i:s'),
+                'invoice' => "INV" . date('ymd'), // temporary
             ];
 
             if (!$this->transactions->insert($transactionData)) {
@@ -248,34 +268,21 @@ class TransactionController extends BaseController
             $insertID = $this->transactions->insertID();
             $invoice = "INV" . date('ymd') . $insertID;
 
+            // 5. Check and update stock in batch
+            $this->checkAndUpdateStockBatch($token['user_id'], $data->id_toko, $data->item, $insertID);
+
+            // 6. Prepare sales data dengan perhitungan sekaligus
             $salesData = [];
             $total_modal = 0;
             $total_actual = 0;
 
             foreach ($data->item as $item) {
-                if (!isset($productMap[$item->kode_barang])) {
-                    throw new \Exception("Produk {$item->kode_barang} tidak ditemukan.");
-                }
-
                 $product = $productMap[$item->kode_barang];
-
-                $this->checkAndUpdateStock(
-                    $token['user_id'],
-                    $data->id_toko,
-                    $item->kode_barang,
-                    $item->jumlah,
-                    $insertID
-                );
-
-                // Perhitungan harga aktual setelah diskon
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
                 $actual_total = $actual_per_piece * $item->jumlah;
 
-                // Akumulasi total
-                $total_modal += $product['harga_modal'] * $item->jumlah;
-                $total_actual += $actual_total;
-
                 $salesData[] = [
+                    'id_transaction' => $insertID,
                     'kode_barang' => $item->kode_barang,
                     'jumlah' => $item->jumlah,
                     'harga_jual' => $item->harga_jual,
@@ -285,18 +292,19 @@ class TransactionController extends BaseController
                     'actual_per_piece' => $actual_per_piece,
                     'actual_total' => $actual_total
                 ];
+
+                $total_modal += $product['harga_modal'] * $item->jumlah;
+                $total_actual += $actual_total;
             }
 
-            if (
-                !$this->transactions->update($insertID, [
-                    'invoice' => $invoice,
-                    'actual_total' => $total_actual,
-                    'total_modal' => $total_modal
-                ])
-            ) {
-                throw new \Exception("Gagal memperbarui nomor invoice dan total.");
-            }
+            // 7. Update transaction dengan data final
+            $this->transactions->update($insertID, [
+                'invoice' => $invoice,
+                'actual_total' => $total_actual,
+                'total_modal' => $total_modal
+            ]);
 
+            // 8. Save metadata dengan free_ongkir
             $this->saveTransactionMeta($insertID, [
                 'ppn' => $data->ppn,
                 'ppn_value' => $ppn_value,
@@ -309,13 +317,12 @@ class TransactionController extends BaseController
                 'alamat' => $data->alamat,
                 'pengiriman' => $data->pengiriman,
                 'biaya_pengiriman' => $data->biaya_pengiriman,
+                'free_ongkir' => $freeOngkir,
+                'potongan_ongkir' => $potongan_ongkir,
                 'customer_name' => $data->customer_name
             ]);
 
-            foreach ($salesData as &$item) {
-                $item['id_transaction'] = $insertID;
-            }
-
+            // 9. Insert sales data
             if (!$this->SalesProductModel->insertBatch($salesData)) {
                 throw new \Exception("Gagal menyimpan data penjualan.");
             }
@@ -326,24 +333,28 @@ class TransactionController extends BaseController
                 throw new \Exception("Terjadi kesalahan saat menyimpan transaksi.");
             }
 
+            // Logging dengan info free ongkir
+            $logDescription = 'Membuat transaksi baru';
+            if ($freeOngkir) {
+                $logDescription .= ' dengan FREE ONGKIR';
+            }
+
             log_aktivitas([
                 'user_id' => $token['user_id'],
                 'action_type' => 'CREATE',
                 'target_table' => 'transactions',
                 'target_id' => $insertID,
-                'description' => 'Membuat transaksi baru',
-                'detail' => [
-                    'new' => $data
-                ],
+                'description' => $logDescription,
+                'new' => $data
             ]);
 
             return $this->jsonResponse->oneResp('Transaksi berhasil diproses', $insertID, 201);
+
         } catch (\Exception $e) {
             $db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-
     public function countTransaction()
     {
         $data = $this->request->getJSON();
@@ -535,70 +546,57 @@ class TransactionController extends BaseController
     public function getTransactionDetailById($id = null)
     {
         $db = \Config\Database::connect();
+
+        // Gunakan single query dengan conditional aggregation untuk meta data
         $builder = $db->table('transaction t')
             ->select("
-                t.id AS transaction_id,
-                t.invoice AS invoice_number,
-                t.amount,
-                t.po,
-                t.total_payment,
-                t.status,
-                t.id_toko,
-                t.date_time,
-                toko.toko_name,
-                toko.image_logo,
-                toko.alamat as alamat_toko,
-                toko.phone_number as nomer_toko,
-                toko.bank as bank_toko,
-                toko.nama_pemilik as nama_pemilik_toko,
-                toko.nomer_rekening as nomer_rekening_toko,
-                COALESCE(c.nama_customer, tm_name.value) AS customer_name,
-                c.no_hp_customer AS customer_phone,
-                tm_partial.value AS partially_paid_at,
-                tm_dp.value AS metode_pembayaran_dp,
-                tm_paid.value AS paid_at,
-                tm_ppn.value AS ppn,
-                tm_ppn_value.value AS ppn_value,
-                tm_grand_total.value AS grand_total,
-                tm_pelunasan.value AS metode_pembayaran_pelunasan,
-                tm_cancel.value AS cancel_at,
-                tm_reason.value AS cancel_reason,
-                tm_refunded.value AS refunded_at,
-                tm_refunded_amount.value AS refunded_amount,
-                tm_total_dp.value AS total_dp,
-                tm_source.value AS source,
-                tm_discount.value AS discount,
-                tm_jatuh_tempo.value AS jatuh_tempo,
-                tm_alamat.value AS alamat,
-                tm_pengiriman.value AS pengiriman,
-                tm_biaya_pengiriman.value AS biaya_pengiriman,
-                tm_notes.value AS notes,
-            ")
-            ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
+            t.id AS transaction_id,
+            t.invoice AS invoice_number,
+            t.amount,
+            t.po,
+            t.total_payment,
+            t.status,
+            t.id_toko,
+            t.date_time,
+            t.actual_total,
+            t.total_modal,
+            tk.toko_name,
+            tk.image_logo,
+            tk.alamat as alamat_toko,
+            tk.phone_number as nomer_toko,
+            tk.bank as bank_toko,
+            tk.nama_pemilik as nama_pemilik_toko,
+            tk.nomer_rekening as nomer_rekening_toko,
+            COALESCE(c.nama_customer, MAX(CASE WHEN tm.key = 'customer_name' THEN tm.value END)) AS customer_name,
+            c.no_hp_customer AS customer_phone,
+            MAX(CASE WHEN tm.key = 'partialy_paid_at' THEN tm.value END) AS partially_paid_at,
+            MAX(CASE WHEN tm.key = 'metode_pembayaran_dp' THEN tm.value END) AS metode_pembayaran_dp,
+            MAX(CASE WHEN tm.key = 'paid_at' THEN tm.value END) AS paid_at,
+            MAX(CASE WHEN tm.key = 'ppn' THEN tm.value END) AS ppn,
+            MAX(CASE WHEN tm.key = 'ppn_value' THEN tm.value END) AS ppn_value,
+            MAX(CASE WHEN tm.key = 'total_dp' THEN tm.value END) AS total_dp,
+            MAX(CASE WHEN tm.key = 'grand_total' THEN tm.value END) AS grand_total,
+            MAX(CASE WHEN tm.key = 'metode_pembayaran_pelunasan' THEN tm.value END) AS metode_pembayaran_pelunasan,
+            MAX(CASE WHEN tm.key = 'cancel_at' THEN tm.value END) AS cancel_at,
+            MAX(CASE WHEN tm.key = 'cancel_reason' THEN tm.value END) AS cancel_reason,
+            MAX(CASE WHEN tm.key = 'refunded_at' THEN tm.value END) AS refunded_at,
+            MAX(CASE WHEN tm.key = 'refunded_amount' THEN tm.value END) AS refunded_amount,
+            MAX(CASE WHEN tm.key = 'source' THEN tm.value END) AS source,
+            MAX(CASE WHEN tm.key = 'discount' THEN tm.value END) AS discount,
+            MAX(CASE WHEN tm.key = 'jatuh_tempo' THEN tm.value END) AS jatuh_tempo,
+            MAX(CASE WHEN tm.key = 'alamat' THEN tm.value END) AS alamat,
+            MAX(CASE WHEN tm.key = 'pengiriman' THEN tm.value END) AS pengiriman,
+            MAX(CASE WHEN tm.key = 'biaya_pengiriman' THEN tm.value END) AS biaya_pengiriman,
+            MAX(CASE WHEN tm.key = 'notes' THEN tm.value END) AS notes,
+            MAX(CASE WHEN tm.key = 'free_ongkir' THEN tm.value END) AS free_ongkir,
+            MAX(CASE WHEN tm.key = 'potongan_ongkir' THEN tm.value END) AS potongan_ongkir
+        ")
+            ->join('toko tk', 't.id_toko = tk.id', 'left')
+            ->join('transaction_meta tm_cust', "t.id = tm_cust.transaction_id AND tm_cust.key = 'customer_id'", 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
-            ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
-            ->join('toko', 't.id_toko = toko.id', 'left')
-            ->join('transaction_meta tm_partial', 't.id = tm_partial.transaction_id AND tm_partial.key = "partialy_paid_at"', 'left')
-            ->join('transaction_meta tm_dp', 't.id = tm_dp.transaction_id AND tm_dp.key = "metode_pembayaran_dp"', 'left')
-            ->join('transaction_meta tm_paid', 't.id = tm_paid.transaction_id AND tm_paid.key = "paid_at"', 'left')
-            ->join('transaction_meta tm_ppn', 't.id = tm_ppn.transaction_id AND tm_ppn.key = "ppn"', 'left')
-            ->join('transaction_meta tm_ppn_value', 't.id = tm_ppn_value.transaction_id AND tm_ppn_value.key = "ppn_value"', 'left')
-            ->join('transaction_meta tm_total_dp', 't.id = tm_total_dp.transaction_id AND tm_total_dp.key = "total_dp"', 'left')
-            ->join('transaction_meta tm_grand_total', 't.id = tm_grand_total.transaction_id AND tm_grand_total.key = "grand_total"', 'left')
-            ->join('transaction_meta tm_pelunasan', 't.id = tm_pelunasan.transaction_id AND tm_pelunasan.key = "metode_pembayaran_pelunasan"', 'left')
-            ->join('transaction_meta tm_cancel', 't.id = tm_cancel.transaction_id AND tm_cancel.key = "cancel_at"', 'left')
-            ->join('transaction_meta tm_reason', 't.id = tm_reason.transaction_id AND tm_reason.key = "cancel_reason"', 'left')
-            ->join('transaction_meta tm_refunded', 't.id = tm_refunded.transaction_id AND tm_refunded.key = "refunded_at"', 'left')
-            ->join('transaction_meta tm_refunded_amount', 't.id = tm_refunded_amount.transaction_id AND tm_refunded_amount.key = "refunded_amount"', 'left')
-            ->join('transaction_meta tm_source', 't.id = tm_source.transaction_id AND tm_source.key = "source"', 'left')
-            ->join('transaction_meta tm_discount', 't.id = tm_discount.transaction_id AND tm_discount.key = "discount"', 'left')
-            ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
-            ->join('transaction_meta tm_alamat', 't.id = tm_alamat.transaction_id AND tm_alamat.key = "alamat"', 'left')
-            ->join('transaction_meta tm_pengiriman', 't.id = tm_pengiriman.transaction_id AND tm_pengiriman.key = "pengiriman"', 'left')
-            ->join('transaction_meta tm_biaya_pengiriman', 't.id = tm_biaya_pengiriman.transaction_id AND tm_biaya_pengiriman.key = "biaya_pengiriman"', 'left')
-            ->join('transaction_meta tm_notes', 't.id = tm_notes.transaction_id AND tm_notes.key = "notes"', 'left')
-            ->where('t.id', $id);
-
+            ->join('transaction_meta tm', 't.id = tm.transaction_id', 'left')
+            ->where('t.id', $id)
+            ->groupBy('t.id, tk.id, c.id'); // Group by semua non-aggregated columns
 
         $transaction = $builder->get()->getRowArray();
 
@@ -606,6 +604,7 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction not found', null, 404);
         }
 
+        // Hitung jatuh tempo
         if (!empty($transaction['jatuh_tempo'])) {
             $jatuhTempo = new \DateTime($transaction['jatuh_tempo']);
             $today = new \DateTime();
@@ -613,60 +612,66 @@ class TransactionController extends BaseController
             $transaction['jatuh_tempo_pada'] = ($interval->invert == 0) ? $interval->days + 1 : 0;
         }
 
-        // Fetch products for the transaction
-        $productBuilder = $db->table('sales_product sp')
-            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
-            ->join('model_barang', 'model_barang.id = p.id_model_barang', 'left')
-            ->join('seri', 'seri.id = p.id_seri_barang', 'left')
+        // Ambil produk dengan single query
+        $products = $db->table('sales_product sp')
             ->select("
-                sp.id,
-                sp.kode_barang,
-                sp.jumlah,
-                sp.harga_jual,
-                sp.total,
-                sp.modal_system as harga_modal,
-                sp.total_modal,
-                CONCAT(p.nama_barang, ' ', model_barang.nama_model, ' ', COALESCE(seri.seri, '')) as nama_lengkap_barang
-            ")
-            ->where('sp.id_transaction', $id);
+            sp.id,
+            sp.kode_barang,
+            sp.jumlah,
+            sp.harga_jual,
+            sp.total,
+            sp.modal_system as harga_modal,
+            sp.total_modal,
+            sp.actual_per_piece,
+            sp.actual_total,
+            CONCAT(
+                COALESCE(p.nama_barang, ''), 
+                ' ', 
+                COALESCE(mb.nama_model, ''), 
+                ' ', 
+                COALESCE(s.seri, '')
+            ) as nama_lengkap_barang,
+            p.nama_barang,
+            mb.nama_model,
+            s.seri
+        ")
+            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('model_barang mb', 'mb.id = p.id_model_barang', 'left')
+            ->join('seri s', 's.id = p.id_seri_barang', 'left')
+            ->where('sp.id_transaction', $id)
+            ->get()
+            ->getResultArray();
 
-
-        $products = $productBuilder->get()->getResultArray();
         $transaction['item'] = $products;
 
-        $cashflowBuilder = $db->table('transaction_meta tm')
-            ->select('tm.value AS cashflow_id')
-            ->where('tm.transaction_id', $id)
-            ->where('tm.key', 'cashflow_id');
+        // Ambil cashflow records dengan single query (menggunakan IN instead of loop)
+        $cashflowIds = $db->table('transaction_meta')
+            ->select('value as cashflow_id')
+            ->where('transaction_id', $id)
+            ->where('key', 'cashflow_id')
+            ->get()
+            ->getResultArray();
 
-        $cashflowMeta = $cashflowBuilder->get()->getResultArray();
-        $cashflowRecords = [];
-
-        foreach ($cashflowMeta as $meta) {
-            $cashflowId = $meta['cashflow_id'];
-
-            $cashflowDetails = $db->table('cashflow')
-                ->select('*')
-                ->where('id', $cashflowId)
+        if (!empty($cashflowIds)) {
+            $ids = array_column($cashflowIds, 'cashflow_id');
+            $cashflowRecords = $db->table('cashflow')
+                ->whereIn('id', $ids)
                 ->orderBy('date_time', 'DESC')
                 ->get()
                 ->getResultArray();
-            $cashflowRecords = array_merge($cashflowRecords, $cashflowDetails);
+            $transaction['cashflow_records'] = $cashflowRecords;
+        } else {
+            $transaction['cashflow_records'] = [];
         }
 
-        $transaction['cashflow_records'] = $cashflowRecords;
-
-        $retur = $db->table('retur rt')
-            ->where('rt.transaction_id', $id)
+        // Ambil retur records
+        $transaction['retur'] = $db->table('retur')
+            ->where('transaction_id', $id)
             ->get()
             ->getResultArray();
-        $transaction['retur'] = $retur;
-
-
 
         return $this->jsonResponse->oneResp('Success', $transaction, 200);
     }
-
     public function createUpdateNotesTransaction()
     {
         $transactionId = $this->request->getVar('transaction_id');
@@ -2134,71 +2139,67 @@ class TransactionController extends BaseController
         $db->transStart();
 
         try {
+            // 1. Validasi transaksi exists
             $transaction = $this->transactions->find($transactionId);
             if (!$transaction) {
                 throw new \Exception("Transaksi tidak ditemukan.");
             }
 
+            // 2. Validasi status transaksi
+            if (in_array($transaction['status'], ['CANCELLED', 'REFUNDED'])) {
+                throw new \Exception("Tidak dapat mengubah transaksi yang sudah dibatalkan/direfund.");
+            }
+
+            // 3. Get or create customer
             $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
 
-            // **1. Ambil Data Item Lama**
+            // 4. Ambil data lama untuk comparison
             $oldItems = $this->SalesProductModel->where('id_transaction', $transactionId)->findAll();
-            $oldItemMap = [];
-            foreach ($oldItems as $oldItem) {
-                $oldItemMap[$oldItem['kode_barang']] = $oldItem;
-            }
+            $oldItemMap = array_column($oldItems, null, 'kode_barang');
 
-            // **2. Temukan item yang dihapus (tidak ada di `$data->item`)**
+            // Ambil meta data lama untuk comparison
+            $oldMeta = $this->getTransactionMetaData($transactionId);
+
+            // 5. Validasi dan prepare produk baru
             $kodeBarangBaru = array_column($data->item, 'kode_barang');
-            foreach ($oldItemMap as $kode_barang => $oldItem) {
-                if (!in_array($kode_barang, $kodeBarangBaru)) {
-                    $this->restoreStock($token['user_id'], $data->id_toko, $kode_barang, $oldItem['jumlah']);
-                }
+            $products = $this->ProductModel->whereIn('id_barang', $kodeBarangBaru)->findAll();
+
+            if (count($products) !== count($kodeBarangBaru)) {
+                throw new \Exception("Beberapa produk tidak ditemukan.");
             }
 
-            // **3. Ambil Produk yang Ada di Item Baru**
-            $kodeBarangList = array_column($data->item, 'kode_barang');
-            $products = $this->ProductModel->whereIn('id_barang', $kodeBarangList)->findAll();
+            $productMap = array_column($products, null, 'id_barang');
 
-            if (empty($products)) {
-                throw new \Exception("Tidak ada produk yang ditemukan.");
-            }
+            // 6. Calculate new totals dengan free_ongkir
+            $freeOngkir = isset($data->free_ongkir) ? (bool) $data->free_ongkir : false;
+            [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir] = $this->calculateTransactionTotals(
+                $data->item,
+                $data->discount,
+                $data->ppn,
+                $data->biaya_pengiriman,
+                $freeOngkir
+            );
 
-            $productMap = [];
-            foreach ($products as $product) {
-                $productMap[$product['id_barang']] = $product;
-            }
-
-            // **4. Menghitung Total, PPN, dan Grand Total**
-            [$totalAmount, $ppn_value, $grandTotal] = $this->calculateTransactionTotals($data->item, $data->discount, $data->ppn, $data->biaya_pengiriman);
-
-            // **5. Hitung Discount Rate**
             $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
 
-            // **6. Periksa dan Perbarui Stok**
-            foreach ($data->item as $item) {
-                $kode_barang = $item->kode_barang;
-                $newJumlah = $item->jumlah;
-                $oldJumlah = isset($oldItemMap[$kode_barang]) ? $oldItemMap[$kode_barang]['jumlah'] : 0;
-                $diffJumlah = $newJumlah - $oldJumlah;
+            // 7. Handle stock adjustment dengan logging
+            $stockChanges = $this->handleStockAdjustment(
+                $token['user_id'],
+                $data->id_toko,
+                $oldItemMap,
+                $data->item,
+                $transactionId
+            );
 
-                if ($diffJumlah > 0) {
-                    $this->checkAndUpdateStock($token['user_id'], $data->id_toko, $kode_barang, $diffJumlah, $transactionId);
-                } elseif ($diffJumlah < 0) {
-                    $this->restoreStock($token['user_id'], $data->id_toko, $kode_barang, abs($diffJumlah));
-                }
-            }
-
-            // **7. Hapus Semua Item Lama dalam Transaksi Ini**
-            $this->SalesProductModel->where('id_transaction', $transactionId)->delete();
-
+            // 8. Calculate modal totals
+            $total_modal = 0;
+            $total_actual = 0;
             $salesData = [];
+
             foreach ($data->item as $item) {
                 $product = $productMap[$item->kode_barang];
-
-                // **Hitung Harga Modal Setelah Diskon**
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
-                $total_actual = $actual_per_piece * $item->jumlah;
+                $actual_total = $actual_per_piece * $item->jumlah;
 
                 $salesData[] = [
                     'kode_barang' => $item->kode_barang,
@@ -2207,120 +2208,282 @@ class TransactionController extends BaseController
                     'total' => $item->harga_jual * $item->jumlah,
                     'modal_system' => $product['harga_modal'],
                     'total_modal' => $product['harga_modal'] * $item->jumlah,
-                    'actual_per_piece' => $actual_per_piece, // Harga modal setelah diskon
-                    'actual_total' => $total_actual, // Total harga modal setelah diskon
+                    'actual_per_piece' => $actual_per_piece,
+                    'actual_total' => $actual_total,
                     'id_transaction' => $transactionId
                 ];
+
+                $total_modal += $product['harga_modal'] * $item->jumlah;
+                $total_actual += $actual_total;
             }
 
+            // 9. Update transaction data
             $updateTransaction = [
                 'amount' => $grandTotal,
+                'actual_total' => $total_actual,
+                'total_modal' => $total_modal,
                 'po' => $data->po,
                 'id_toko' => $data->id_toko,
                 "updated_by" => $token['user_id'],
                 'date_time' => date('Y-m-d H:i:s'),
             ];
 
+            // 10. Handle status changes based on payment
+            $updateTransaction = $this->handleStatusUpdate(
+                $transaction,
+                $updateTransaction,
+                $grandTotal
+            );
+
+            // 11. Prepare meta data
             $metaData = [
                 'ppn' => $data->ppn,
                 'ppn_value' => $ppn_value,
                 'totalAmount' => $totalAmount,
                 'discount' => $data->discount,
-                'discount_rate' => $discount_rate, // Simpan discount rate untuk referensi
+                'discount_rate' => $discount_rate,
                 'jatuh_tempo' => $data->jatuh_tempo,
                 'source' => $data->source,
                 'alamat' => $data->alamat,
                 'pengiriman' => $data->pengiriman,
                 'biaya_pengiriman' => $data->biaya_pengiriman,
+                'free_ongkir' => $freeOngkir,
+                'potongan_ongkir' => $potongan_ongkir,
                 'customerId' => $customerId,
                 'customer_name' => $data->customer_name
             ];
 
-            // **8. Tambahkan logika status transaksi**
-            if ($transaction['status'] === 'PAID') {
-                if ($grandTotal > $transaction['amount']) {
-                    $updateTransaction['status'] = 'PARTIALLY_PAID';
-                } elseif ($grandTotal < $transaction['amount']) {
-                    $updateTransaction['status'] = 'NEED_REFUNDED';
-                    $metaData['refunded_amount'] = $transaction['total_payment'] - $grandTotal;
+            // 12. Handle refund amount calculation
+            if ($updateTransaction['status'] === 'NEED_REFUND') {
+                $refundAmount = $transaction['total_payment'] - $grandTotal;
+                if ($refundAmount > 0) {
+                    $metaData['refunded_amount'] = $refundAmount;
                     $metaData['complaint'] = true;
                 }
             }
 
+            // 13. Execute updates
             if (!$this->transactions->update($transactionId, $updateTransaction)) {
                 throw new \Exception("Gagal memperbarui transaksi.");
             }
 
-            $this->saveTransactionMeta($transactionId, $metaData);
-
+            // Delete old sales data and insert new
+            $this->SalesProductModel->where('id_transaction', $transactionId)->delete();
             if (!$this->SalesProductModel->insertBatch($salesData)) {
                 throw new \Exception("Gagal memperbarui data penjualan.");
             }
+
+            // Update meta data
+            $this->saveTransactionMeta($transactionId, $metaData);
 
             $db->transComplete();
 
             if ($db->transStatus() === false) {
                 throw new \Exception("Terjadi kesalahan saat memperbarui transaksi.");
             }
-            $logDescription = $this->generateTransactionLog(
+
+            // 14. Log activity
+            $this->logTransactionUpdate(
                 $token['user_id'],
+                $transactionId,
                 $transaction,
                 $updateTransaction,
                 $oldItemMap,
-                $data->item
+                $data->item,
+                $stockChanges,
+                $oldMeta,
+                $metaData
             );
 
-            log_aktivitas([
-                'user_id' => $token['user_id'],
-                'action_type' => 'UPDATE',
-                'target_table' => 'transactions',
-                'target_id' => $transactionId,
-                'description' => $logDescription,
-            ]);
-
             return $this->jsonResponse->oneResp('Transaksi berhasil diperbarui', $transactionId, 200);
+
         } catch (\Exception $e) {
             $db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-    private function restoreStock($user_id, $idToko, $kodeBarang, $jumlah)
+
+    private function handleStockAdjustment($user_id, $id_toko, $oldItemMap, $newItems, $transactionId)
     {
-        $stok = $this->stockModel
-            ->select('stock.id, stock.stock, product.dropship, product.id as product_id')
+        $stockChanges = [];
+        $kodeBarangBaru = array_column($newItems, 'kode_barang');
+
+        // Handle removed items - restore stock
+        foreach ($oldItemMap as $kode_barang => $oldItem) {
+            if (!in_array($kode_barang, $kodeBarangBaru)) {
+                $this->restoreStock($user_id, $id_toko, $kode_barang, $oldItem['jumlah'], $transactionId);
+                $stockChanges[] = [
+                    'action' => 'RESTORE',
+                    'kode_barang' => $kode_barang,
+                    'jumlah' => $oldItem['jumlah'],
+                    'reason' => 'Item dihapus dari transaksi'
+                ];
+            }
+        }
+
+        // Handle updated items - adjust stock
+        $itemsToReduce = [];
+        foreach ($newItems as $item) {
+            $kode_barang = $item->kode_barang;
+            $newJumlah = $item->jumlah;
+            $oldJumlah = isset($oldItemMap[$kode_barang]) ? $oldItemMap[$kode_barang]['jumlah'] : 0;
+            $diffJumlah = $newJumlah - $oldJumlah;
+
+            if ($diffJumlah > 0) {
+                // Need more stock - collect for batch processing
+                $itemsToReduce[] = (object) [
+                    'kode_barang' => $kode_barang,
+                    'jumlah' => $diffJumlah
+                ];
+                // HAPUS logging dari sini, nanti dilakukan di checkAndUpdateStockBatch
+            } elseif ($diffJumlah < 0) {
+                // Restore excess stock
+                $this->restoreStock($user_id, $id_toko, $kode_barang, abs($diffJumlah), $transactionId);
+                // HAPUS logging dari sini, sudah dilakukan di restoreStock
+            }
+        }
+
+        // Process batch stock reduction
+        if (!empty($itemsToReduce)) {
+            $this->checkAndUpdateStockBatch($user_id, $id_toko, $itemsToReduce, $transactionId);
+        }
+
+        return $stockChanges;
+    }
+
+    private function handleStatusUpdate($oldTransaction, $updateData, $newGrandTotal)
+    {
+        $status = $oldTransaction['status'];
+        $totalPayment = $oldTransaction['total_payment'];
+
+        // Only adjust status for paid transactions
+        if (in_array($status, ['PAID', 'PARTIALLY_PAID'])) {
+            if ($newGrandTotal == $totalPayment) {
+                $updateData['status'] = 'PAID';
+            } elseif ($newGrandTotal > $totalPayment) {
+                $updateData['status'] = 'PARTIALLY_PAID';
+            } else {
+                $updateData['status'] = 'NEED_REFUND';
+            }
+        }
+
+        return $updateData;
+    }
+
+    private function getTransactionMetaData($transactionId)
+    {
+        $metaRows = $this->transactionMeta
+            ->where('transaction_id', $transactionId)
+            ->get()
+            ->getResultArray();
+
+        $metaData = [];
+        foreach ($metaRows as $row) {
+            $metaData[$row['key']] = $row['value'];
+        }
+
+        return $metaData;
+    }
+
+
+    private function restoreStock($user_id, $id_toko, $kode_barang, $jumlah, $transactionId = null)
+    {
+        $stock = $this->stockModel
+            ->select('stock.*, product.id AS product_id, stock.stock as current_stock')
             ->join('product', 'product.id_barang = stock.id_barang')
-            ->where('stock.id_toko', $idToko)
-            ->where('stock.id_barang', $kodeBarang)
-            ->first();
+            ->where('stock.id_toko', $id_toko)
+            ->where('stock.id_barang', $kode_barang)
+            ->get()
+            ->getRowArray();
 
-        if (!$stok) {
-            throw new \Exception("Stok untuk produk {$kodeBarang} tidak ditemukan di toko {$idToko}.");
+        if (!$stock) {
+            throw new \Exception("Stok untuk produk {$kode_barang} tidak ditemukan.");
         }
 
-        $isDropship = isset($stok['dropship']) && (int) $stok['dropship'] === 1;
-
-        $result = false;
-        if (!$isDropship) {
-            $result = $this->stockModel
-                ->where('id', $stok['id'])
-                ->set('stock', 'stock + ' . (int) $jumlah, false)
-                ->update();
+        // Skip dropship products
+        if (!empty($stock['dropship']) && (int) $stock['dropship'] === 1) {
+            return true;
         }
+
+        $oldStock = (int) $stock['current_stock'];
+        $newStock = $oldStock + $jumlah;
+
+        $result = $this->stockModel
+            ->where('id_toko', $id_toko)
+            ->where('id_barang', $kode_barang)
+            ->set('stock', $newStock)
+            ->update();
 
         if ($result) {
+            $description = $transactionId
+                ? "Mengembalikan stok produk {$kode_barang} sebanyak {$jumlah} untuk update transaksi {$transactionId}"
+                : "Mengembalikan stok produk {$kode_barang} sebanyak {$jumlah}";
+
+            // LOG HANYA DI SINI - tidak double
             log_aktivitas([
                 'user_id' => $user_id,
                 'action_type' => 'UPDATE',
                 'target_table' => 'product',
-                'target_id' => $stok['product_id'],
-                'description' => "Mengembalikan stok produk {$kodeBarang} pada toko {$idToko} sebanyak {$jumlah} dari transaksi.",
+                'target_id' => $stock['product_id'],
+                'description' => $description,
                 'detail' => [
-                    'stok_sebelum' => (int) $stok['stock'],
-                    'jumlah_ditambah' => (int) $jumlah,
-                    'stok_setelah' => (int) $stok['stock'] + $jumlah,
+                    'sebelum' => $oldStock,
+                    'ditambahkan' => (int) $jumlah,
+                    'sisa' => $newStock,
+                    'kode_barang' => $kode_barang,
+                    'transaction_id' => $transactionId,
+                    'reason' => 'Penyesuaian stok untuk update transaksi'
                 ]
             ]);
         }
+
+        return $result;
+    }
+
+    private function logTransactionUpdate($user_id, $transactionId, $oldTransaction, $newTransaction, $oldItems, $newItems, $stockChanges, $oldMeta, $newMeta)
+    {
+        $changes = [];
+
+        // Track transaction changes
+        foreach ($newTransaction as $key => $value) {
+            if (isset($oldTransaction[$key]) && $oldTransaction[$key] != $value) {
+                $changes[$key] = [
+                    'from' => $oldTransaction[$key],
+                    'to' => $value
+                ];
+            }
+        }
+
+        // Track meta changes
+        foreach ($newMeta as $key => $value) {
+            if (!isset($oldMeta[$key]) || $oldMeta[$key] != $value) {
+                $changes['meta_' . $key] = [
+                    'from' => $oldMeta[$key] ?? null,
+                    'to' => $value
+                ];
+            }
+        }
+
+        $description = "Memperbarui transaksi {$transactionId}";
+        if (!empty($stockChanges)) {
+            $description .= " dengan penyesuaian stok";
+        }
+        if (isset($changes['status'])) {
+            $description .= " - Status berubah dari {$changes['status']['from']} ke {$changes['status']['to']}";
+        }
+
+        log_aktivitas([
+            'user_id' => $user_id,
+            'action_type' => 'UPDATE',
+            'target_table' => 'transactions',
+            'target_id' => $transactionId,
+            'description' => $description,
+            'detail' => [
+                'changes' => $changes,
+                'stock_adjustments' => $stockChanges,
+                'items_updated' => count($newItems)
+            ]
+        ]);
     }
     public function getUpcomingDueTransactions()
     {
