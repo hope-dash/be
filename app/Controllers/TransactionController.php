@@ -177,6 +177,26 @@ class TransactionController extends BaseController
     }
     private function saveTransactionMeta($transactionId, $data)
     {
+        // Daftar key yang BOLEH diupdate (tidak termasuk preserved keys)
+        $updatableKeys = [
+            'ppn',
+            'ppn_value',
+            'totalAmount',
+            'discount',
+            'discount_rate',
+            'alamat',
+            'pengiriman',
+            'biaya_pengiriman',
+            'free_ongkir',
+            'potongan_ongkir',
+            'source',
+            'customerId',
+            'customer_name',
+            'jatuh_tempo',
+            'refunded_amount',
+            'complaint'
+        ];
+
         $metaData = [
             'ppn' => $data['ppn'],
             'ppn_value' => $data['ppn_value'],
@@ -201,19 +221,31 @@ class TransactionController extends BaseController
             return $value !== null;
         });
 
-        $batchData = [];
+        // Hanya proses keys yang boleh diupdate
         foreach ($metaData as $key => $value) {
-            $batchData[] = [
-                'transaction_id' => $transactionId,
-                'key' => $key,
-                'value' => is_bool($value) ? ($value ? '1' : '0') : (string) $value
-            ];
-        }
+            if (in_array($key, $updatableKeys)) {
+                // Cek apakah data sudah ada
+                $existingMeta = $this->transactionMeta
+                    ->where('transaction_id', $transactionId)
+                    ->where('key', $key)
+                    ->first();
 
-        // Hapus data meta lama dan insert baru
-        $this->transactionMeta->where('transaction_id', $transactionId)->delete();
-        if (!empty($batchData)) {
-            $this->transactionMeta->insertBatch($batchData);
+                $formattedValue = is_bool($value) ? ($value ? '1' : '0') : (string) $value;
+
+                if ($existingMeta) {
+                    // Update existing
+                    $this->transactionMeta->update($existingMeta['id'], [
+                        'value' => $formattedValue
+                    ]);
+                } else {
+                    // Insert baru
+                    $this->transactionMeta->insert([
+                        'transaction_id' => $transactionId,
+                        'key' => $key,
+                        'value' => $formattedValue
+                    ]);
+                }
+            }
         }
     }
     public function createTransaction()
@@ -1421,7 +1453,7 @@ class TransactionController extends BaseController
 
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
-            ->whereIn('status', ['cancel', 'need_refunded'])
+            ->whereIn('status', ['CANCEL', 'NEED_REFUNDED'])
             ->get()
             ->getRowArray();
 
@@ -1758,11 +1790,13 @@ class TransactionController extends BaseController
             return $this->jsonResponse->oneResp('Transaction status updated to partially paid', null, 200);
         }
     }
+
     public function updateTransactionStatusToFullyPaid($transactionId)
     {
         $token = $this->request->user;
         $db = \Config\Database::connect();
-        $db->transBegin();
+
+        $db->transStart();
 
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
@@ -1786,13 +1820,34 @@ class TransactionController extends BaseController
 
         $newTotalPayment = $transaction['amount'] - $transaction['total_payment'];
         $newTotalPembayaran = $newTotalPayment + $transaction['total_payment'];
+
+        // CEK ONGKIR YANG BENAR: dari transaction_meta -> cashflow
+        $ongkirAlreadyPaid = false;
+        $cashflowIds = $db->table('transaction_meta')
+            ->select('value as cashflow_id')
+            ->where('transaction_id', $transactionId)
+            ->where('key', 'cashflow_id')
+            ->get()
+            ->getResultArray();
+
+        if (!empty($cashflowIds)) {
+            $cashflowIdList = array_column($cashflowIds, 'cashflow_id');
+
+            $existingOngkir = $db->table('cashflow')
+                ->whereIn('id', $cashflowIdList)
+                ->where('credit >', 0)
+                ->like('noted', 'Ongkos Kirim')
+                ->countAllResults();
+
+            $ongkirAlreadyPaid = $existingOngkir > 0;
+        }
+
         $ongkirMeta = $db->table('transaction_meta')
             ->select('value')
             ->where('transaction_id', $transactionId)
             ->where('key', 'biaya_pengiriman')
             ->get()
             ->getRowArray();
-
 
         $ongkir = isset($ongkirMeta['value']) ? (float) $ongkirMeta['value'] : 0;
 
@@ -1808,16 +1863,50 @@ class TransactionController extends BaseController
             ]);
 
         $dateTime = date('Y-m-d H:i:s');
-        // Metadata pelunasan
-        $metaData = [
-            ['key' => 'paid_at', 'value' => $dateTime],
-            ['key' => 'metode_pembayaran_pelunasan', 'value' => (string) $data->metode_pembayaran]
-        ];
+
+        // Update paid_at jika sudah ada, atau insert baru
+        $existingPaidAt = $db->table('transaction_meta')
+            ->where('transaction_id', $transactionId)
+            ->where('key', 'paid_at')
+            ->get()
+            ->getRowArray();
+
+        if ($existingPaidAt) {
+            $db->table('transaction_meta')
+                ->where('id', $existingPaidAt['id'])
+                ->update(['value' => $dateTime]);
+        } else {
+            $db->table('transaction_meta')->insert([
+                'transaction_id' => $transactionId,
+                'key' => 'paid_at',
+                'value' => $dateTime
+            ]);
+        }
+
+        // Update metode pembayaran pelunasan
+        $existingMetode = $db->table('transaction_meta')
+            ->where('transaction_id', $transactionId)
+            ->where('key', 'metode_pembayaran_pelunasan')
+            ->get()
+            ->getRowArray();
+
+        if ($existingMetode) {
+            $db->table('transaction_meta')
+                ->where('id', $existingMetode['id'])
+                ->update(['value' => (string) $data->metode_pembayaran]);
+        } else {
+            $db->table('transaction_meta')->insert([
+                'transaction_id' => $transactionId,
+                'key' => 'metode_pembayaran_pelunasan',
+                'value' => (string) $data->metode_pembayaran
+            ]);
+        }
+
         // Insert pemasukan produk
         $cashflowIdProduk = $this->CashflowModel->insert([
             'debit' => $newTotalPayment,
             'credit' => 0,
-            'noted' => "Pembayaran Produk Transaksi " . $transaction['invoice'],
+            'noted' => "Pelunasan Produk Transaksi " . $transaction['invoice'],
             'type' => 'Transaction',
             'status' => 'SUCCESS',
             'date_time' => $dateTime,
@@ -1827,11 +1916,25 @@ class TransactionController extends BaseController
         ]);
 
         if ($cashflowIdProduk) {
-            $metaData[] = ['key' => 'cashflow_id', 'value' => $cashflowIdProduk];
+            // Cek apakah cashflow_id sudah ada
+            $existingCashflow = $db->table('transaction_meta')
+                ->where('transaction_id', $transactionId)
+                ->where('key', 'cashflow_id')
+                ->where('value', (string) $cashflowIdProduk)
+                ->get()
+                ->getRowArray();
+
+            if (!$existingCashflow) {
+                $db->table('transaction_meta')->insert([
+                    'transaction_id' => $transactionId,
+                    'key' => 'cashflow_id',
+                    'value' => (string) $cashflowIdProduk
+                ]);
+            }
         }
 
-        // Insert pengeluaran ongkir (jika ada)
-        if ($ongkir > 0) {
+        // Insert pengeluaran ongkir HANYA jika belum pernah dibayar
+        if ($ongkir > 0 && !$ongkirAlreadyPaid) {
             $cashflowIdOngkir = $this->CashflowModel->insert([
                 'debit' => 0,
                 'credit' => $ongkir,
@@ -1845,32 +1948,54 @@ class TransactionController extends BaseController
             ]);
 
             if ($cashflowIdOngkir) {
-                $metaData[] = ['key' => 'cashflow_id', 'value' => $cashflowIdOngkir];
+                // Cek apakah cashflow_id sudah ada
+                $existingCashflowOngkir = $db->table('transaction_meta')
+                    ->where('transaction_id', $transactionId)
+                    ->where('key', 'cashflow_id')
+                    ->where('value', (string) $cashflowIdOngkir)
+                    ->get()
+                    ->getRowArray();
+
+                if (!$existingCashflowOngkir) {
+                    $db->table('transaction_meta')->insert([
+                        'transaction_id' => $transactionId,
+                        'key' => 'cashflow_id',
+                        'value' => (string) $cashflowIdOngkir
+                    ]);
+                }
             }
         }
 
+        // Selesaikan transaction
+        $db->transComplete();
 
-        foreach ($metaData as $meta) {
-            $db->table('transaction_meta')->insert([
-                'transaction_id' => (string) $transactionId,
-                'key' => $meta['key'],
-                'value' => $meta['value']
-            ]);
-        }
-
+        // Cek status transaction
         if ($db->transStatus() === false) {
-            $db->transRollback();
             return $this->jsonResponse->oneResp('Gagal memperbarui transaksi', null, 500);
         }
 
-        $db->transCommit();
+        $logDescription = "Update transaksi {$transactionId} menjadi Full Payment menggunakan metode {$data->metode_pembayaran}";
+        if ($ongkir > 0 && !$ongkirAlreadyPaid) {
+            $logDescription .= " + ongkos kirim";
+        } elseif ($ongkir > 0 && $ongkirAlreadyPaid) {
+            $logDescription .= " (ongkos kirim sudah dibayar sebelumnya)";
+        }
+
         log_aktivitas([
             'user_id' => $token['user_id'],
             'action_type' => 'UPDATE',
             'target_table' => 'transactions',
             'target_id' => $transactionId,
-            'description' => "Update transaksi {$transactionId} menjadi Full Payment menggunakan metode {$data->metode_pembayaran}",
+            'description' => $logDescription,
+            'detail' => [
+                'amount_paid' => $newTotalPayment,
+                'ongkir_paid' => !$ongkirAlreadyPaid && $ongkir > 0,
+                'ongkir_already_paid' => $ongkirAlreadyPaid,
+                'previous_status' => $transaction['status'],
+                'new_total_payment' => $newTotalPembayaran
+            ]
         ]);
+
         return $this->jsonResponse->oneResp('Transaksi berhasil dilunasi dan dicatat di cashflow', null, 200);
     }
     public function complainProduct($transactionId)
@@ -2254,11 +2379,10 @@ class TransactionController extends BaseController
             ];
 
             // 12. Handle refund amount calculation
-            if ($updateTransaction['status'] === 'NEED_REFUND') {
+            if ($updateTransaction['status'] === 'NEED_REFUNDED') {
                 $refundAmount = $transaction['total_payment'] - $grandTotal;
                 if ($refundAmount > 0) {
                     $metaData['refunded_amount'] = $refundAmount;
-                    $metaData['complaint'] = true;
                 }
             }
 
@@ -2363,7 +2487,7 @@ class TransactionController extends BaseController
             } elseif ($newGrandTotal > $totalPayment) {
                 $updateData['status'] = 'PARTIALLY_PAID';
             } else {
-                $updateData['status'] = 'NEED_REFUND';
+                $updateData['status'] = 'NEED_REFUNDED';
             }
         }
 
@@ -2485,6 +2609,7 @@ class TransactionController extends BaseController
             ]
         ]);
     }
+
     public function getUpcomingDueTransactions()
     {
         $db = \Config\Database::connect();
