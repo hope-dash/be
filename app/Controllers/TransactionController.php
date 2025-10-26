@@ -397,36 +397,38 @@ class TransactionController extends BaseController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
+
     public function getListTransaction()
     {
         $db = \Config\Database::connect();
         $builder = $db->table('transaction t')
             ->select("
-                t.id AS transaction_id,
-                t.invoice AS invoice_number,
-                t.amount,
-                t.po,
-                t.total_payment,
-                t.status,
-                t.id_toko,
-                t.date_time,
-                toko.toko_name,
-                COALESCE(c.nama_customer, tm_name.value) AS customer_name,
-                c.no_hp_customer AS customer_phone,
-                tm_jatuh_tempo.value AS jatuh_tempo_pada,
-                CASE 
-                    WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
-                    ELSE FALSE
-                END AS jatuh_tempo
-            ")
+            t.id AS transaction_id,
+            t.invoice AS invoice_number,
+            t.amount,
+            t.po,
+            t.total_payment,
+            t.status,
+            t.id_toko,
+            t.date_time,
+            toko.toko_name,
+            COALESCE(c.nama_customer, tm_name.value) AS customer_name,
+            c.no_hp_customer AS customer_phone,
+            tm_jatuh_tempo.value AS jatuh_tempo_pada,
+            CASE 
+                WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
+                ELSE FALSE
+            END AS jatuh_tempo
+        ")
             ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
             ->join('customer c', 'tm_cust.value = c.id', 'left')
             ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
             ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
-            ->join('toko', 't.id_toko = toko.id', 'left')
-            ->orderBy('t.date_time', 'DESC');
+            ->join('toko', 't.id_toko = toko.id', 'left');
 
-        // **FILTERS**
+        // =====================
+        // FILTERING
+        // =====================
         $status = $this->request->getGet('status');
         $id_toko = $this->request->getGet('id_toko');
         $date_start = $this->request->getGet('date_start');
@@ -436,12 +438,11 @@ class TransactionController extends BaseController
         $total_min = $this->request->getGet('total_min');
         $total_max = $this->request->getGet('total_max');
 
-        if ($status) {
+        if ($status)
             $builder->where('t.status', $status);
-        }
 
         if (is_string($role)) {
-            $role = array_map('intval', explode(',', $role));
+            $role = array_filter(array_map('intval', explode(',', $role)));
         }
 
         if (!empty($role) && !$id_toko) {
@@ -452,36 +453,22 @@ class TransactionController extends BaseController
             $builder->where('t.id_toko', $id_toko);
         }
 
-
         if ($date_start && $date_end) {
-            $start_val = $date_start . ' 00:00:00';
-            $end_val = $date_end . ' 23:59:59';
-            $builder->where("t.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
-
+            $builder->where('t.date_time >=', "{$date_start} 00:00:00");
+            $builder->where('t.date_time <=', "{$date_end} 23:59:59");
         } elseif ($date_start) {
-            $start_val = $date_start . ' 00:00:00';
-            $builder->where("t.date_time >= '{$start_val}'");
-
+            $builder->where('t.date_time >=', "{$date_start} 00:00:00");
         } elseif ($date_end) {
-            $end_val = $date_end . ' 23:59:59';
-            $builder->where("t.date_time <= '{$end_val}'");
+            $builder->where('t.date_time <=', "{$date_end} 23:59:59");
         }
 
-
-        if (
-            isset($total_min) && $total_min !== '' && is_numeric($total_min) &&
-            isset($total_max) && $total_max !== '' && is_numeric($total_max)
-        ) {
+        if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) {
             $builder->where('t.total_payment >=', (float) $total_min);
-            $builder->where('t.total_payment <=', (float) $total_max);
-        } elseif (isset($total_min) && $total_min !== '' && is_numeric($total_min)) {
-            $builder->where('t.total_payment >=', (float) $total_min);
-        } elseif (isset($total_max) && $total_max !== '' && is_numeric($total_max)) {
+        }
+        if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) {
             $builder->where('t.total_payment <=', (float) $total_max);
         }
 
-
-        // **SEARCH (customer_name, customer_phone, invoice_number)**
         if ($search) {
             $builder->groupStart()
                 ->like('c.nama_customer', $search)
@@ -491,24 +478,51 @@ class TransactionController extends BaseController
                 ->groupEnd();
         }
 
-        // **SORTING & PAGINATION**
+        // =====================
+        // SORT & PAGINATION
+        // =====================
         $sortBy = $this->request->getGet('sortBy') ?: 't.id';
-        $sortMethod = strtolower($this->request->getGet('sortMethod') ?: 'asc');
+        $sortMethod = strtolower($this->request->getGet('sortMethod') ?: 'desc');
         $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
         $page = max((int) ($this->request->getGet('page') ?: 1), 1);
         $offset = ($page - 1) * $limit;
 
         $builder->orderBy($sortBy, $sortMethod);
-        $total_data = $builder->countAllResults(false); // Hitung total data
         $builder->limit($limit, $offset);
 
-        $result = $builder->get()->getResultArray();
+        // =====================
+        // COUNT OPTIMIZED (tanpa JOIN)
+        // =====================
+        $countBuilder = $db->table('transaction t');
 
+        if ($status)
+            $countBuilder->where('t.status', $status);
+        if (!empty($role) && !$id_toko)
+            $countBuilder->whereIn('t.id_toko', $role);
+        if ($id_toko)
+            $countBuilder->where('t.id_toko', $id_toko);
+        if ($date_start && $date_end) {
+            $countBuilder->where('t.date_time >=', "{$date_start} 00:00:00");
+            $countBuilder->where('t.date_time <=', "{$date_end} 23:59:59");
+        } elseif ($date_start) {
+            $countBuilder->where('t.date_time >=', "{$date_start} 00:00:00");
+        } elseif ($date_end) {
+            $countBuilder->where('t.date_time <=', "{$date_end} 23:59:59");
+        }
+        if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) {
+            $countBuilder->where('t.total_payment >=', (float) $total_min);
+        }
+        if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) {
+            $countBuilder->where('t.total_payment <=', (float) $total_max);
+        }
+
+        $total_data = (int) $countBuilder->countAllResults();
+        $result = $builder->get()->getResultArray();
         $total_page = ceil($total_data / $limit);
 
         return $this->jsonResponse->multiResp(
             'Success',
-            array_values($result),
+            $result,
             $total_data,
             $total_page,
             $page,
@@ -516,6 +530,8 @@ class TransactionController extends BaseController
             200
         );
     }
+
+
     public function getTransactionDetailById($id = null)
     {
         $db = \Config\Database::connect();
@@ -1050,7 +1066,6 @@ class TransactionController extends BaseController
             200
         );
     }
-
     public function calculateExpenseAllocation()
     {
         $date_start = $this->request->getGet('date_start');
@@ -1628,7 +1643,6 @@ class TransactionController extends BaseController
             );
         }
     }
-
     public function updateTransactionStatusToPartiallyPaid($transactionId)
     {
         $token = $this->request->user;
@@ -2308,7 +2322,6 @@ class TransactionController extends BaseController
             ]);
         }
     }
-
     public function getUpcomingDueTransactions()
     {
         $db = \Config\Database::connect();
@@ -2346,7 +2359,6 @@ class TransactionController extends BaseController
         // Return response
         return $this->jsonResponse->multiResp('Success', $result, count($result), 1, 1, count($result), 200);
     }
-
     public function updateTransactionStatus($transactionId)
     {
         $token = $this->request->user;

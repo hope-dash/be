@@ -316,7 +316,6 @@ class ProductController extends ResourceController
         return implode(", ", $changes) . ".";
     }
 
-
     public function updateProduct($id = null)
     {
         $token = $this->request->user;
@@ -419,70 +418,96 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id], 200);
     }
-    // Fungsi baru di controller (atau model helper) untuk ambil data array (tanpa response JSON)
+
     private function getProductDetailArray($id)
     {
+        // 🔹 Ambil data produk + relasi model & seri
         $product = $this->productModel
-            ->select('product.*, product.id_model_barang as id_model, model_barang.nama_model, seri.seri')
-            ->join('model_barang', 'model_barang.id = product.id_model_barang')
+            ->select('
+            product.*,
+            product.id_model_barang AS id_model,
+            model_barang.nama_model,
+            seri.seri
+        ')
+            ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
             ->join('seri', 'seri.id = product.id_seri_barang', 'left')
             ->where('product.id', $id)
             ->first();
 
-        if (!$product)
+        if (!$product) {
             return null;
-
-        $product = (array) $product;
-
-        // Ambil stock
-        $stockData = $this->productModel
-            ->select("stock.id, stock.stock, IF(stock.dropship = 1, 1, 0) AS dropship, stock.id_toko, stock.barang_cacat, toko.toko_name")
-            ->join('stock', 'stock.id_barang = product.id_barang', 'left')
-            ->join('toko', 'toko.id = stock.id_toko', 'left')
-            ->where('product.id', $id)
-            ->get()
-            ->getResultArray();
-
-        foreach ($stockData as &$row) {
-            $row['dropship'] = (bool) $row['dropship'];
         }
-        unset($row);
 
-        $product['stock'] = $stockData;
+        $p = (array) $product;
 
-        // Ambil images
-        $existingImages = $this->imageModel->where('type', 'product')
-            ->where('kode', $id)
-            ->findAll();
-        $product['images'] = array_column($existingImages, 'url');
+        // 🔹 Tambahkan kode_barang dan nama_lengkap_barang
+        $p['kode_barang'] = $p['id_barang'] ?? null;
+        $p['nama_lengkap_barang'] = trim(implode(' ', array_filter([
+            $p['nama_barang'] ?? '',
+            $p['nama_model'] ?? '',
+            $p['seri'] ?? ''
+        ])));
 
-        // Dropship & supplier
-        $product['dropship'] = (bool) ($product['dropship'] ?? false);
-        $product['suplier'] = !empty($product['suplier']) ? explode(',', $product['suplier']) : [];
-
-        // Ambil supplier details
-        if (!empty($product['suplier'])) {
-            $supplierNames = $this->db->table('suplier')
-                ->select('id, suplier_name')
-                ->whereIn('id', $product['suplier'])
-                ->get()
-                ->getResultArray();
-
-            $product['supplier_details'] = [];
-            foreach ($supplierNames as $supplier) {
-                $product['supplier_details'][] = [
-                    'id' => $supplier['id'],
-                    'name' => $supplier['suplier_name'],
+        // 🔹 Ambil stok (langsung dari tabel stock untuk efisiensi)
+        $p['stock'] = array_map(
+            function ($s) {
+                return [
+                    'id' => $s['id'],
+                    'stock' => $s['stock'],
+                    'dropship' => (bool) $s['dropship'],
+                    'id_toko' => $s['id_toko'],
+                    'barang_cacat' => $s['barang_cacat'],
+                    'toko_name' => $s['toko_name']
                 ];
-            }
-        } else {
-            $product['supplier_details'] = [];
-        }
+            },
+            $this->db->table('stock')
+                ->select('
+            stock.id,
+            stock.stock,
+            stock.dropship,
+            stock.id_toko,
+            stock.barang_cacat,
+            toko.toko_name
+        ')
+                ->join('toko', 'toko.id = stock.id_toko', 'left')
+                ->where('stock.id_barang', $p['id_barang'])
+                ->get()
+                ->getResultArray()
+        );
 
-        return $product;
+        // 🔹 Ambil gambar (hanya ambil URL langsung)
+        $p['images'] = array_column(
+            $this->imageModel
+                ->where(['type' => 'product', 'kode' => $id])
+                ->findAll(),
+            'url'
+        );
+
+        // 🔹 Normalisasi field dropship & supplier
+        $p['dropship'] = (bool) ($p['dropship'] ?? false);
+        $p['suplier'] = !empty($p['suplier'])
+            ? explode(',', $p['suplier'])
+            : [];
+
+        // 🔹 Ambil supplier details (jika ada)
+        $p['supplier_details'] = !empty($p['suplier'])
+            ? array_map(
+                fn($s) => [
+                    'id' => $s['id'],
+                    'name' => $s['suplier_name']
+                ],
+                $this->db->table('suplier')
+                    ->select('id, suplier_name')
+                    ->whereIn('id', $p['suplier'])
+                    ->get()
+                    ->getResultArray()
+            )
+            : [];
+
+        return $p;
     }
 
-    // Fungsi getDetailById tetap untuk response API (optional)
+
     public function getDetailById($id = null)
     {
         try {
@@ -581,6 +606,7 @@ class ProductController extends ResourceController
     public function getAllProduct()
     {
         try {
+            // === Ambil parameter ===
             $sortBy = $this->request->getGet('sortBy');
             if ($sortBy === 'kode_barang') {
                 $sortBy = 'product.id_barang';
@@ -589,65 +615,20 @@ class ProductController extends ResourceController
             }
 
             $sortMethodRaw = $this->request->getGet('sortMethod');
-            $sortMethod = $sortMethodRaw ? strtolower($sortMethodRaw) : 'desc';
-            $namaProduct = $this->request->getGet('namaProduct') ?? '';
-            $seri = $this->request->getGet('seri') ?? '';
-            $model = $this->request->getGet('model') ?? '';
-            $suplier = $this->request->getGet('suplier') ?? '';
-            $stock = $this->request->getGet('stock') ?? '';
-            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+            $sortMethod = in_array(strtolower($sortMethodRaw), ['asc', 'desc']) ? strtolower($sortMethodRaw) : 'desc';
+
+            $namaProduct = trim($this->request->getGet('namaProduct') ?? '');
+            $seri = trim($this->request->getGet('seri') ?? '');
+            $model = trim($this->request->getGet('model') ?? '');
+            $suplier = trim($this->request->getGet('suplier') ?? '');
+            $stockFilter = trim($this->request->getGet('stock') ?? '');
+            $limit = max((int) ($this->request->getGet('limit') ?: 25), 1);
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
-            $subqueryTerjual = "
-                (
-                    SELECT 
-                        sales_product.kode_barang, 
-                        SUM(sales_product.jumlah) AS total_terjual
-                    FROM sales_product
-                    JOIN transaction ON transaction.id = sales_product.id_transaction
-                    WHERE transaction.status IN ('SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID')
-                    GROUP BY sales_product.kode_barang
-                ) AS terjual
-            ";
-
-            $subqueryHold = "
-                (
-                    SELECT 
-                        sales_product.kode_barang, 
-                        SUM(sales_product.jumlah) AS total_hold
-                    FROM sales_product
-                    JOIN transaction ON transaction.id = sales_product.id_transaction
-                    WHERE transaction.status = 'WAITING_PAYMENT'
-                    GROUP BY sales_product.kode_barang
-                ) AS hold
-            ";
-
+            // === Bangun query dasar ===
             $builder = $this->productModel
-                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->join('suplier', 'FIND_IN_SET(suplier.id, product.suplier)', 'left')
-                ->join('stock', 'stock.id_barang = product.id_barang', 'left')
-                ->join($subqueryTerjual, 'terjual.kode_barang = product.id_barang', 'left')
-                ->join($subqueryHold, 'hold.kode_barang = product.id_barang', 'left')
                 ->select([
-                    'product.id',
-                    'product.id_barang',
-                    'product.notes',
-                    'product.nama_barang as nama_barang',
-                    'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
-                    'product.harga_modal',
-                    'product.harga_jual',
-                    'product.harga_jual_toko',
-                    'model_barang.nama_model',
-                    'COALESCE(seri.seri, "") as seri',
-                    'SUM(stock.stock) as total_stock',
-                    'SUM(stock.barang_cacat) as total_cacat',
-                    'GROUP_CONCAT(suplier.suplier_name) as suplier_names',
-                    'COALESCE(terjual.total_terjual, 0) as total_terjual',
-                    'COALESCE(hold.total_hold, 0) as total_hold'
-                ])
-                ->groupBy([
                     'product.id',
                     'product.id_barang',
                     'product.notes',
@@ -655,131 +636,188 @@ class ProductController extends ResourceController
                     'product.harga_modal',
                     'product.harga_jual',
                     'product.harga_jual_toko',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
+                    'product.suplier',
                     'model_barang.nama_model',
                     'seri.seri',
-                    'terjual.total_terjual',
-                    'hold.total_hold'
-                ]);
+                ])
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
-
-            if (!empty($stock)) {
-                switch ($stock) {
-                    case 'available':
-                        $builder->having('SUM(stock.stock) >', 5);
-                        break;
-                    case 'low_stock':
-                        $builder->having('SUM(stock.stock) >', 0);
-                        $builder->having('SUM(stock.stock) <=', 5);
-                        break;
-
-                    case 'out_stock':
-                        $builder->having('SUM(stock.stock) =', 0);
-                        break;
-                }
-            }
-
-
-            // Apply filters
+            // === Filter ===
             if (!empty($namaProduct)) {
                 $builder->groupStart()
-                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->like("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, ''))", $namaProduct)
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
 
-
             if (!empty($seri)) {
-                $builder->like('product.id_seri_barang', $seri, 'both');
+                $builder->where('product.id_seri_barang', $seri);
             }
             if (!empty($model)) {
-                $builder->like('product.id_model_barang', $model, 'both');
-            }
-            if (!empty($suplier)) {
-                $builder->like('product.suplier', $suplier, 'both');
+                $builder->where('product.id_model_barang', $model);
             }
 
-            // Count total data
+            if (!empty($suplier) && is_numeric($suplier)) {
+                $builder->where("FIND_IN_SET({$this->db->escape($suplier)}, product.suplier) >", 0);
+            }
+
+            // Hitung total
             $total_data = $builder->countAllResults(false);
-            $total_page = ceil($total_data / $limit);
+            $total_page = $limit > 0 ? ceil($total_data / $limit) : 0;
 
-            // Fetch product data with pagination
+            if ($total_data === 0) {
+                return $this->jsonResponse->multiResp('', [], $total_data, $total_page, $page, $limit, 200);
+            }
+
+            // Ambil data
             $products = $builder
-                ->groupBy('product.id')
                 ->orderBy($sortBy, $sortMethod)
                 ->limit($limit, $offset)
                 ->get()
                 ->getResultArray();
 
-            // Log the SQL query for debugging
-            log_message('debug', $this->productModel->getLastQuery());
+            // === Batch Query ===
+            $productIds = array_unique(array_column($products, 'id'));
+            $productCodes = array_unique(array_column($products, 'id_barang'));
 
-            $formattedProducts = [];
-            foreach ($products as $item) {
-                $productId = $item['id'];
+            // --- Stock + Toko ---
+            $stockByProduct = [];
+            $tokoMap = [];
+            if (!empty($productCodes)) {
+                $stocks = $this->stockModel
+                    ->select('id_barang, dropship, stock, barang_cacat, id_toko')
+                    ->whereIn('id_barang', $productCodes)
+                    ->findAll();
 
-                // Initialize product data
-                if (!isset($formattedProducts[$productId])) {
-                    $formattedProducts[$productId] = [
-                        'id' => $productId,
-                        'kode_barang' => $item['id_barang'],
-                        'notes' => $item['notes'],
-                        'suplier' => !empty($item['suplier_names']) ? explode(',', $item['suplier_names']) : [], // Convert supplier names to array
-                        'nama_barang' => $item['nama_barang'],
-                        'nama_lengkap_barang' => $item['nama_lengkap_barang'],
-                        'harga_modal' => $item['harga_modal'],
-                        'harga_jual' => $item['harga_jual'],
-                        'harga_jual_toko' => $item['harga_jual_toko'],
-                        'nama_model' => $item['nama_model'],
-                        'seri' => $item['seri'],
-                        'stock' => [],
-                        'total_stock' => (int) $item['total_stock'],
-                        'total_cacat' => (int) $item['total_cacat'],
-                        'total_terjual' => (int) $item['total_terjual'],
-                        'total_hold' => (int) $item['total_hold'],
-                        'stock_string' => ''
-                    ];
+                $tokoIds = array_unique(array_column($stocks, 'id_toko'));
+                if (!empty($tokoIds)) {
+                    $tokoList = $this->db->table('toko')->select('id, toko_name')->whereIn('id', $tokoIds)->get()->getResultArray();
+                    $tokoMap = array_column($tokoList, 'toko_name', 'id');
                 }
 
-                // Fetch stock data based on product code
-                if (!empty($item['id_barang'])) {
-                    $stocks = $this->stockModel
-                        ->select('stock.dropship, stock.stock, stock.barang_cacat, toko.toko_name')
-                        ->join('toko', 'toko.id = stock.id_toko', 'left')
-                        ->where('stock.id_barang', $item['id_barang'])
-                        ->findAll();
-
-                    $stockStrings = [];
-                    foreach ($stocks as $stockItem) {
-                        $stockValue = (int) ($stockItem['stock'] ?? 0);
-                        $barangCacat = (int) ($stockItem['barang_cacat'] ?? 0);
-                        $tokoName = $stockItem['toko_name'] ?? 'Tidak diketahui';
-                        $dropship = $stockItem['dropship'] === "1";
-
-                        $formattedProducts[$productId]['stock'][] = [
-                            'stock' => $stockValue,
-                            'barang_cacat' => $barangCacat,
-                            'toko_name' => $tokoName,
-                            'dropship' => $dropship
-                        ];
-                        // Save for stock_string
-                        $stockStrings[] = "{$tokoName}=" . (!$dropship ? $stockValue : 'dropship');
-                    }
-
-                    // Combine stock strings
-                    $formattedProducts[$productId]['stock_string'] = implode("\n", $stockStrings);
-
-                    // Fetch existing images
-                    $existingImages = $this->imageModel->where('type', 'product')
-                        ->where('kode', $item['id'])
-                        ->findAll();
-
-                    $formattedProducts[$productId]['images'] = array_column($existingImages, 'url');
+                foreach ($stocks as $s) {
+                    $stockByProduct[$s['id_barang']][] = $s;
                 }
             }
 
-            return $this->jsonResponse->multiResp('', array_values($formattedProducts), $total_data, $total_page, $page, $limit, 200);
+            // --- Terjual ---
+            $terjualMap = [];
+            if (!empty($productCodes)) {
+                $rows = $this->db->table('sales_product sp')
+                    ->select('sp.kode_barang, SUM(sp.jumlah) as total')
+                    ->join('transaction t', 't.id = sp.id_transaction')
+                    ->whereIn('sp.kode_barang', $productCodes)
+                    ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
+                    ->groupBy('sp.kode_barang')
+                    ->get()->getResultArray();
+                $terjualMap = array_column($rows, 'total', 'kode_barang');
+            }
+
+            // --- Hold ---
+            $holdMap = [];
+            if (!empty($productCodes)) {
+                $rows = $this->db->table('sales_product sp')
+                    ->select('sp.kode_barang, SUM(sp.jumlah) as total')
+                    ->join('transaction t', 't.id = sp.id_transaction')
+                    ->whereIn('sp.kode_barang', $productCodes)
+                    ->where('t.status', 'WAITING_PAYMENT')
+                    ->groupBy('sp.kode_barang')
+                    ->get()->getResultArray();
+                $holdMap = array_column($rows, 'total', 'kode_barang');
+            }
+
+            // --- Images (pastikan tabel = 'image') ---
+            $imageMap = [];
+            if (!empty($productIds)) {
+                $images = $this->imageModel
+                    ->select('kode, url')
+                    ->where('type', 'product')
+                    ->whereIn('kode', $productIds)
+                    ->findAll();
+                foreach ($images as $img) {
+                    $imageMap[$img['kode']][] = $img['url'];
+                }
+            }
+
+            // === Format Hasil ===
+            $formattedProducts = [];
+            foreach ($products as $p) {
+                $namaLengkap = trim(implode(' ', array_filter([
+                    $p['nama_barang'],
+                    $p['nama_model'] ?? '',
+                    $p['seri'] ?? ''
+                ])));
+
+                // Stock
+                $stocks = $stockByProduct[$p['id_barang']] ?? [];
+                $stockList = [];
+                $stockStrings = [];
+                foreach ($stocks as $s) {
+                    $tokoName = $tokoMap[$s['id_toko']] ?? 'Tidak diketahui';
+                    $dropship = in_array($s['dropship'], ['1', 1, true], true);
+                    $stockVal = (int) ($s['stock'] ?? 0);
+                    $cacatVal = (int) ($s['barang_cacat'] ?? 0);
+
+                    $stockList[] = [
+                        'stock' => $stockVal,
+                        'barang_cacat' => $cacatVal,
+                        'toko_name' => $tokoName,
+                        'dropship' => $dropship
+                    ];
+                    $stockStrings[] = "{$tokoName}=" . ($dropship ? 'dropship' : $stockVal);
+                }
+
+                // Suplier names
+                $suplierNames = [];
+                if (!empty($p['suplier'])) {
+                    $ids = array_filter(explode(',', $p['suplier']));
+                    if (!empty($ids)) {
+                        $supList = $this->db->table('suplier')
+                            ->select('suplier_name')
+                            ->whereIn('id', $ids)
+                            ->get()
+                            ->getResultArray();
+                        $suplierNames = array_column($supList, 'suplier_name');
+                    }
+                }
+
+                $formattedProducts[] = [
+                    'id' => $p['id'],
+                    'kode_barang' => $p['id_barang'],
+                    'notes' => $p['notes'],
+                    'suplier' => $suplierNames,
+                    'nama_barang' => $p['nama_barang'],
+                    'nama_lengkap_barang' => $namaLengkap,
+                    'harga_modal' => $p['harga_modal'],
+                    'harga_jual' => $p['harga_jual'],
+                    'harga_jual_toko' => $p['harga_jual_toko'],
+                    'nama_model' => $p['nama_model'] ?? null,
+                    'seri' => $p['seri'] ?? null,
+                    'stock' => $stockList,
+                    'total_stock' => array_sum(array_column($stockList, 'stock')),
+                    'total_cacat' => array_sum(array_column($stockList, 'barang_cacat')),
+                    'total_terjual' => (int) ($terjualMap[$p['id_barang']] ?? 0),
+                    'total_hold' => (int) ($holdMap[$p['id_barang']] ?? 0),
+                    'stock_string' => implode("\n", $stockStrings),
+                    'images' => $imageMap[$p['id']] ?? []
+                ];
+            }
+
+            return $this->jsonResponse->multiResp(
+                '',
+                $formattedProducts,
+                $total_data,
+                $total_page,
+                $page,
+                $limit,
+                200
+            );
         } catch (\Exception $e) {
-            return $this->jsonResponse->error($e->getMessage(), 400);
+            log_message('error', '[getAllProduct] Error: ' . $e->getMessage());
+            return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data produk.', 500);
         }
     }
     public function getProductStock()
@@ -876,129 +914,202 @@ class ProductController extends ResourceController
             $productList = $products->get()
                 ->getResultArray();
 
-            foreach ($productList as &$item) {
-                $existingImages = $this->imageModel
-                    ->where('type', 'product')
-                    ->where('kode', $item['id'])
-                    ->findAll();
-
-                $item['images'] = array_column($existingImages, 'url');
-            }
-
             return $this->jsonResponse->multiResp('', $productList, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
-
     public function getProductStockForPricelist()
     {
         try {
+            // === Ambil parameter ===
             $sortBy = $this->request->getGet('sortBy') ?? 'product.id_barang';
-            $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
-            $namaProduct = $this->request->getGet('namaProduct') ?? '';
-            $id_toko = $this->request->getGet('id_toko') ?? '';
-            $customer_id = $this->request->getGet('customer_id') ?? '';
-            $seri = $this->request->getGet('seri') ?? '';
-            $model = $this->request->getGet('model') ?? '';
+            $sortMethod = in_array(strtolower($this->request->getGet('sortMethod')), ['asc', 'desc'])
+                ? strtolower($this->request->getGet('sortMethod'))
+                : 'asc';
+            $namaProduct = trim($this->request->getGet('namaProduct') ?? '');
+            $id_toko = trim($this->request->getGet('id_toko') ?? '');
+            $customer_id = trim($this->request->getGet('customer_id') ?? '');
+            $seri = trim($this->request->getGet('seri') ?? '');
+            $model = trim($this->request->getGet('model') ?? '');
             $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+            $offset = ($page - 1) * $limit;
 
-            $cacheKeyData = [
-                'sortBy' => $sortBy,
-                'sortMethod' => $sortMethod,
-                'namaProduct' => $namaProduct,
-                'id_toko' => $id_toko,
-                'customer_id' => $customer_id,
-                'seri' => $seri,
-                'model' => $model,
-                'limit' => $limit,
-                'page' => $page,
-            ];
-
+            // Cache key
+            $cacheKeyData = compact('sortBy', 'sortMethod', 'namaProduct', 'id_toko', 'customer_id', 'seri', 'model', 'limit', 'page');
             $cacheKey = 'getProductStockForPricelist_' . md5(json_encode($cacheKeyData));
-
             $cache = \Config\Services::cache();
 
             if ($cached = $cache->get($cacheKey)) {
                 return $this->jsonResponse->multiResp('', $cached['data'], $cached['total_data'], $cached['total_page'], $page, $limit, 200);
             }
 
-            $offset = ($page - 1) * $limit;
+            // === Cek tipe customer ===
+            $isSpecialCustomer = false;
+            if (!empty($customer_id) && is_numeric($customer_id)) {
+                $customer = $this->db->table('customer')
+                    ->select('type')
+                    ->where('id', (int) $customer_id)
+                    ->where('deleted_at', null)
+                    ->get()
+                    ->getRow();
 
-            $customer = $this->customer
-                ->where('id', $customer_id)
-                ->where('type', 'special')
-                ->where('deleted_at', null)
-                ->first();
+                if ($customer && $customer->type === 'special') {
+                    $isSpecialCustomer = true;
+                }
+            }
 
-            $selectFields = [
-                'product.id',
-                'product.id_barang as kode_barang',
-                'model_barang.nama_model',
-                'product.nama_barang as nama_barang',
-                'CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang',
-                'COALESCE(seri.seri, "") as seri',
-                'stock.stock',
-                'toko.toko_name',
-                'product.harga_jual_toko',
-                'product.harga_jual'
-            ];
+            // === LANGKAH 1: Ambil produk ===
+            $productBuilder = $this->productModel
+                ->select([
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
 
+                    'product.harga_modal',
+                    'product.harga_jual',
+                    'product.harga_jual_toko',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
 
-            $builder = $this->productModel
-                ->join('stock', 'stock.id_barang = product.id_barang', 'left')
-                ->join('toko', 'toko.id = stock.id_toko', 'left')
+                    'model_barang.nama_model as nama_model',
+                    'seri.seri as seri',
+                ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->select($selectFields);
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
-
+            // Filter teks
             if (!empty($namaProduct)) {
-                $builder->groupStart()
+                $productBuilder->groupStart()
                     ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
-            if (!empty($seri)) {
-                $builder->where('product.id_seri_barang', $seri);
-            }
-            if (!empty($model)) {
-                $builder->where('product.id_model_barang', $model);
-            }
-            if (!empty($id_toko)) {
-                $builder->where('toko.id', $id_toko);
+            if (!empty($seri))
+                $productBuilder->where('product.id_seri_barang', $seri);
+            if (!empty($model))
+                $productBuilder->where('product.id_model_barang', $model);
+
+            // Filter berdasarkan stock & toko
+            if (!empty($id_toko) && is_numeric($id_toko)) {
+                $productBuilder->whereIn('product.id_barang', function ($sub) use ($id_toko) {
+                    return $sub->select('id_barang')
+                        ->from('stock')
+                        ->where('id_toko', (int) $id_toko)
+                        ->where('stock >', 0);
+                });
+            } else {
+                $productBuilder->whereIn('product.id_barang', function ($sub) {
+                    return $sub->select('id_barang')
+                        ->from('stock')
+                        ->where('stock >', 0);
+                });
             }
 
-            $productsQuery = $builder->where('stock.stock >', 0)
+            // Hitung & ambil data
+            $total_data = $productBuilder->countAllResults(false);
+            $total_page = $limit > 0 ? ceil($total_data / $limit) : 0;
+
+            if ($total_data === 0) {
+                $cache->save($cacheKey, ['data' => [], 'total_data' => 0, 'total_page' => 0], 300);
+                return $this->jsonResponse->multiResp('', [], 0, 0, $page, $limit, 200);
+            }
+
+            $products = $productBuilder
                 ->orderBy($sortBy, $sortMethod)
-                ->limit($limit, $offset);
-
-            $total_data = $builder->countAllResults(false);
-            $total_page = ceil($total_data / $limit);
-
-            $productList = $productsQuery->get()
+                ->limit($limit, $offset)
+                ->get()
                 ->getResultArray();
 
-            foreach ($productList as &$item) {
-                $existingImages = $this->imageModel
-                    ->where('type', 'product')
-                    ->where('kode', $item['id'])
-                    ->findAll();
+            // === LANGKAH 2: Ambil stock ===
+            $productCodes = array_unique(array_column($products, 'id_barang'));
+            $stockByProduct = [];
+            $tokoMap = [];
 
-                $item['images'] = array_column($existingImages, 'url');
+            if (!empty($productCodes)) {
+                $stockQuery = $this->db->table('stock')
+                    ->select('id_barang, id_toko, stock, barang_cacat, dropship')
+                    ->whereIn('id_barang', $productCodes)
+                    ->where('stock >', 0);
+
+                if (!empty($id_toko) && is_numeric($id_toko)) {
+                    $stockQuery->where('id_toko', (int) $id_toko);
+                }
+
+                $allStocks = $stockQuery->get()->getResultArray();
+
+                $tokoIds = array_unique(array_column($allStocks, 'id_toko'));
+                if (!empty($tokoIds)) {
+                    $tokoList = $this->db->table('toko')
+                        ->select('id, toko_name')
+                        ->whereIn('id', $tokoIds)
+                        ->get()
+                        ->getResultArray();
+                    $tokoMap = array_column($tokoList, 'toko_name', 'id');
+                }
+
+                foreach ($allStocks as $s) {
+                    $stockByProduct[$s['id_barang']][] = [
+                        'stock' => (int) $s['stock'],
+                        'barang_cacat' => (int) $s['barang_cacat'],
+                        'toko_name' => $tokoMap[$s['id_toko']] ?? 'Toko Tidak Diketahui',
+                        'dropship' => in_array($s['dropship'], ['1', 1, true], true),
+                    ];
+                }
             }
 
-            // Simpan ke cache selama 5 menit (300 detik)
+            // === LANGKAH 3: Ambil images ===
+            $productIds = array_unique(array_column($products, 'id'));
+            $imageMap = [];
+            if (!empty($productIds)) {
+                $images = $this->imageModel
+                    ->select('kode, url')
+                    ->where('type', 'product')
+                    ->whereIn('kode', $productIds)
+                    ->findAll();
+                foreach ($images as $img) {
+                    $imageMap[$img['kode']][] = $img['url'];
+                }
+            }
+
+            // === LANGKAH 4: Format hasil ===
+            $result = [];
+            foreach ($products as $p) {
+                $namaLengkap = trim(implode(' ', array_filter([
+                    $p['nama_barang'],
+                    $p['nama_model'] ?? '',
+                    $p['seri'] ?? ''
+                ])));
+
+                // 🔥 Tentukan harga berdasarkan tipe customer
+                $hargaJual = $isSpecialCustomer
+                    ? $p['harga_jual_toko']
+                    : $p['harga_jual'];
+
+                $result[] = [
+                    'id' => $p['id'],
+                    'kode_barang' => $p['id_barang'],
+                    'nama_barang' => $p['nama_barang'],
+                    'nama_lengkap_barang' => $namaLengkap,
+                    'nama_model' => $p['nama_model'] ?? null,
+                    'seri' => $p['seri'] ?? null,
+                    'harga_jual' => $hargaJual,
+                    'stock' => $stockByProduct[$p['id_barang']] ?? [],
+                    'images' => $imageMap[$p['id']] ?? [],
+                ];
+            }
+
             $cache->save($cacheKey, [
-                'data' => $productList,
+                'data' => $result,
                 'total_data' => $total_data,
                 'total_page' => $total_page,
             ], 300);
 
-            return $this->jsonResponse->multiResp('', $productList, $total_data, $total_page, $page, $limit, 200);
+            return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
-            return $this->jsonResponse->error($e->getMessage(), 400);
+            log_message('error', '[getProductStockForPricelist] Error: ' . $e->getMessage());
+            return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data.', 500);
         }
     }
 
