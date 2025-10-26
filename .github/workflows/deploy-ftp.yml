@@ -21,7 +21,7 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: "./"
-          server-dir: "/"
+          server-dir: "/public_html"
           # hanya upload folder app dan file composer
           include: |
             app/**
