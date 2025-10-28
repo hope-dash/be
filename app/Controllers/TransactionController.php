@@ -190,7 +190,7 @@ class TransactionController extends BaseController
             'free_ongkir',
             'potongan_ongkir',
             'source',
-            'customerId',
+            'customer_id',
             'customer_name',
             'jatuh_tempo',
             'refunded_amount',
@@ -392,6 +392,11 @@ class TransactionController extends BaseController
         $data = $this->request->getJSON();
 
         try {
+            // Validasi input
+            if (!isset($data->item) || !is_array($data->item) || empty($data->item)) {
+                throw new \Exception("Item data is required and cannot be empty");
+            }
+
             $kodeBarangList = array_column($data->item, 'kode_barang');
             $products = $this->ProductModel->whereIn('id_barang', $kodeBarangList)->findAll();
 
@@ -417,26 +422,47 @@ class TransactionController extends BaseController
                 $total = $harga_final_satuan * $jumlah;
                 $totalAmount += $total;
             }
+
+            // Handle PPN
             if (empty($data->ppn)) {
                 $ppn = 0;
             } else {
                 $ppn = $data->ppn * $totalAmount / 100;
             }
 
-            // Simpan transaksi
-            $transactionData = [
-                'discount' => $data->discount,
-                'biaya_pengiriman' => $data->biaya_pengiriman,
-                'sub_total' => $totalAmount,
-                'ppn' => $ppn,
-                'grand_total' => $totalAmount + $ppn + $data->biaya_pengiriman - $data->discount,
+            // Handle biaya pengiriman dengan free_ongkir
+            $biaya_pengiriman = 0;
+            if (isset($data->free_ongkir) && $data->free_ongkir === true) {
+                $biaya_pengiriman = 0; // Gratis ongkir
+            } else {
+                $biaya_pengiriman = $data->biaya_pengiriman ?? 0;
+            }
 
+            // Handle discount
+            $discount = $data->discount ?? 0;
+
+            // Calculate grand total
+            $grand_total = $totalAmount + $ppn + $biaya_pengiriman - $discount;
+
+            // Pastikan grand total tidak negatif
+            if ($grand_total < 0) {
+                $grand_total = 0;
+            }
+
+            // Prepare response data
+            $transactionData = [
+                'discount' => (float) $discount,
+                'biaya_pengiriman' => (float) $data->biaya_pengiriman,
+                'sub_total' => (float) $totalAmount,
+                'ppn' => (float) $ppn,
+                'grand_total' => (float) $grand_total,
+                'free_ongkir' => isset($data->free_ongkir) ? (bool) $data->free_ongkir : false
             ];
 
-
-
             return $this->jsonResponse->oneResp('Transaction successfully processed', $transactionData, 201);
+
         } catch (\Exception $e) {
+            log_message('error', 'Count transaction error: ' . $e->getMessage());
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -2374,7 +2400,7 @@ class TransactionController extends BaseController
                 'biaya_pengiriman' => $data->biaya_pengiriman,
                 'free_ongkir' => $freeOngkir,
                 'potongan_ongkir' => $potongan_ongkir,
-                'customerId' => $customerId,
+                'customer_id' => $customerId,
                 'customer_name' => $data->customer_name
             ];
 
