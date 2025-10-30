@@ -82,9 +82,10 @@ class ProductController extends ResourceController
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
-            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null, // Convert array to comma-separated string
+            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
+            'dropship' => $data->dropship ?? 0,
             "created_by" => $token['user_id'],
         ];
 
@@ -356,6 +357,7 @@ class ProductController extends ResourceController
             'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
+            'dropship' => $data->dropship ?? 0,
             "updated_by" => $token['user_id'],
         ];
 
@@ -639,6 +641,7 @@ class ProductController extends ResourceController
                     'product.id_model_barang',
                     'product.id_seri_barang',
                     'product.suplier',
+                    'product.dropship',
                     'model_barang.nama_model',
                     'seri.seri',
                 ])
@@ -784,6 +787,7 @@ class ProductController extends ResourceController
                     }
                 }
 
+                $totalStock = array_sum(array_column($stockList, 'stock'));
                 $formattedProducts[] = [
                     'id' => $p['id'],
                     'kode_barang' => $p['id_barang'],
@@ -796,14 +800,37 @@ class ProductController extends ResourceController
                     'harga_jual_toko' => $p['harga_jual_toko'],
                     'nama_model' => $p['nama_model'] ?? null,
                     'seri' => $p['seri'] ?? null,
+                    'dropship' => $p['dropship'] ?? null,
                     'stock' => $stockList,
-                    'total_stock' => array_sum(array_column($stockList, 'stock')),
+                    'total_stock' => $totalStock,
                     'total_cacat' => array_sum(array_column($stockList, 'barang_cacat')),
                     'total_terjual' => (int) ($terjualMap[$p['id_barang']] ?? 0),
                     'total_hold' => (int) ($holdMap[$p['id_barang']] ?? 0),
                     'stock_string' => implode("\n", $stockStrings),
                     'images' => $imageMap[$p['id']] ?? []
                 ];
+            }
+
+            // === Filter berdasarkan stok ===
+            if (!empty($stockFilter)) {
+                $formattedProducts = array_filter($formattedProducts, function ($prod) use ($stockFilter) {
+                    $total = (int) $prod['total_stock'];
+                    switch ($stockFilter) {
+                        case 'available':
+                            return $total > 6;
+                        case 'low_stock':
+                            return $total <= 5 && $total > 0;
+                        case 'out_stock':
+                            return $total === 0;
+                        default:
+                            return true;
+                    }
+                });
+
+                // Re-index array
+                $formattedProducts = array_values($formattedProducts);
+                $total_data = count($formattedProducts);
+                $total_page = $limit > 0 ? ceil($total_data / $limit) : 0;
             }
 
             return $this->jsonResponse->multiResp(

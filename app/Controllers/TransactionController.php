@@ -90,10 +90,6 @@ class TransactionController extends BaseController
 
             $stock = $stockMap[$item->kode_barang];
 
-            if (!empty($stock['dropship']) && (int) $stock['dropship'] === 1) {
-                continue;
-            }
-
             if ((int) $stock['stock'] < $item->jumlah) {
                 throw new \Exception("Stok tidak mencukupi untuk produk {$item->kode_barang}. Stok tersedia: {$stock['stock']}, dibutuhkan: {$item->jumlah}");
             }
@@ -192,6 +188,7 @@ class TransactionController extends BaseController
             'source',
             'customer_id',
             'customer_name',
+            'customer_phone',
             'jatuh_tempo',
             'refunded_amount',
             'complaint'
@@ -209,8 +206,9 @@ class TransactionController extends BaseController
             'free_ongkir' => $data['free_ongkir'] ?? false,
             'potongan_ongkir' => $data['potongan_ongkir'] ?? 0,
             'source' => $data['source'] ?? null,
-            'customerId' => empty($data['customerId']) ? null : $data['customerId'],
-            'customer_name' => empty($data['customerId']) ? $data['customer_name'] : null,
+            'customer_id' => empty($data['customer_id']) ? null : $data['customer_id'],
+            'customer_name' => empty($data['customer_id']) ? $data['customer_name'] : null,
+            'customer_phone' => empty($data['customer_id']) ? $data['customer_phone'] : null,
             'jatuh_tempo' => $data['jatuh_tempo'] ?? null,
             'refunded_amount' => $data['refunded_amount'] ?? null,
             'complaint' => $data['complaint'] ?? null,
@@ -257,9 +255,14 @@ class TransactionController extends BaseController
         $db->transStart();
 
         try {
-            // 1. Prepare data
-            $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
+            $customerId = null;
 
+            // 1. Prepare data
+            if ($data->customer_id) {
+                $customerId = $data->customer_id;
+            } else {
+                $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
+            }
             // 2. Get products in batch
             $kodeBarangList = array_column($data->item, 'kode_barang');
             $products = $this->ProductModel->whereIn('id_barang', $kodeBarangList)->findAll();
@@ -313,6 +316,11 @@ class TransactionController extends BaseController
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
                 $actual_total = $actual_per_piece * $item->jumlah;
 
+                $dropship_suplier = null;
+                if (isset($product['dropship']) && $product['dropship'] == 1) {
+                    $dropship_suplier = $product['suplier'] ?? null;
+                }
+
                 $salesData[] = [
                     'id_transaction' => $insertID,
                     'kode_barang' => $item->kode_barang,
@@ -322,12 +330,14 @@ class TransactionController extends BaseController
                     'modal_system' => $product['harga_modal'],
                     'total_modal' => $product['harga_modal'] * $item->jumlah,
                     'actual_per_piece' => $actual_per_piece,
-                    'actual_total' => $actual_total
+                    'actual_total' => $actual_total,
+                    'dropship_suplier' => $dropship_suplier,
                 ];
 
                 $total_modal += $product['harga_modal'] * $item->jumlah;
                 $total_actual += $actual_total;
             }
+
 
             // 7. Update transaction dengan data final
             $this->transactions->update($insertID, [
@@ -344,7 +354,8 @@ class TransactionController extends BaseController
                 'discount' => $data->discount,
                 'discount_rate' => $discount_rate,
                 'source' => $data->source,
-                'customerId' => $customerId,
+                'customer_id' => $customerId,
+                'customer_phone' => $data->customer_phone,
                 'jatuh_tempo' => $data->jatuh_tempo,
                 'alamat' => $data->alamat,
                 'pengiriman' => $data->pengiriman,
@@ -626,7 +637,8 @@ class TransactionController extends BaseController
             tk.nama_pemilik as nama_pemilik_toko,
             tk.nomer_rekening as nomer_rekening_toko,
             COALESCE(c.nama_customer, MAX(CASE WHEN tm.key = 'customer_name' THEN tm.value END)) AS customer_name,
-            c.no_hp_customer AS customer_phone,
+            c.no_hp_customer AS customer_phone, 
+            c.id AS customer_id, 
             MAX(CASE WHEN tm.key = 'partialy_paid_at' THEN tm.value END) AS partially_paid_at,
             MAX(CASE WHEN tm.key = 'metode_pembayaran_dp' THEN tm.value END) AS metode_pembayaran_dp,
             MAX(CASE WHEN tm.key = 'paid_at' THEN tm.value END) AS paid_at,
@@ -654,7 +666,7 @@ class TransactionController extends BaseController
             ->join('customer c', 'tm_cust.value = c.id', 'left')
             ->join('transaction_meta tm', 't.id = tm.transaction_id', 'left')
             ->where('t.id', $id)
-            ->groupBy('t.id, tk.id, c.id'); // Group by semua non-aggregated columns
+            ->groupBy('t.id, tk.id, c.id');
 
         $transaction = $builder->get()->getRowArray();
 
@@ -1504,7 +1516,7 @@ class TransactionController extends BaseController
             ->update([
                 'total_payment' => $transaction['total_payment'] - $refundValue,
                 'updated_at' => date('Y-m-d H:i:s'),
-                'closing' => $transaction['closing'] !== 0 ? 2 : 0
+                'closing' => $transaction['closing'] !== "0" ? 2 : 0
             ]);
 
         // Insert ke cashflow
@@ -1610,7 +1622,7 @@ class TransactionController extends BaseController
             $updateData = [
                 'status' => $newStatus,
                 'updated_at' => date('Y-m-d H:i:s'),
-                'closing' => $transaction['closing'] !== 0 ? 2 : 0,
+                'closing' => $transaction['closing'] !== "0" ? 2 : 0,
                 'updated_by' => $token['user_id']
             ];
 
@@ -1750,7 +1762,7 @@ class TransactionController extends BaseController
             ->update([
                 'status' => 'PARTIALLY_PAID',
                 'updated_at' => date('Y-m-d H:i:s'),
-                'closing' => $transaction['closing'] !== 0 ? 2 : 0,
+                'closing' => $transaction['closing'] !== "0" ? 2 : 0,
                 'updated_by' => $token['user_id'],
                 'total_payment' => $newTotalPayment
             ]);
@@ -1877,6 +1889,8 @@ class TransactionController extends BaseController
 
         $ongkir = isset($ongkirMeta['value']) ? (float) $ongkirMeta['value'] : 0;
 
+        var_dump(($transaction['closing']));
+
         // Update status transaksi
         $db->table('transaction')
             ->where('id', $transactionId)
@@ -1884,7 +1898,7 @@ class TransactionController extends BaseController
                 'status' => 'PAID',
                 'updated_by' => $token['user_id'],
                 'updated_at' => date('Y-m-d H:i:s'),
-                'closing' => $transaction['closing'] !== 0 ? 2 : 0,
+                'closing' => $transaction['closing'] !== "0" ? 2 : 0,
                 'total_payment' => $newTotalPembayaran
             ]);
 
@@ -2211,7 +2225,7 @@ class TransactionController extends BaseController
                 ->where('id', $transactionId)
                 ->update([
                     'status' => $totalRefundAmount > 0 ? 'NEED_REFUNDED' : 'RETUR',
-                    'closing' => $transaction['closing'] !== 0 ? 2 : 0,
+                    'closing' => $transaction['closing'] !== "0" ? 2 : 0,
                     'updated_at' => date('Y-m-d H:i:s'),
                     'updated_by' => $token['user_id']
                 ]);
@@ -2302,7 +2316,14 @@ class TransactionController extends BaseController
             }
 
             // 3. Get or create customer
-            $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
+            $customerId = null;
+
+            // 1. Prepare data
+            if ($data->customer_id) {
+                $customerId = $data->customer_id;
+            } else {
+                $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
+            }
 
             // 4. Ambil data lama untuk comparison
             $oldItems = $this->SalesProductModel->where('id_transaction', $transactionId)->findAll();
@@ -2352,6 +2373,12 @@ class TransactionController extends BaseController
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
                 $actual_total = $actual_per_piece * $item->jumlah;
 
+                // Tambahan logika untuk dropship
+                $dropship_suplier = null;
+                if (isset($product['dropship']) && $product['dropship'] == 1) {
+                    $dropship_suplier = $product['suplier'] ?? null; // suplier pasti string
+                }
+
                 $salesData[] = [
                     'kode_barang' => $item->kode_barang,
                     'jumlah' => $item->jumlah,
@@ -2361,12 +2388,14 @@ class TransactionController extends BaseController
                     'total_modal' => $product['harga_modal'] * $item->jumlah,
                     'actual_per_piece' => $actual_per_piece,
                     'actual_total' => $actual_total,
-                    'id_transaction' => $transactionId
+                    'id_transaction' => $transactionId,
+                    'dropship_suplier' => $dropship_suplier, // kolom baru
                 ];
 
                 $total_modal += $product['harga_modal'] * $item->jumlah;
                 $total_actual += $actual_total;
             }
+
 
             // 9. Update transaction data
             $updateTransaction = [
@@ -2377,6 +2406,7 @@ class TransactionController extends BaseController
                 'id_toko' => $data->id_toko,
                 "updated_by" => $token['user_id'],
                 'date_time' => date('Y-m-d H:i:s'),
+                'closing' => $transaction['closing'] !== "0" ? 2 : 0
             ];
 
             // 10. Handle status changes based on payment
@@ -2401,7 +2431,8 @@ class TransactionController extends BaseController
                 'free_ongkir' => $freeOngkir,
                 'potongan_ongkir' => $potongan_ongkir,
                 'customer_id' => $customerId,
-                'customer_name' => $data->customer_name
+                'customer_name' => $data->customer_name,
+                'customer_phone' => $data->customer_phone,
             ];
 
             // 12. Handle refund amount calculation
@@ -2505,6 +2536,11 @@ class TransactionController extends BaseController
     {
         $status = $oldTransaction['status'];
         $totalPayment = $oldTransaction['total_payment'];
+
+        if (in_array($status, ['WAITING_PAYMENT', 'PENDING'])) {
+            $updateData['status'] = 'WAITING_PAYMENT';
+            return $updateData;
+        }
 
         // Only adjust status for paid transactions
         if (in_array($status, ['PAID', 'PARTIALLY_PAID'])) {

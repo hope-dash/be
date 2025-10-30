@@ -281,6 +281,7 @@ class ClosingController extends BaseController
             // Gunakan tanggal default dari transaksi, tapi detail akan menggunakan tanggal cashflow
             $this->saveClosingDetails($closingId, $detail, $tanggal);
             $this->updateClosingStatuses($trxId, $cashflows);
+            $this->saveSupplierClosing($trxId, $start, $end, $isAdjustment);
 
             $this->db->transCommit();
 
@@ -304,19 +305,84 @@ class ClosingController extends BaseController
         }
     }
 
+    private function saveSupplierClosing($trxId, $startDate, $endDate, $isAdjustment = false)
+    {
+        $salesProducts = $this->db->table('sales_product')
+            ->where('id_transaction', $trxId)
+            ->get()
+            ->getResult();
+
+        if (empty($salesProducts)) {
+            log_message('info', "Tidak ada sales_product untuk transaksi ID {$trxId}");
+            return;
+        }
+
+        // Hitung periode closing (YYYY-MM)
+        $closingMonth = date('Y-m', strtotime($endDate));
+        $closingDate = date('Y-m-d H:i:s');
+
+        foreach ($salesProducts as $sp) {
+            // Cek apakah sudah pernah di-closing bulan ini
+            $existing = $this->db->table('supplier_closing')
+                ->where('transaction_id', $trxId)
+                ->where('kode_barang', $sp->kode_barang)
+                ->get()
+                ->getRow();
+
+            // Kalau adjustment, hitung selisih jumlah
+            $jumlah = intval($sp->jumlah);
+            if ($isAdjustment && $existing) {
+                $selisih = $jumlah - intval($existing->jumlah);
+
+                if ($selisih == 0)
+                    continue; // Tidak ada perubahan
+
+                // Kalau ada selisih, catat sebagai penyesuaian
+                $jumlah = $selisih;
+            }
+
+            $data = [
+                'transaction_id' => $trxId,
+                'kode_barang' => $sp->kode_barang,
+                'transaction_date' => $sp->created_at ?? date('Y-m-d H:i:s'),
+                'jumlah' => $jumlah,
+                'harga_jual' => $sp->harga_jual ?? 0,
+                'total' => ($sp->harga_jual ?? 0) * $jumlah,
+                'harga_modal' => $sp->modal_system ?? 0,
+                'total_harga_modal' => ($sp->modal_system ?? 0) * $jumlah,
+                'dropship_suplier' => $sp->dropship_suplier ?? null,
+                'closing_month' => $closingMonth,
+                'closing_date' => $closingDate,
+                'closing_status' => 'active',
+                'created_at' => $closingDate,
+            ];
+
+            // Insert ke supplier_closing
+            $this->db->table('supplier_closing')->insert($data);
+
+            // Update sales_product.closing = 1
+            $this->db->table('sales_product')
+                ->where('id', $sp->id)
+                ->update(['closing' => 1]);
+        }
+
+        log_message('info', "Supplier closing disimpan untuk trx {$trxId}");
+    }
+
     private function calculateClosingDetails($cashflows, $sales, $previousClosing, $status, $closingStatus, $isAdjustment, $trxId)
     {
         $detail = [];
         $urutan = 1;
 
+
         $modalLama = $previousClosing ? $previousClosing->total_modal : 0;
         $prevStatus = $previousClosing ? strtoupper($previousClosing->transaction_status) : null;
-        $isDPPreviouslyClosed = $prevStatus === 'PARTIALLY_PAID';
 
-        // DEBUG: Log informasi previous closing
+        log_message('info', "=== CALCULATE CLOSING DETAIL START ===");
         log_message('info', "Previous closing - Modal: {$modalLama}, Status: {$prevStatus}, Is Adjustment: " . ($isAdjustment ? 'YES' : 'NO'));
+        log_message('info', "Current status: {$status}, Closing status: {$closingStatus}");
 
-        // ========== CEK RETURN ITEMS DI AWAL ==========
+        // ========== CEK RETURN ITEMS ==========
         $hasReturnedItems = $this->db->table('sales_product')
             ->where('id_transaction', $trxId)
             ->where('closing', 2)
@@ -324,14 +390,14 @@ class ClosingController extends BaseController
 
         log_message('info', "Has returned items: " . ($hasReturnedItems ? 'YES' : 'NO'));
 
-        // Process cashflows - DETECT ALL PAYMENT TYPES
+        // ========== PROSES CASHFLOW ==========
         foreach ($cashflows as $cf) {
             $desc = strtoupper(trim($cf->noted));
             $debit = floatval($cf->debit);
             $credit = floatval($cf->credit);
             $cashflowDate = $cf->date_time;
 
-            // Handle semua jenis pembayaran (DP, PEMBAYARAN, PELUNASAN, dll)
+            // Handle pembayaran (DP / Pelunasan / Bayar)
             if (
                 $debit > 0 && (
                     strpos($desc, 'DP') !== false ||
@@ -341,8 +407,6 @@ class ClosingController extends BaseController
                     strpos($desc, 'PAYMENT') !== false
                 )
             ) {
-
-                // Tentukan tipe berdasarkan deskripsi
                 if (strpos($desc, 'DP') !== false) {
                     $tipe = 'DP';
                     $keterangan = 'DP';
@@ -356,10 +420,12 @@ class ClosingController extends BaseController
 
                 $detail[] = $this->createDetailItem($keterangan, $debit, 0, $urutan++, $tipe, $cf->id, $cashflowDate);
             }
+
             // Handle refund
             elseif (strpos($desc, 'REFUND') !== false && $credit > 0) {
                 $detail[] = $this->createDetailItem('Refund', 0, $credit, $urutan++, 'REFUND', $cf->id, $cashflowDate);
             }
+
             // Handle ongkos kirim
             elseif (
                 $credit > 0 && (
@@ -373,39 +439,51 @@ class ClosingController extends BaseController
             }
         }
 
-        // Calculate current modal from sales products
+        // ========== HITUNG MODAL SEKARANG ==========
         $modalSekarang = array_reduce($sales, function ($carry, $s) {
             return $carry + (floatval($s->modal_system) * intval($s->jumlah));
         }, 0);
 
         log_message('info', "Modal calculation - Lama: {$modalLama}, Sekarang: {$modalSekarang}");
+        $selisihModal = $modalSekarang - $modalLama;
+        log_message('info', "Selisih Modal: {$selisihModal}");
 
-        // ========== LOGIC MODAL ADJUSTMENT UNTUK TRANSAKSI YANG SUDAH PERNAH DI-CLOSING ==========
+        $hasModalRefund = false;
 
+        // ========== LOGIC UNTUK ADJUSTMENT ==========
         if ($isAdjustment && $previousClosing) {
-            // Ini adalah adjustment untuk transaksi yang sudah pernah di-closing
+            log_message('info', "=== HANDLING ADJUSTMENT ===");
 
-            $selisihModal = $modalSekarang - $modalLama;
+            if ($status === 'REFUNDED') {
+                log_message('info', "Adjustment + Refund detected");
 
-            log_message('info', "Modal adjustment - Selisih: {$selisihModal}");
 
-            if ($selisihModal > 0) {
-                // Modal bertambah - perlu tambah modal baru
-                $detail[] = $this->createDetailItem('Penambahan Modal', 0, $selisihModal, $urutan++, 'MODAL', null, date('Y-m-d'));
-                log_message('info', "Added modal increase: {$selisihModal}");
-            } elseif ($selisihModal < 0) {
-                // Modal berkurang - perlu pengembalian modal
-                $detail[] = $this->createDetailItem('Pengembalian Modal', abs($selisihModal), 0, $urutan++, 'MODAL_REFUND', null, date('Y-m-d'));
-                log_message('info', "Added modal refund: " . abs($selisihModal));
+                if ($modalSekarang < $modalLama) {
+                    // Modal turun → pengembalian selisih
+                    $detail[] = $this->createDetailItem('Pengembalian Modal (Selisih)', abs($selisihModal), 0, $urutan++, 'MODAL_REFUND', null, date('Y-m-d'));
+                    $hasModalRefund = true;
+                    log_message('info', "Returned modal difference: " . abs($selisihModal));
+                } elseif ($modalSekarang > $modalLama) {
+                    // Modal naik → penambahan modal
+                    $detail[] = $this->createDetailItem('Penambahan Modal (Selisih)', 0, $selisihModal, $urutan++, 'MODAL', null, date('Y-m-d'));
+                    log_message('info', "Added modal difference: {$selisihModal}");
+                } else {
+                    log_message('info', "No modal change during refund adjustment");
+                }
+            } else {
+                // Adjustment biasa (tanpa refund)
+                if ($selisihModal > 0) {
+                    $detail[] = $this->createDetailItem('Penambahan Modal', 0, $selisihModal, $urutan++, 'MODAL', null, date('Y-m-d'));
+                    log_message('info', "Added modal increase: {$selisihModal}");
+                } elseif ($selisihModal < 0) {
+                    $detail[] = $this->createDetailItem('Pengembalian Modal (Selisih)', abs($selisihModal), 0, $urutan++, 'MODAL_REFUND', null, date('Y-m-d'));
+                    $hasModalRefund = true;
+                    log_message('info', "Added modal refund: " . abs($selisihModal));
+                }
             }
 
-            // Untuk adjustment, skip modal calculation biasa karena sudah dihandle di atas
-            $shouldCountModal = false;
-
         } else {
-            // ========== LOGIC MODAL NORMAL UNTUK TRANSAKSI BARU ==========
-
-            // Calculate new modal - LOGIC MODAL NORMAL
+            // ========== LOGIC UNTUK TRANSAKSI BARU ==========
             $hasIncomingPayment = false;
             $totalProductPayments = 0;
 
@@ -413,7 +491,6 @@ class ClosingController extends BaseController
                 $desc = strtoupper(trim($cf->noted));
                 $debit = floatval($cf->debit);
 
-                // Hitung hanya pembayaran produk (bukan ongkir atau biaya lain)
                 if (
                     $debit > 0 && (
                         strpos($desc, 'DP') !== false ||
@@ -427,35 +504,32 @@ class ClosingController extends BaseController
                 }
             }
 
-            // Hitung modal hanya untuk transaksi yang memiliki pembayaran produk
-            $shouldCountModal = !$isDPPreviouslyClosed && !$hasReturnedItems && $closingStatus == 0 && $hasIncomingPayment;
+            $shouldCountModal = !$hasReturnedItems && $closingStatus == 0 && $hasIncomingPayment;
 
             if ($shouldCountModal && $modalSekarang > 0) {
                 $detail[] = $this->createDetailItem('Modal', 0, $modalSekarang, $urutan++, 'MODAL', null, date('Y-m-d'));
                 log_message('info', "Added normal modal: {$modalSekarang}");
             }
-        }
 
-        // Handle returns - SUDAH DIPINDAHKAN KE ATAS
-        if ($hasReturnedItems && $modalLama > 0) {
-            $detail[] = $this->createDetailItem('Pembatalan Modal Lama', $modalLama, 0, $urutan++, 'MODAL_CORRECTION', null, date('Y-m-d'));
-        }
-
-        // Handle refund with modal return
-        if ($status === 'REFUNDED') {
-            $hasRefund = array_filter($detail, fn($d) => $d['tipe'] === 'REFUND');
-            if (!empty($hasRefund)) {
-                if ($closingStatus == 0) {
-                    if ($modalSekarang > 0) {
-                        $detail[] = $this->createDetailItem('Pengembalian Modal', $modalSekarang, 0, $urutan++, 'MODAL_REFUND', null, date('Y-m-d'));
-                    }
-                } elseif ($closingStatus == 2 && $modalLama > 0) {
-                    $detail[] = $this->createDetailItem('Pengembalian Modal', $modalLama, 0, $urutan++, 'MODAL_REFUND', null, date('Y-m-d'));
+            // REFUND untuk transaksi non-adjustment
+            if ($status === 'REFUNDED' && $modalSekarang > 0) {
+                $hasRefund = array_filter($detail, fn($d) => $d['tipe'] === 'REFUND');
+                if (!empty($hasRefund) && !$hasModalRefund) {
+                    $refundModal = $modalSekarang > 0 ? $modalSekarang : $modalLama;
+                    $detail[] = $this->createDetailItem('Pengembalian Modal (Refund)', $refundModal, 0, $urutan++, 'MODAL_REFUND', null, date('Y-m-d'));
+                    log_message('info', "Added refund modal for non-adjustment: {$refundModal}");
                 }
             }
         }
 
+        // ========== FINAL VALIDATION ==========
+        $modalEntries = array_filter($detail, fn($d) => $d['tipe'] === 'MODAL');
+        $modalRefundEntries = array_filter($detail, fn($d) => $d['tipe'] === 'MODAL_REFUND');
+
+        log_message('info', "Final validation - Modal entries: " . count($modalEntries) . ", Modal refund entries: " . count($modalRefundEntries));
         log_message('info', "Final detail count: " . count($detail));
+        log_message('info', "=== CALCULATE CLOSING DETAIL END ===");
+
         return $detail;
     }
 
@@ -651,7 +725,7 @@ class ClosingController extends BaseController
     {
         $json = $this->request->getJSON();
         $year = $json->year ?? null;
-        $month = $json->month ?? null; // Perbaikan: sebelumnya $json->year
+        $month = $json->month ?? null;
 
         if (!$year || !$month) {
             return $this->response->setJSON([
@@ -662,23 +736,18 @@ class ClosingController extends BaseController
 
         $startDate = "$year-$month-01 00:00:00";
         $endDate = date("Y-m-t 23:59:59", strtotime($startDate));
+        $closingMonth = date("Y-m", strtotime($startDate));
 
-        // Mulai transaction database
+        // Mulai transaksi database
         $this->db->transBegin();
 
         try {
-            // 1. Ambil semua data closing yang akan dirollback - PERBAIKI QUERY
+            // 1. Ambil semua closing di periode itu
             $closings = $this->db->table('transaction_closing')
                 ->where('period_start >=', $startDate)
                 ->where('period_start <=', $endDate)
-                ->get();
-
-            // Periksa jika query berhasil
-            if ($closings === false) {
-                throw new \Exception('Query database gagal: ' . $this->db->error());
-            }
-
-            $closings = $closings->getResult();
+                ->get()
+                ->getResult();
 
             if (empty($closings)) {
                 return $this->response->setJSON([
@@ -690,85 +759,63 @@ class ClosingController extends BaseController
             $closingIds = array_column($closings, 'id');
             $transactionIds = array_column($closings, 'transaction_id');
 
-            // 2. Ambil semua id_cashflow dari closing_detail yang akan dirollback
-            $cashflowQuery = $this->db->table('closing_detail')
+            // 2. Ambil semua id_cashflow dari closing_detail
+            $cashflowIds = $this->db->table('closing_detail')
                 ->select('id_cashflow')
                 ->whereIn('transaction_closing_id', $closingIds)
                 ->where('id_cashflow IS NOT NULL')
-                ->get();
+                ->get()
+                ->getResultArray();
 
-            if ($cashflowQuery === false) {
-                throw new \Exception('Query cashflow detail gagal: ' . $this->db->error());
-            }
+            $cashflowIds = array_column($cashflowIds, 'id_cashflow');
 
-            $cashflowIds = array_column($cashflowQuery->getResultArray(), 'id_cashflow');
-
-            // 3. Hapus data di closing_detail
-            $deleteDetail = $this->db->table('closing_detail')
+            // 3. Hapus closing_detail
+            $this->db->table('closing_detail')
                 ->whereIn('transaction_closing_id', $closingIds)
                 ->delete();
 
-            if ($deleteDetail === false) {
-                throw new \Exception('Gagal menghapus closing detail: ' . $this->db->error());
-            }
-
-            // 4. Hapus data di transaction_closing
-            $deleteClosing = $this->db->table('transaction_closing')
+            // 4. Hapus transaction_closing
+            $this->db->table('transaction_closing')
                 ->whereIn('id', $closingIds)
                 ->delete();
 
-            if ($deleteClosing === false) {
-                throw new \Exception('Gagal menghapus transaction closing: ' . $this->db->error());
-            }
-
-            // 5. Update status di tabel terkait
+            // 5. Kembalikan status transaksi ke semula (unclosing)
             foreach ($closings as $closing) {
-                $trxId = $closing->transaction_id;
-                $closingStatus = $closing->closing_status;
-
-                // Kembalikan status transaction ke closing_status
-                $updateTransaction = $this->db->table('transaction')
-                    ->where('id', $trxId)
-                    ->update(['closing' => $closingStatus]);
-
-                if ($updateTransaction === false) {
-                    throw new \Exception('Gagal update transaction: ' . $this->db->error());
-                }
+                $this->db->table('transaction')
+                    ->where('id', $closing->transaction_id)
+                    ->update(['closing' => $closing->closing_status]);
             }
 
-            // 6. Update sales_product.closing = 0 untuk yang bukan adjustment
-            $updateSales = $this->db->table('sales_product')
+            // 6. Update sales_product.closing = 0
+            $this->db->table('sales_product')
                 ->whereIn('id_transaction', $transactionIds)
                 ->update(['closing' => 0]);
 
-            if ($updateSales === false) {
-                throw new \Exception('Gagal update sales product: ' . $this->db->error());
-            }
-
-            // 7. Update cashflow.closing = 0 berdasarkan id_cashflow dari closing_detail
+            // 7. Update cashflow.closing = 0
             if (!empty($cashflowIds)) {
-                $updateCashflow = $this->db->table('cashflow')
+                $this->db->table('cashflow')
                     ->whereIn('id', $cashflowIds)
                     ->update(['closing' => 0]);
-
-                if ($updateCashflow === false) {
-                    throw new \Exception('Gagal update cashflow: ' . $this->db->error());
-                }
             }
 
-            // Commit transaction jika semua sukses
+            // 8. Hapus data supplier_closing sesuai periode
+            $this->db->table('supplier_closing')
+                ->where('closing_month', $closingMonth)
+                ->delete();
+
+            // Commit transaksi jika semua sukses
             $this->db->transCommit();
 
             return $this->response->setJSON([
                 'status' => 'success',
-                'message' => 'Rollback data closing bulan ' . $month . '/' . $year . ' berhasil',
+                'message' => "Rollback data closing bulan {$month}/{$year} berhasil",
                 'affected_transactions' => count($transactionIds),
                 'affected_cashflows' => count($cashflowIds),
                 'affected_closings' => count($closingIds)
             ]);
 
         } catch (\Exception $e) {
-            // Rollback transaction jika ada error
+            // Rollback semua jika ada error
             $this->db->transRollback();
 
             log_message('error', 'Rollback closing failed: ' . $e->getMessage());
@@ -925,4 +972,106 @@ class ClosingController extends BaseController
 
         return 'OTHER';
     }
+
+    public function getSupplierClosingReport()
+    {
+        try {
+            $request = $this->request->getGet();
+
+            $closingMonth = $request['closing_month_year'] ?? null;
+            $transactionId = $request['transaction_id'] ?? null;
+            $kodeBarang = isset($request['kode_barang']) ? (array) $request['kode_barang'] : [];
+            $suplier = $request['suplier'] ?? null;
+
+            // ✅ Supplier wajib diisi
+            if (empty($suplier)) {
+                return $this->response->setJSON([
+                    'status' => 'error',
+                    'message' => 'Parameter suplier wajib diisi.',
+                ])->setStatusCode(400);
+            }
+
+            $builder = $this->db->table('supplier_closing sc')
+                ->select("
+                sc.id,
+                sc.dropship_suplier,
+                sc.transaction_id,
+                sc.kode_barang,
+                sc.jumlah,
+                sc.total,
+                sc.harga_modal,
+                sc.total_harga_modal,
+                sc.closing_month,
+                sc.created_at
+            ")
+                ->where('sc.dropship_suplier', $suplier);
+
+            // ✅ Filter tambahan opsional
+            if ($closingMonth) {
+                $builder->where('sc.closing_month', $closingMonth);
+            }
+
+            if ($transactionId) {
+                $builder->where('sc.transaction_id', $transactionId);
+            }
+
+            if (!empty($kodeBarang)) {
+                $builder->whereIn('sc.kode_barang', $kodeBarang);
+            }
+
+            $data = $builder->get()->getResultArray();
+
+            if (empty($data)) {
+                return $this->response->setJSON([
+                    'status' => 'empty',
+                    'message' => 'Tidak ada data ditemukan untuk suplier tersebut.',
+                    'data' => []
+                ]);
+            }
+
+            // ✅ Group berdasarkan kode_barang
+            $grouped = [];
+            foreach ($data as $row) {
+                $kode = $row['kode_barang'];
+
+                if (!isset($grouped[$kode])) {
+                    $grouped[$kode] = [
+                        'kode_barang' => $row['kode_barang'],
+                        'total_jumlah' => 0,
+                        'total' => 0,
+                        'total_modal' => 0,
+                        'data' => []
+                    ];
+                }
+
+                $grouped[$kode]['total_jumlah'] += (float) $row['jumlah'];
+                $grouped[$kode]['total'] += (float) $row['total'];
+                $grouped[$kode]['total_modal'] += (float) $row['total_harga_modal'];
+                $grouped[$kode]['data'][] = [
+                    'transaction_id' => $row['transaction_id'],
+                    'jumlah' => $row['jumlah'],
+                    'total' => $row['total'],
+                    'harga_modal' => $row['harga_modal'],
+                    'total_harga_modal' => $row['total_harga_modal'],
+                    'closing_month' => $row['closing_month'],
+                    'tanggal' => $row['created_at'] ?? null,
+                ];
+            }
+
+            return $this->response->setJSON([
+                'status' => 'success',
+                'message' => 'Data laporan supplier berhasil diambil.',
+                'data' => array_values($grouped)
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', 'Error in getSupplierClosingReport: ' . $e->getMessage());
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ])->setStatusCode(500);
+        }
+    }
+
+
+
 }
