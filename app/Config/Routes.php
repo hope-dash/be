@@ -119,6 +119,8 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('rollback', 'ClosingController::rollbackClosingByMonth');
         $routes->post('detail', 'ClosingController::getClosingDetailsByMonth');
         $routes->get('list', 'ClosingController::listClosings');
+        $routes->get('suplier', 'ClosingController::getSupplierClosingReport');
+        
     });
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
