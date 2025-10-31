@@ -2329,8 +2329,6 @@ class TransactionController extends BaseController
                 );
             }
 
-            var_dump($customerId);
-
             // 4. Ambil data lama untuk comparison
             $oldItems = $this->SalesProductModel->where('id_transaction', $transactionId)->findAll();
             $oldItemMap = array_column($oldItems, null, 'kode_barang');
