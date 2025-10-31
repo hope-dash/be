@@ -2319,11 +2319,17 @@ class TransactionController extends BaseController
             $customerId = null;
 
             // 1. Prepare data
-            if ($data->customer_id) {
+            if (isset($data->customer_id) && !empty($data->customer_id)) {
                 $customerId = $data->customer_id;
             } else {
-                $customerId = $this->getOrCreateCustomer($data->customer_name, $data->customer_phone, $data->alamat);
+                $customerId = $this->getOrCreateCustomer(
+                    $data->customer_name,
+                    $data->customer_phone,
+                    $data->alamat
+                );
             }
+
+            var_dump($customerId);
 
             // 4. Ambil data lama untuk comparison
             $oldItems = $this->SalesProductModel->where('id_transaction', $transactionId)->findAll();
