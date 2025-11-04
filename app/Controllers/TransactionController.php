@@ -316,10 +316,10 @@ class TransactionController extends BaseController
                 $actual_per_piece = $item->harga_jual * (1 - $discount_rate);
                 $actual_total = $actual_per_piece * $item->jumlah;
 
-                $dropship_suplier = null;
-                if (isset($product['dropship']) && $product['dropship'] == 1) {
-                    $dropship_suplier = $product['suplier'] ?? null;
-                }
+
+
+                $dropship_suplier = $product['suplier'] ?? null;
+
 
                 $salesData[] = [
                     'id_transaction' => $insertID,

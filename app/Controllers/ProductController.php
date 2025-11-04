@@ -57,6 +57,7 @@ class ProductController extends ResourceController
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
             'suplier.*' => 'permit_empty|integer',
+            'dropship' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -332,6 +333,7 @@ class ProductController extends ResourceController
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
             'suplier.*' => 'permit_empty|integer',
+            'dropship' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
