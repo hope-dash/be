@@ -56,7 +56,6 @@ class ProductController extends ResourceController
             'id_seri_barang' => 'permit_empty',
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
-            'suplier.*' => 'permit_empty|integer',
             'dropship' => 'permit_empty',
         ]);
 
@@ -83,7 +82,7 @@ class ProductController extends ResourceController
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
-            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null,
+            'suplier' => $data->suplier ?? null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             'dropship' => $data->dropship ?? 0,
@@ -332,7 +331,6 @@ class ProductController extends ResourceController
             'id_seri_barang' => 'permit_empty',
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
-            'suplier.*' => 'permit_empty|integer',
             'dropship' => 'permit_empty',
         ]);
 
@@ -356,7 +354,7 @@ class ProductController extends ResourceController
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
-            'suplier' => !empty($data->suplier) ? implode(',', $data->suplier) : null,
+            'suplier' => $data->suplier ?? null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             'dropship' => $data->dropship ?? 0,
