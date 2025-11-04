@@ -494,9 +494,7 @@ class TransactionController extends BaseController
             toko.toko_name,
             COALESCE(c.nama_customer, tm_name.value) AS customer_name,
             c.no_hp_customer AS customer_phone,
-            -- PERUBAHAN 1: Gunakan NULLIF untuk mengubah string kosong menjadi NULL
             NULLIF(tm_jatuh_tempo.value, '') AS jatuh_tempo_pada,
-            -- PERUBAHAN 2: Boolean jatuh_tempo juga disesuaikan
             CASE 
                 WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value != '' AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
                 ELSE FALSE
@@ -600,27 +598,18 @@ class TransactionController extends BaseController
 
         $total_data = (int) $countBuilder->countAllResults();
         $result = $builder->get()->getResultArray();
-
-        // =====================
-        // PERUBAHAN 3: Hapus kunci yang NULL dari setiap baris hasil
-        // =====================
-        $processedResult = array_map(function ($row) {
-            // Hapus kunci 'jatuh_tempo_pona' jika nilainya NULL
-            if (array_key_exists('jatuh_tempo_pada', $row) && is_null($row['jatuh_tempo_pada'])) {
+        foreach ($result as &$row) {
+            if (!isset($row['jatuh_tempo_pada']) || $row['jatuh_tempo_pada'] === null || $row['jatuh_tempo_pada'] === '') {
                 unset($row['jatuh_tempo_pada']);
             }
-            // Opsional: Anda juga bisa memilih untuk menghapus 'jatuh_tempo' jika false
-            // if (array_key_exists('jatuh_tempo', $row) && $row['jatuh_tempo'] === false) {
-            //     unset($row['jatuh_tempo']);
-            // }
-            return $row;
-        }, $result);
+        }
+        unset($row);
 
         $total_page = ceil($total_data / $limit);
 
         return $this->jsonResponse->multiResp(
             'Success',
-            $processedResult, 
+            $result,
             $total_data,
             $total_page,
             $page,

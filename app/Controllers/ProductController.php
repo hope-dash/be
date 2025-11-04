@@ -334,6 +334,7 @@ class ProductController extends ResourceController
             'dropship' => 'permit_empty',
         ]);
 
+
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
@@ -347,6 +348,7 @@ class ProductController extends ResourceController
         if (!$oldProductData) {
             return $this->jsonResponse->error("Produk tidak ditemukan", 404);
         }
+
         $productData = [
             'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
             'description' => isset($data->description) ? $data->description : NULL,
@@ -409,13 +411,6 @@ class ProductController extends ResourceController
                     $this->stockModel->insert($stockData);
                 }
             }
-        }
-
-
-        // Update suppliers if provided
-        if (!empty($data->suplier)) {
-            $supplierIds = implode(',', $data->suplier);
-            $this->productModel->update($id, ['suplier' => $supplierIds]);
         }
 
         return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id], 200);
@@ -487,23 +482,14 @@ class ProductController extends ResourceController
 
         // 🔹 Normalisasi field dropship & supplier
         $p['dropship'] = (bool) ($p['dropship'] ?? false);
-        $p['suplier'] = !empty($p['suplier'])
-            ? explode(',', $p['suplier'])
-            : [];
 
         // 🔹 Ambil supplier details (jika ada)
         $p['supplier_details'] = !empty($p['suplier'])
-            ? array_map(
-                fn($s) => [
-                    'id' => $s['id'],
-                    'name' => $s['suplier_name']
-                ],
-                $this->db->table('suplier')
-                    ->select('id, suplier_name')
-                    ->whereIn('id', $p['suplier'])
-                    ->get()
-                    ->getResultArray()
-            )
+            ? $this->db->table('suplier')
+                ->select('id, suplier_name as name')
+                ->where('id', $p['suplier'])
+                ->get()
+                ->getRowArray()
             : [];
 
         return $p;
