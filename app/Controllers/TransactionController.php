@@ -1896,7 +1896,7 @@ class TransactionController extends BaseController
 
         $ongkir = isset($ongkirMeta['value']) ? (float) $ongkirMeta['value'] : 0;
 
-        var_dump(($transaction['closing']));
+        
 
         // Update status transaksi
         $db->table('transaction')
