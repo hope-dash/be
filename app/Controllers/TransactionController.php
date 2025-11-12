@@ -197,7 +197,7 @@ class TransactionController extends BaseController
         $metaData = [
             'ppn' => $data['ppn'],
             'ppn_value' => $data['ppn_value'],
-            'totalAmount' => $data['totalAmount'],
+            'grand_total' => $data['totalAmount'],
             'discount' => $data['discount'],
             'discount_rate' => $data['discount_rate'] ?? null,
             'alamat' => $data['alamat'],
