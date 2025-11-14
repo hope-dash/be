@@ -73,17 +73,21 @@ class SuplierController extends ResourceController
     {
         $token = $this->request->user;
         $input = $this->request->getJSON();
+
         $data = [
-            "suplier_name" => $input->suplier_name,
-            "suplier_number" => $input->suplier_number,
-            "notes" => $input->notes,
+            "suplier_name" => $input->suplier_name ?? null,
+            "suplier_number" => $input->suplier_number ?? null,
+            "notes" => $input->notes ?? null,
             "created_by" => $token['user_id'],
         ];
+
         if (!$this->suplierModel->insert($data)) {
             return $this->jsonResponse->error($this->suplierModel->errors(), 400);
         }
+
         return $this->jsonResponse->oneResp('successfully', "", 201);
     }
+
 
     // PUT/PATCH: Update supplier
     public function update($id = null)
