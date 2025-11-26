@@ -1163,18 +1163,9 @@ class ProductController extends ResourceController
             // === Filter nama produk (id_barang atau nama lengkap) ===
             if (!empty($namaProduct)) {
                 $builder->groupStart()
-                    ->like("product.id_barang", $namaProduct)
-                    ->orLike("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct);
-
-                // Cari per kata tanpa memperdulikan urutan
-                $kataKunci = explode(' ', $namaProduct);
-                foreach ($kataKunci as $kata) {
-                    if (strlen(trim($kata)) > 2) { // minimal 3 karakter
-                        $builder->orLike("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $kata);
-                    }
-                }
-
-                $builder->groupEnd();
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                    ->groupEnd();
             }
 
             // Hitung total untuk pagination
