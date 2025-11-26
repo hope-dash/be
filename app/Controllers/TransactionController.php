@@ -178,6 +178,7 @@ class TransactionController extends BaseController
             'ppn',
             'ppn_value',
             'totalAmount',
+            'grand_total',
             'discount',
             'discount_rate',
             'alamat',
