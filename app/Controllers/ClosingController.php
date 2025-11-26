@@ -973,26 +973,26 @@ class ClosingController extends BaseController
         return 'OTHER';
     }
 
-    public function getSupplierClosingReport()
-    {
-        try {
-            $request = $this->request->getGet();
+public function getSupplierClosingReport()
+{
+    try {
+        $request = $this->request->getGet();
 
-            $closingMonth = $request['closing_month_year'] ?? null;
-            $transactionId = $request['transaction_id'] ?? null;
-            $kodeBarang = isset($request['kode_barang']) ? (array) $request['kode_barang'] : [];
-            $suplier = $request['suplier'] ?? null;
+        $closingMonth = $request['closing_month_year'] ?? null;
+        $transactionId = $request['transaction_id'] ?? null;
+        $kodeBarang = isset($request['kode_barang']) ? (array) $request['kode_barang'] : [];
+        $suplier = $request['suplier'] ?? null;
 
-            // ✅ Supplier wajib diisi
-            if (empty($suplier)) {
-                return $this->response->setJSON([
-                    'status' => 'error',
-                    'message' => 'Parameter suplier wajib diisi.',
-                ])->setStatusCode(400);
-            }
+        // ✅ Supplier wajib diisi
+        if (empty($suplier)) {
+            return $this->response->setJSON([
+                'status' => 'error',
+                'message' => 'Parameter suplier wajib diisi.',
+            ])->setStatusCode(400);
+        }
 
-            $builder = $this->db->table('supplier_closing sc')
-                ->select("
+        $builder = $this->db->table('supplier_closing sc')
+            ->select("
                 sc.id,
                 sc.dropship_suplier,
                 sc.transaction_id,
@@ -1002,75 +1002,91 @@ class ClosingController extends BaseController
                 sc.harga_modal,
                 sc.total_harga_modal,
                 sc.closing_month,
-                sc.created_at
+                sc.created_at,
+                p.nama_barang,
+                p.id_model_barang,
+                p.id_seri_barang,
+                model_barang.nama_model,
+                seri.seri
             ")
-                ->where('sc.dropship_suplier', $suplier);
+            ->join('product p', 'p.id_barang = sc.kode_barang', 'left')
+            ->join('model_barang', 'model_barang.id = p.id_model_barang', 'left')
+            ->join('seri', 'seri.id = p.id_seri_barang', 'left')
+            ->where('sc.dropship_suplier', $suplier);
 
-            // ✅ Filter tambahan opsional
-            if ($closingMonth) {
-                $builder->where('sc.closing_month', $closingMonth);
-            }
+        // ✅ Filter tambahan opsional
+        if ($closingMonth) {
+            $builder->where('sc.closing_month', $closingMonth);
+        }
 
-            if ($transactionId) {
-                $builder->where('sc.transaction_id', $transactionId);
-            }
+        if ($transactionId) {
+            $builder->where('sc.transaction_id', $transactionId);
+        }
 
-            if (!empty($kodeBarang)) {
-                $builder->whereIn('sc.kode_barang', $kodeBarang);
-            }
+        if (!empty($kodeBarang)) {
+            $builder->whereIn('sc.kode_barang', $kodeBarang);
+        }
 
-            $data = $builder->get()->getResultArray();
+        $data = $builder->get()->getResultArray();
 
-            if (empty($data)) {
-                return $this->response->setJSON([
-                    'status' => 'empty',
-                    'message' => 'Tidak ada data ditemukan untuk suplier tersebut.',
+        if (empty($data)) {
+            return $this->response->setJSON([
+                'status' => 'empty',
+                'message' => 'Tidak ada data ditemukan untuk suplier tersebut.',
+                'data' => []
+            ]);
+        }
+
+        // ✅ Group berdasarkan kode_barang
+        $grouped = [];
+        foreach ($data as $row) {
+            $kode = $row['kode_barang'];
+
+            // ✅ Membuat nama lengkap barang
+            $namaLengkap = trim(implode(' ', array_filter([
+                $row['nama_barang'],
+                $row['nama_model'] ?? '',
+                $row['seri'] ?? ''
+            ])));
+
+            if (!isset($grouped[$kode])) {
+                $grouped[$kode] = [
+                    'kode_barang' => $row['kode_barang'],
+                    'nama_barang_lengkap' => $namaLengkap,
+                    'total_jumlah' => 0,
+                    'total' => 0,
+                    'total_modal' => 0,
                     'data' => []
-                ]);
-            }
-
-            // ✅ Group berdasarkan kode_barang
-            $grouped = [];
-            foreach ($data as $row) {
-                $kode = $row['kode_barang'];
-
-                if (!isset($grouped[$kode])) {
-                    $grouped[$kode] = [
-                        'kode_barang' => $row['kode_barang'],
-                        'total_jumlah' => 0,
-                        'total' => 0,
-                        'total_modal' => 0,
-                        'data' => []
-                    ];
-                }
-
-                $grouped[$kode]['total_jumlah'] += (float) $row['jumlah'];
-                $grouped[$kode]['total'] += (float) $row['total'];
-                $grouped[$kode]['total_modal'] += (float) $row['total_harga_modal'];
-                $grouped[$kode]['data'][] = [
-                    'transaction_id' => $row['transaction_id'],
-                    'jumlah' => $row['jumlah'],
-                    'total' => $row['total'],
-                    'harga_modal' => $row['harga_modal'],
-                    'total_harga_modal' => $row['total_harga_modal'],
-                    'closing_month' => $row['closing_month'],
-                    'tanggal' => $row['created_at'] ?? null,
                 ];
             }
 
-            return $this->response->setJSON([
-                'status' => 'success',
-                'message' => 'Data laporan supplier berhasil diambil.',
-                'data' => array_values($grouped)
-            ]);
-        } catch (\Throwable $e) {
-            log_message('error', 'Error in getSupplierClosingReport: ' . $e->getMessage());
-            return $this->response->setJSON([
-                'status' => 'error',
-                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
-            ])->setStatusCode(500);
+            $grouped[$kode]['total_jumlah'] += (float) $row['jumlah'];
+            $grouped[$kode]['total'] += (float) $row['total'];
+            $grouped[$kode]['total_modal'] += (float) $row['total_harga_modal'];
+            $grouped[$kode]['data'][] = [
+                'transaction_id' => $row['transaction_id'],
+                'jumlah' => $row['jumlah'],
+                'total' => $row['total'],
+                'harga_modal' => $row['harga_modal'],
+                'total_harga_modal' => $row['total_harga_modal'],
+                'closing_month' => $row['closing_month'],
+                'tanggal' => $row['created_at'] ?? null,
+            ];
         }
+
+        return $this->response->setJSON([
+            'status' => 'success',
+            'message' => 'Data laporan supplier berhasil diambil.',
+            'data' => array_values($grouped)
+        ]);
+    } catch (\Throwable $e) {
+        log_message('error', 'Error in getSupplierClosingReport: ' . $e->getMessage());
+        return $this->response->setJSON([
+            'status' => 'error',
+            'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+        ])->setStatusCode(500);
     }
+}
 
 
 

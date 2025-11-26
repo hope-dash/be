@@ -71,6 +71,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->get('product', 'ProductController::getAllProduct');
     $routes->post('product-stock', 'ProductController::getProductStock');
     $routes->put('product/(:num)', 'ProductController::updateProduct/$1');
+    $routes->get('product-summary', 'ProductController::getProductStockSummary');
     $routes->delete('product/(:num)', 'ProductController::deleteByProductId/$1');
     $routes->post('bulk-product', 'ProductController::bulkUpload');
     $routes->get('model_barang/count', 'ProductController::getTotalByModelId');
@@ -120,7 +121,9 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('detail', 'ClosingController::getClosingDetailsByMonth');
         $routes->get('list', 'ClosingController::listClosings');
         $routes->get('suplier', 'ClosingController::getSupplierClosingReport');
-        
+
+
+
     });
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);

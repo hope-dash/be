@@ -1126,6 +1126,258 @@ class ProductController extends ResourceController
         }
     }
 
+    public function getProductStockSummary()
+    {
+        try {
+            // === Ambil parameter ===
+            $sortBy = $this->request->getGet('sortBy');
+            if ($sortBy === 'kode_barang') {
+                $sortBy = 'product.id_barang';
+            } elseif (!$sortBy) {
+                $sortBy = 'product.id';
+            }
+
+            $sortMethodRaw = $this->request->getGet('sortMethod');
+            $sortMethod = in_array(strtolower($sortMethodRaw), ['asc', 'desc']) ? strtolower($sortMethodRaw) : 'desc';
+
+            $namaProduct = trim($this->request->getGet('namaProduct') ?? '');
+            $limit = max((int) ($this->request->getGet('limit') ?: 25), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+            $offset = ($page - 1) * $limit;
+
+            // === Bangun query dasar ===
+            $builder = $this->productModel
+                ->select([
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
+                    'product.harga_modal',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
+                    'model_barang.nama_model',
+                    'seri.seri',
+                ])
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+
+            // === Filter nama produk (id_barang atau nama lengkap) ===
+            if (!empty($namaProduct)) {
+                $builder->groupStart()
+                    ->like("product.id_barang", $namaProduct)
+                    ->orLike("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct);
+
+                // Cari per kata tanpa memperdulikan urutan
+                $kataKunci = explode(' ', $namaProduct);
+                foreach ($kataKunci as $kata) {
+                    if (strlen(trim($kata)) > 2) { // minimal 3 karakter
+                        $builder->orLike("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $kata);
+                    }
+                }
+
+                $builder->groupEnd();
+            }
+
+            // Hitung total untuk pagination
+            $total_data = $builder->countAllResults(false);
+            $total_page = $limit > 0 ? ceil($total_data / $limit) : 0;
+
+            if ($total_data === 0) {
+                return $this->jsonResponse->multiResp('', [], $total_data, $total_page, $page, $limit, 200);
+            }
+
+            // Ambil data produk dengan pagination
+            $products = $builder
+                ->orderBy($sortBy, $sortMethod)
+                ->limit($limit, $offset)
+                ->get()
+                ->getResultArray();
+
+            $productCodes = array_unique(array_column($products, 'id_barang'));
+
+            // === Hitung stock dari table stock ===
+            $stockData = [];
+            if (!empty($productCodes)) {
+                $stocks = $this->stockModel
+                    ->select('id_barang, SUM(stock) as total_stock, SUM(barang_cacat) as total_cacat')
+                    ->whereIn('id_barang', $productCodes)
+                    ->groupBy('id_barang')
+                    ->get()
+                    ->getResultArray();
+
+                foreach ($stocks as $stock) {
+                    $stockData[$stock['id_barang']] = [
+                        'total_stock' => (int) $stock['total_stock'],
+                        'total_cacat' => (int) $stock['total_cacat']
+                    ];
+                }
+            }
+
+            // === Hitung stock gantung (waiting_payment) dari sales_product + transaction ===
+            $pendingStockData = [];
+            if (!empty($productCodes)) {
+                $pendingStocks = $this->db->table('sales_product sp')
+                    ->select('sp.kode_barang, SUM(sp.jumlah) as total_pending')
+                    ->join('transaction t', 't.id = sp.id_transaction')
+                    ->whereIn('sp.kode_barang', $productCodes)
+                    ->where('t.status', 'WAITING_PAYMENT')
+                    ->groupBy('sp.kode_barang')
+                    ->get()
+                    ->getResultArray();
+
+                foreach ($pendingStocks as $pending) {
+                    $pendingStockData[$pending['kode_barang']] = (int) $pending['total_pending'];
+                }
+            }
+
+            // === Format hasil dan hitung estimasi modal untuk data yang dipaginasi ===
+            $summaryProducts = [];
+            $pageTotalStock = 0;
+            $pageTotalEstimasiModal = 0;
+
+            foreach ($products as $product) {
+                $kodeBarang = $product['id_barang'];
+
+                $stock = $stockData[$kodeBarang] ?? ['total_stock' => 0, 'total_cacat' => 0];
+                $pendingStock = $pendingStockData[$kodeBarang] ?? 0;
+
+                $totalStock = $stock['total_stock'] + $stock['total_cacat'] + $pendingStock;
+                $hargaModal = (float) $product['harga_modal'];
+                $estimasiModal = $totalStock * $hargaModal;
+
+                // Format nama lengkap barang
+                $namaLengkap = trim(implode(' ', array_filter([
+                    $product['nama_barang'],
+                    $product['nama_model'] ?? '',
+                    $product['seri'] ?? ''
+                ])));
+
+                $summaryProducts[] = [
+                    'id' => $product['id'],
+                    'kode_barang' => $kodeBarang,
+                    'nama_barang' => $product['nama_barang'],
+                    'nama_lengkap_barang' => $namaLengkap,
+                    'nama_model' => $product['nama_model'] ?? null,
+                    'seri' => $product['seri'] ?? null,
+                    'harga_modal' => $hargaModal,
+
+                    // Stock breakdown
+                    'stock_normal' => $stock['total_stock'],
+                    'stock_cacat' => $stock['total_cacat'],
+                    'stock_gantung' => $pendingStock,
+                    'stock_total' => $totalStock,
+
+                    // Estimasi
+                    'estimasi_modal' => $estimasiModal
+                ];
+
+                // Accumulate page totals
+                $pageTotalStock += $totalStock;
+                $pageTotalEstimasiModal += $estimasiModal;
+            }
+
+            // === HITUNG SUMMARY GLOBAL (SEMUA DATA TANPA PAGINATION) ===
+            $globalBuilder = $this->productModel
+                ->select([
+                    'product.id_barang',
+                    'product.harga_modal',
+                ])
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+
+            // Apply filter yang sama untuk global summary
+            if (!empty($namaProduct)) {
+                $globalBuilder->groupStart()
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                    ->groupEnd();
+            }
+
+            $allProducts = $globalBuilder->get()->getResultArray();
+            $allProductCodes = array_unique(array_column($allProducts, 'id_barang'));
+
+            // Hitung stock global
+            $globalStockData = [];
+            if (!empty($allProductCodes)) {
+                $globalStocks = $this->stockModel
+                    ->select('id_barang, SUM(stock) as total_stock, SUM(barang_cacat) as total_cacat')
+                    ->whereIn('id_barang', $allProductCodes)
+                    ->groupBy('id_barang')
+                    ->get()
+                    ->getResultArray();
+
+                foreach ($globalStocks as $stock) {
+                    $globalStockData[$stock['id_barang']] = [
+                        'total_stock' => (int) $stock['total_stock'],
+                        'total_cacat' => (int) $stock['total_cacat']
+                    ];
+                }
+            }
+
+            // Hitung stock gantung global
+            $globalPendingStockData = [];
+            if (!empty($allProductCodes)) {
+                $globalPendingStocks = $this->db->table('sales_product sp')
+                    ->select('sp.kode_barang, SUM(sp.jumlah) as total_pending')
+                    ->join('transaction t', 't.id = sp.id_transaction')
+                    ->whereIn('sp.kode_barang', $allProductCodes)
+                    ->where('t.status', 'WAITING_PAYMENT')
+                    ->groupBy('sp.kode_barang')
+                    ->get()
+                    ->getResultArray();
+
+                foreach ($globalPendingStocks as $pending) {
+                    $globalPendingStockData[$pending['kode_barang']] = (int) $pending['total_pending'];
+                }
+            }
+
+            // Hitung total global
+            $globalTotalStock = 0;
+            $globalTotalEstimasiModal = 0;
+
+            foreach ($allProducts as $product) {
+                $kodeBarang = $product['id_barang'];
+
+                $stock = $globalStockData[$kodeBarang] ?? ['total_stock' => 0, 'total_cacat' => 0];
+                $pendingStock = $globalPendingStockData[$kodeBarang] ?? 0;
+
+                $totalStock = $stock['total_stock'] + $stock['total_cacat'] + $pendingStock;
+                $hargaModal = (float) $product['harga_modal'];
+                $estimasiModal = $totalStock * $hargaModal;
+
+                $globalTotalStock += $totalStock;
+                $globalTotalEstimasiModal += $estimasiModal;
+            }
+
+            // === Response dengan summary ===
+            $response = [
+                'products' => $summaryProducts,
+                'summary_page' => [
+                    'total_produk_page' => count($summaryProducts),
+                    'total_stock_page' => $pageTotalStock,
+                    'total_estimasi_modal_page' => $pageTotalEstimasiModal
+                ],
+                'summary_global' => [
+                    'total_produk_global' => count($allProducts),
+                    'total_stock_global' => $globalTotalStock,
+                    'total_estimasi_modal_global' => $globalTotalEstimasiModal
+                ]
+            ];
+
+            return $this->jsonResponse->multiResp(
+                'Data summary modal produk berhasil diambil',
+                $response,
+                $total_data,
+                $total_page,
+                $page,
+                $limit,
+                200
+            );
+
+        } catch (\Exception $e) {
+            log_message('error', '[getProductStockSummary] Error: ' . $e->getMessage());
+            return $this->jsonResponse->error('Terjadi kesalahan saat mengambil summary modal produk.', 500);
+        }
+    }
     public function deleteByProductId($id)
     {
         $token = $this->request->user;
