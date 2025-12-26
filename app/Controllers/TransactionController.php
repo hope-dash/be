@@ -278,9 +278,9 @@ class TransactionController extends BaseController
             $freeOngkir = isset($data->free_ongkir) ? (bool) $data->free_ongkir : false;
             [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir] = $this->calculateTransactionTotals(
                 $data->item,
-                $data->discount,
-                $data->ppn,
-                $data->biaya_pengiriman,
+                $data->discount ?? 0,
+                $data->ppn ?? 0,
+                $data->biaya_pengiriman ?? 0,
                 $freeOngkir
             );
 
