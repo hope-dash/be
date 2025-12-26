@@ -482,130 +482,190 @@ class TransactionController extends BaseController
     public function getListTransaction()
     {
         $db = \Config\Database::connect();
-        $builder = $db->table('transaction t')
-            ->select("
-            t.id AS transaction_id,
-            t.invoice AS invoice_number,
-            t.amount,
-            t.po,
-            t.total_payment,
-            t.status,
-            t.id_toko,
-            t.date_time,
-            toko.toko_name,
-            COALESCE(c.nama_customer, tm_name.value) AS customer_name,
-            c.no_hp_customer AS customer_phone,
-            NULLIF(tm_jatuh_tempo.value, '') AS jatuh_tempo_pada,
-            CASE 
-                WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value != '' AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
-                ELSE FALSE
-            END AS jatuh_tempo
-        ")
-            ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
-            ->join('customer c', 'tm_cust.value = c.id', 'left')
-            ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
-            ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
-            ->join('toko', 't.id_toko = toko.id', 'left');
+        $request = $this->request;
 
-        // =====================
-        // FILTERING
-        // =====================
-        $status = $this->request->getGet('status');
-        $id_toko = $this->request->getGet('id_toko');
-        $date_start = $this->request->getGet('date_start');
-        $date_end = $this->request->getGet('date_end');
-        $role = $this->request->getGet('role');
-        $search = $this->request->getGet('search');
-        $total_min = $this->request->getGet('total_min');
-        $total_max = $this->request->getGet('total_max');
-
-        if ($status)
-            $builder->where('t.status', $status);
+        $status = $request->getGet('status');
+        $id_toko = $request->getGet('id_toko');
+        $date_start = $request->getGet('date_start');
+        $date_end = $request->getGet('date_end');
+        $role = $request->getGet('role');
+        $search = $request->getGet('search');
+        $total_min = $request->getGet('total_min');
+        $total_max = $request->getGet('total_max');
+        $sortBy = $request->getGet('sortBy') ?: 't.id';
+        $sortMethod = strtolower($request->getGet('sortMethod') ?: 'desc');
+        $limit = max((int) ($request->getGet('limit') ?: 10), 1);
+        $page = max((int) ($request->getGet('page') ?: 1), 1);
+        $offset = ($page - 1) * $limit;
 
         if (is_string($role)) {
             $role = array_filter(array_map('intval', explode(',', $role)));
         }
 
-        if (!empty($role) && !$id_toko) {
-            $builder->whereIn('t.id_toko', $role);
-        }
+        // Determine if we can use the optimized path (Deferred Joins)
+        // We cannot use it if we are searching (needs joins to search) or sorting by joined columns
+        $complexSortColumns = ['customer_name', 'jatuh_tempo']; // Columns not in 'transaction' or 'toko'
+        $isComplexQuery = !empty($search) || in_array($sortBy, $complexSortColumns);
 
-        if ($id_toko) {
-            $builder->where('t.id_toko', $id_toko);
-        }
+        if (!$isComplexQuery) {
+            // ==========================================
+            // OPTIMIZED PATH (No Search, Simple Sort)
+            // ==========================================
+            $builder = $db->table('transaction t')
+                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.po, t.total_payment, t.status, t.id_toko, t.date_time, toko.toko_name')
+                ->join('toko', 't.id_toko = toko.id', 'left');
 
-        if ($date_start && $date_end) {
-            $builder->where('t.date_time >=', "{$date_start} 00:00:00");
-            $builder->where('t.date_time <=', "{$date_end} 23:59:59");
-        } elseif ($date_start) {
-            $builder->where('t.date_time >=', "{$date_start} 00:00:00");
-        } elseif ($date_end) {
-            $builder->where('t.date_time <=', "{$date_end} 23:59:59");
-        }
-
-        if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) {
-            $builder->where('t.total_payment >=', (float) $total_min);
-        }
-        if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) {
-            $builder->where('t.total_payment <=', (float) $total_max);
-        }
-
-        if ($search) {
-            $builder->groupStart()
-                ->like('c.nama_customer', $search)
-                ->orLike('c.no_hp_customer', $search)
-                ->orLike('tm_name.value', $search)
-                ->orLike('t.invoice', $search)
-                ->groupEnd();
-        }
-
-        // =====================
-        // SORT & PAGINATION
-        // =====================
-        $sortBy = $this->request->getGet('sortBy') ?: 't.id';
-        $sortMethod = strtolower($this->request->getGet('sortMethod') ?: 'desc');
-        $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
-        $page = max((int) ($this->request->getGet('page') ?: 1), 1);
-        $offset = ($page - 1) * $limit;
-
-        $builder->orderBy($sortBy, $sortMethod);
-        $builder->limit($limit, $offset);
-
-        // =====================
-        // COUNT OPTIMIZED (tanpa JOIN)
-        // =====================
-        $countBuilder = $db->table('transaction t');
-
-        if ($status)
-            $countBuilder->where('t.status', $status);
-        if (!empty($role) && !$id_toko)
-            $countBuilder->whereIn('t.id_toko', $role);
-        if ($id_toko)
-            $countBuilder->where('t.id_toko', $id_toko);
-        if ($date_start && $date_end) {
-            $countBuilder->where('t.date_time >=', "{$date_start} 00:00:00");
-            $countBuilder->where('t.date_time <=', "{$date_end} 23:59:59");
-        } elseif ($date_start) {
-            $countBuilder->where('t.date_time >=', "{$date_start} 00:00:00");
-        } elseif ($date_end) {
-            $countBuilder->where('t.date_time <=', "{$date_end} 23:59:59");
-        }
-        if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) {
-            $countBuilder->where('t.total_payment >=', (float) $total_min);
-        }
-        if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) {
-            $countBuilder->where('t.total_payment <=', (float) $total_max);
-        }
-
-        $total_data = (int) $countBuilder->countAllResults();
-        $result = $builder->get()->getResultArray();
-        foreach ($result as &$row) {
-            if (!isset($row['jatuh_tempo_pada']) || $row['jatuh_tempo_pada'] === null || $row['jatuh_tempo_pada'] === '') {
-                unset($row['jatuh_tempo_pada']);
+            // Apply Basic Filters
+            if ($status) $builder->where('t.status', $status);
+            if (!empty($role) && !$id_toko) $builder->whereIn('t.id_toko', $role);
+            if ($id_toko) $builder->where('t.id_toko', $id_toko);
+            if ($date_start && $date_end) {
+                $builder->where('t.date_time >=', "{$date_start} 00:00:00");
+                $builder->where('t.date_time <=', "{$date_end} 23:59:59");
+            } elseif ($date_start) {
+                $builder->where('t.date_time >=', "{$date_start} 00:00:00");
+            } elseif ($date_end) {
+                $builder->where('t.date_time <=', "{$date_end} 23:59:59");
             }
-        }
-        unset($row);
+            if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) $builder->where('t.total_payment >=', (float) $total_min);
+            if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) $builder->where('t.total_payment <=', (float) $total_max);
 
+            // Clone for count BEFORE limit
+            $countBuilder = clone $builder;
+            $total_data = (int) $countBuilder->countAllResults();
+
+            // Apply Sort & Limit
+            $builder->orderBy($sortBy, $sortMethod);
+            $builder->limit($limit, $offset);
+            $result = $builder->get()->getResultArray();
+
+            // Hydrate Data (Deferred Join logic)
+            if (!empty($result)) {
+                $transactionIds = array_column($result, 'transaction_id');
+
+                // 1. Get Transaction Meta (Customer Info & Jatuh Tempo)
+                $metas = $db->table('transaction_meta')
+                    ->whereIn('transaction_id', $transactionIds)
+                    ->whereIn('key', ['customer_id', 'customer_name', 'jatuh_tempo'])
+                    ->get()
+                    ->getResultArray();
+
+                $metaMap = [];
+                $customerIds = [];
+                foreach ($metas as $meta) {
+                    $metaMap[$meta['transaction_id']][$meta['key']] = $meta['value'];
+                    if ($meta['key'] === 'customer_id') {
+                        $customerIds[] = $meta['value'];
+                    }
+                }
+
+                // 2. Get Customer Data
+                $customerMap = [];
+                if (!empty($customerIds)) {
+                    $customers = $db->table('customer')
+                        ->whereIn('id', array_unique($customerIds))
+                        ->get()
+                        ->getResultArray();
+                    foreach ($customers as $cust) {
+                        $customerMap[$cust['id']] = $cust;
+                    }
+                }
+
+                // 3. Merge Data
+                foreach ($result as &$row) {
+                    $tid = $row['transaction_id'];
+                    $tMeta = $metaMap[$tid] ?? [];
+
+                    $custId = $tMeta['customer_id'] ?? null;
+                    $custNameMeta = $tMeta['customer_name'] ?? null;
+                    $jatuhTempoVal = $tMeta['jatuh_tempo'] ?? null;
+
+                    // Determine Customer Name
+                    if ($custId && isset($customerMap[$custId])) {
+                        $row['customer_name'] = $customerMap[$custId]['nama_customer'];
+                        $row['customer_phone'] = $customerMap[$custId]['no_hp_customer'];
+                    } else {
+                        $row['customer_name'] = $custNameMeta;
+                        $row['customer_phone'] = null;
+                    }
+
+                    // Determine Jatuh Tempo
+                    $row['jatuh_tempo_pada'] = $jatuhTempoVal;
+                    $row['jatuh_tempo'] = false;
+                    if ($jatuhTempoVal && $jatuhTempoVal != '' && $jatuhTempoVal <= date('Y-m-d')) {
+                        $row['jatuh_tempo'] = true;
+                    }
+                }
+                unset($row);
+            }
+
+        } else {
+            // ==========================================
+            // COMPLEX PATH (Search active or Sort by Joined Col)
+            // ==========================================
+            // Use original rigorous query with all joins
+
+            $builder = $db->table('transaction t')
+                ->select("
+                t.id AS transaction_id,
+                t.invoice AS invoice_number,
+                t.amount,
+                t.po,
+                t.total_payment,
+                t.status,
+                t.id_toko,
+                t.date_time,
+                toko.toko_name,
+                COALESCE(c.nama_customer, tm_name.value) AS customer_name,
+                c.no_hp_customer AS customer_phone,
+                NULLIF(tm_jatuh_tempo.value, '') AS jatuh_tempo_pada,
+                CASE 
+                    WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value != '' AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
+                    ELSE FALSE
+                END AS jatuh_tempo
+            ")
+                ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
+                ->join('customer c', 'tm_cust.value = c.id', 'left')
+                ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
+                ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
+                ->join('toko', 't.id_toko = toko.id', 'left');
+
+            // Apply Filters
+            if ($status) $builder->where('t.status', $status);
+            if (!empty($role) && !$id_toko) $builder->whereIn('t.id_toko', $role);
+            if ($id_toko) $builder->where('t.id_toko', $id_toko);
+            if ($date_start && $date_end) {
+                $builder->where('t.date_time >=', "{$date_start} 00:00:00");
+                $builder->where('t.date_time <=', "{$date_end} 23:59:59");
+            } elseif ($date_start) {
+                $builder->where('t.date_time >=', "{$date_start} 00:00:00");
+            } elseif ($date_end) {
+                $builder->where('t.date_time <=', "{$date_end} 23:59:59");
+            }
+            if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) $builder->where('t.total_payment >=', (float) $total_min);
+            if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) $builder->where('t.total_payment <=', (float) $total_max);
+
+            if ($search) {
+                $builder->groupStart()
+                    ->like('c.nama_customer', $search)
+                    ->orLike('c.no_hp_customer', $search)
+                    ->orLike('tm_name.value', $search)
+                    ->orLike('t.invoice', $search)
+                    ->groupEnd();
+            }
+
+            // Clone for count BEFORE limit
+            // IMPORTANT: This fixes the bug where search didn't affect count
+            $countBuilder = clone $builder;
+            $total_data = (int) $countBuilder->countAllResults();
+
+            // Apply Sort & Limit
+            $builder->orderBy($sortBy, $sortMethod);
+            $builder->limit($limit, $offset);
+            $result = $builder->get()->getResultArray();
+        }
+
+        // Common final processing
         $total_page = ceil($total_data / $limit);
 
         return $this->jsonResponse->multiResp(
