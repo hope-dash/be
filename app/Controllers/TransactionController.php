@@ -503,13 +503,14 @@ class TransactionController extends BaseController
         }
 
         // Determine if we can use the optimized path (Deferred Joins)
-        // We cannot use it if we are searching (needs joins to search) or sorting by joined columns
+        // We cannot use it if we are sorting by joined columns (complex sort)
+        // BUT we CAN use it for searching now by using subqueries/EXISTS
         $complexSortColumns = ['customer_name', 'jatuh_tempo']; // Columns not in 'transaction' or 'toko'
-        $isComplexQuery = !empty($search) || in_array($sortBy, $complexSortColumns);
+        $isComplexQuery = in_array($sortBy, $complexSortColumns);
 
         if (!$isComplexQuery) {
             // ==========================================
-            // OPTIMIZED PATH (No Search, Simple Sort)
+            // OPTIMIZED PATH (Search with Subqueries, Simple Sort)
             // ==========================================
             $builder = $db->table('transaction t')
                 ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.po, t.total_payment, t.status, t.id_toko, t.date_time, toko.toko_name')
@@ -529,6 +530,35 @@ class TransactionController extends BaseController
             }
             if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) $builder->where('t.total_payment >=', (float) $total_min);
             if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) $builder->where('t.total_payment <=', (float) $total_max);
+
+            // Apply Search using EXISTS subqueries to maintain performance
+            if ($search) {
+                $builder->groupStart();
+                
+                // 1. Search by Invoice (Direct Column)
+                $builder->like('t.invoice', $search);
+
+                // 2. Search by Customer Name/Phone (Linked via Meta -> Customer table)
+                // exists (select 1 from transaction_meta tm join customer c on tm.value = c.id where tm.transaction_id = t.id and tm.key = 'customer_id' and (c.nama_customer like ... or c.no_hp_customer like ...))
+                $builder->orWhere("EXISTS (
+                    SELECT 1 FROM transaction_meta tm 
+                    JOIN customer c ON tm.value = c.id 
+                    WHERE tm.transaction_id = t.id 
+                    AND tm.key = 'customer_id' 
+                    AND (c.nama_customer LIKE '%{$db->escapeLikeString($search)}%' OR c.no_hp_customer LIKE '%{$db->escapeLikeString($search)}%')
+                )");
+
+                // 3. Search by Guest Name (Directly in Meta)
+                // exists (select 1 from transaction_meta tm where tm.transaction_id = t.id and tm.key = 'customer_name' and tm.value like ...)
+                $builder->orWhere("EXISTS (
+                    SELECT 1 FROM transaction_meta tm 
+                    WHERE tm.transaction_id = t.id 
+                    AND tm.key = 'customer_name' 
+                    AND tm.value LIKE '%{$db->escapeLikeString($search)}%'
+                )");
+
+                $builder->groupEnd();
+            }
 
             // Clone for count BEFORE limit
             $countBuilder = clone $builder;
@@ -601,7 +631,7 @@ class TransactionController extends BaseController
 
         } else {
             // ==========================================
-            // COMPLEX PATH (Search active or Sort by Joined Col)
+            // COMPLEX PATH (Sort by Joined Col ONLY)
             // ==========================================
             // Use original rigorous query with all joins
 
