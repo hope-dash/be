@@ -182,7 +182,7 @@ class Database extends Config
             'database' => getenv('database.default.database') ?: 'hope',
             'DBDriver' => 'MySQLi',
             'DBPrefix' => '',
-            'pConnect' => false,
+            'pConnect' => true,
             'DBDebug' => true,
             'charset' => 'utf8mb4',
             'DBCollat' => 'utf8mb4_general_ci',
