@@ -157,19 +157,27 @@ class TransactionController extends BaseController
 
         return $customer['id'];
     }
-    private function calculateTransactionTotals($items, $discount, $ppn, $pengiriman, $freeOngkir = false)
+    private function calculateTransactionTotals($items, $discountValue, $discountType, $ppn, $pengiriman, $freeOngkir = false)
     {
         $totalAmount = array_reduce($items, function ($carry, $item) {
             return $carry + ($item->jumlah * $item->harga_jual);
         }, 0);
 
+        // Calculate discount amount
+        $discountAmount = 0;
+        if ($discountType === 'percentage') {
+             $discountAmount = ($totalAmount * $discountValue) / 100;
+        } else {
+             $discountAmount = $discountValue;
+        }
+
         $totalPpn = ($totalAmount * $ppn) / 100;
 
         // Hitung potongan ongkir jika free ongkir
         $potongan_ongkir = $freeOngkir ? $pengiriman : 0;
-        $grandTotal = $totalAmount + $totalPpn + $pengiriman - $discount - $potongan_ongkir;
+        $grandTotal = $totalAmount + $totalPpn + $pengiriman - $discountAmount - $potongan_ongkir;
 
-        return [$totalAmount, $totalPpn, $grandTotal, $potongan_ongkir];
+        return [$totalAmount, $totalPpn, $grandTotal, $potongan_ongkir, $discountAmount];
     }
     private function saveTransactionMeta($transactionId, $data)
     {
@@ -192,7 +200,10 @@ class TransactionController extends BaseController
             'customer_phone',
             'jatuh_tempo',
             'refunded_amount',
-            'complaint'
+            'complaint',
+            'discount_type',
+            'discount_value',
+            'discount_percentage'
         ];
 
         $metaData = [
@@ -201,6 +212,8 @@ class TransactionController extends BaseController
             'grand_total' => $data['totalAmount'],
             'discount' => $data['discount'],
             'discount_rate' => $data['discount_rate'] ?? null,
+            'discount_type' => $data['discount_type'] ?? 'fixed',
+            'discount_value' => $data['discount_value'] ?? 0,
             'alamat' => $data['alamat'],
             'pengiriman' => $data['pengiriman'],
             'biaya_pengiriman' => $data['biaya_pengiriman'],
@@ -276,15 +289,21 @@ class TransactionController extends BaseController
 
             // 3. Calculate totals dengan free_ongkir
             $freeOngkir = isset($data->free_ongkir) ? (bool) $data->free_ongkir : false;
-            [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir] = $this->calculateTransactionTotals(
+            $discountType = $data->discount_type ?? 'fixed';
+
+            [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir, $discountAmount] = $this->calculateTransactionTotals(
                 $data->item,
-                $data->discount ?? 0,
+                $data->discount_value ?? 0,
+                $discountType,
                 $data->ppn ?? 0,
                 $data->biaya_pengiriman ?? 0,
                 $freeOngkir
             );
 
-            $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
+            $discount_rate = 0;
+            if ($totalAmount > 0) {
+                $discount_rate = $discountAmount / $totalAmount;
+            }
 
             // 4. Create transaction
             $transactionData = [
@@ -352,7 +371,10 @@ class TransactionController extends BaseController
                 'ppn' => $data->ppn,
                 'ppn_value' => $ppn_value,
                 'totalAmount' => $totalAmount,
-                'discount' => $data->discount,
+                'discount' => $discountAmount,
+                'discount_value' => $data->discount_value ?? 0,
+                'discount_type' => $discountType,
+                'discount_percentage' => ($discountType === 'percentage') ? ($data->discount_value ?? 0) : 0,
                 'discount_rate' => $discount_rate,
                 'source' => $data->source,
                 'customer_id' => $customerId,
@@ -451,10 +473,18 @@ class TransactionController extends BaseController
             }
 
             // Handle discount
-            $discount = $data->discount ?? 0;
+            $discountValue = $data->discount_value ?? 0;
+            $discountType = $data->discount_type ?? 'fixed';
+            $discountAmount = 0;
+            
+            if ($discountType === 'percentage') {
+                $discountAmount = ($totalAmount * $discountValue) / 100;
+            } else {
+                $discountAmount = $discountValue;
+            }
 
             // Calculate grand total
-            $grand_total = $totalAmount + $ppn + $biaya_pengiriman - $discount;
+            $grand_total = $totalAmount + $ppn + $biaya_pengiriman - $discountAmount;
 
             // Pastikan grand total tidak negatif
             if ($grand_total < 0) {
@@ -463,7 +493,9 @@ class TransactionController extends BaseController
 
             // Prepare response data
             $transactionData = [
-                'discount' => (float) $discount,
+                'discount' => (float) $discountAmount,
+                'discount_type' => $discountType,
+                'discount_value' => (float) $discountValue,
                 'biaya_pengiriman' => (float) $data->biaya_pengiriman,
                 'sub_total' => (float) $totalAmount,
                 'ppn' => (float) $ppn,
@@ -751,6 +783,8 @@ class TransactionController extends BaseController
             MAX(CASE WHEN tm.key = 'refunded_amount' THEN tm.value END) AS refunded_amount,
             MAX(CASE WHEN tm.key = 'source' THEN tm.value END) AS source,
             MAX(CASE WHEN tm.key = 'discount' THEN tm.value END) AS discount,
+            MAX(CASE WHEN tm.key = 'discount_type' THEN tm.value END) AS discount_type,
+            MAX(CASE WHEN tm.key = 'discount_value' THEN tm.value END) AS discount_value,
             MAX(CASE WHEN tm.key = 'jatuh_tempo' THEN tm.value END) AS jatuh_tempo,
             MAX(CASE WHEN tm.key = 'alamat' THEN tm.value END) AS alamat,
             MAX(CASE WHEN tm.key = 'pengiriman' THEN tm.value END) AS pengiriman,
@@ -2446,15 +2480,31 @@ class TransactionController extends BaseController
 
             // 6. Calculate new totals dengan free_ongkir
             $freeOngkir = isset($data->free_ongkir) ? (bool) $data->free_ongkir : false;
+            
+             // Calculate discount based on type
+             $discount_type = $data->discount_type ?? 'fixed';
+             $discount_value = $data->discount_value ?? 0;
+
+             // Calculate total items first
+             $items_total = array_reduce($data->item, function ($carry, $item) {
+                 return $carry + ($item->jumlah * $item->harga_jual);
+             }, 0);
+ 
+             if ($discount_type === 'percentage') {
+                 $discount_nominal = ($items_total * $discount_value) / 100;
+             } else {
+                 $discount_nominal = $discount_value;
+             }
+
             [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir] = $this->calculateTransactionTotals(
                 $data->item,
-                $data->discount,
+                $discount_nominal,
                 $data->ppn,
                 $data->biaya_pengiriman,
                 $freeOngkir
             );
 
-            $discount_rate = ($totalAmount > 0) ? ($data->discount / $totalAmount) : 0;
+            $discount_rate = ($totalAmount > 0) ? ($discount_nominal / $totalAmount) : 0;
 
             // 7. Handle stock adjustment dengan logging
             $stockChanges = $this->handleStockAdjustment(
@@ -2523,7 +2573,9 @@ class TransactionController extends BaseController
                 'ppn' => $data->ppn,
                 'ppn_value' => $ppn_value,
                 'totalAmount' => $totalAmount,
-                'discount' => $data->discount,
+                'discount' => $discount_nominal,
+                'discount_value' => $discount_value,
+                'discount_type' => $discount_type,
                 'discount_rate' => $discount_rate,
                 'jatuh_tempo' => $data->jatuh_tempo,
                 'source' => $data->source,
