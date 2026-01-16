@@ -2485,22 +2485,12 @@ class TransactionController extends BaseController
              $discount_type = $data->discount_type ?? 'fixed';
              $discount_value = $data->discount_value ?? 0;
 
-             // Calculate total items first
-             $items_total = array_reduce($data->item, function ($carry, $item) {
-                 return $carry + ($item->jumlah * $item->harga_jual);
-             }, 0);
- 
-             if ($discount_type === 'percentage') {
-                 $discount_nominal = ($items_total * $discount_value) / 100;
-             } else {
-                 $discount_nominal = $discount_value;
-             }
-
-            [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir] = $this->calculateTransactionTotals(
+            [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir, $discount_nominal] = $this->calculateTransactionTotals(
                 $data->item,
-                $discount_nominal,
-                $data->ppn,
-                $data->biaya_pengiriman,
+                $discount_value,
+                $discount_type,
+                $data->ppn ?? 0,
+                $data->biaya_pengiriman ?? 0,
                 $freeOngkir
             );
 
