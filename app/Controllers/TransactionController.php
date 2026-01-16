@@ -192,8 +192,7 @@ class TransactionController extends BaseController
             'customer_phone',
             'jatuh_tempo',
             'refunded_amount',
-            'complaint',
-            'discount_percentage'
+            'complaint'
         ];
 
         $metaData = [
@@ -214,7 +213,6 @@ class TransactionController extends BaseController
             'jatuh_tempo' => $data['jatuh_tempo'] ?? null,
             'refunded_amount' => $data['refunded_amount'] ?? null,
             'complaint' => $data['complaint'] ?? null,
-            'discount_percentage' => $data['discount_percentage'] ?? 0,
         ];
 
         // Filter null values
@@ -355,7 +353,6 @@ class TransactionController extends BaseController
                 'ppn_value' => $ppn_value,
                 'totalAmount' => $totalAmount,
                 'discount' => $data->discount,
-                'discount_percentage' => $data->discount_percentage ?? 0,
                 'discount_rate' => $discount_rate,
                 'source' => $data->source,
                 'customer_id' => $customerId,
@@ -754,7 +751,6 @@ class TransactionController extends BaseController
             MAX(CASE WHEN tm.key = 'refunded_amount' THEN tm.value END) AS refunded_amount,
             MAX(CASE WHEN tm.key = 'source' THEN tm.value END) AS source,
             MAX(CASE WHEN tm.key = 'discount' THEN tm.value END) AS discount,
-            MAX(CASE WHEN tm.key = 'discount_percentage' THEN tm.value END) AS discount_percentage,
             MAX(CASE WHEN tm.key = 'jatuh_tempo' THEN tm.value END) AS jatuh_tempo,
             MAX(CASE WHEN tm.key = 'alamat' THEN tm.value END) AS alamat,
             MAX(CASE WHEN tm.key = 'pengiriman' THEN tm.value END) AS pengiriman,
@@ -2528,7 +2524,6 @@ class TransactionController extends BaseController
                 'ppn_value' => $ppn_value,
                 'totalAmount' => $totalAmount,
                 'discount' => $data->discount,
-                'discount_percentage' => $data->discount_percentage ?? 0,
                 'discount_rate' => $discount_rate,
                 'jatuh_tempo' => $data->jatuh_tempo,
                 'source' => $data->source,
