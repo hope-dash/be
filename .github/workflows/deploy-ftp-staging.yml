@@ -1,0 +1,31 @@
+name: Deploy to FTP (Main Branch Only)
+
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  ftp-deploy:
+    runs-on: ubuntu-latest
+    name: 🚀 Deploy app and composer files to FTP
+
+    steps:
+      - name: 🧩 Checkout repository
+        uses: actions/checkout@v3
+
+      - name: 📂 Deploy selected files to FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME_STG }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: "./"
+          server-dir: "/public_html/"
+          # hanya upload folder app dan file composer
+          include: |
+            app/**
+            composer.json
+            composer.lock
+          dry-run: false
+          log-level: minimal
