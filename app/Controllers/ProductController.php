@@ -70,8 +70,8 @@ class ProductController extends ResourceController
 
         $kodeAwal = $model['kode_awal'];
 
-        $lastProduct = $this->productModel->withDeleted()->selectMax('id')->first();
-        $nextId = isset($lastProduct['id']) ? (int) $lastProduct['id'] + 1 : 1;
+        $lastProduct = $this->productModel->withDeleted()->orderBy('id', 'DESC')->first();
+        $nextId = $lastProduct ? (int) $lastProduct['id'] + 1 : 1;
         $productId = $kodeAwal . str_pad($nextId, 3, '0', STR_PAD_LEFT);
 
         $productData = [
