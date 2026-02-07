@@ -8,5 +8,8 @@ class TransactionMetaModel extends Model
 {
     protected $table = 'transaction_meta';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['transaction_id', 'key', 'value'];
+    protected $allowedFields = [
+        'transaction_id', 'key', 'value',
+        'created_at', 'updated_at'
+    ];
 }

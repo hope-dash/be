@@ -127,6 +127,41 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     });
 
     $routes->resource('suplier', ['controller' => 'SuplierController']);
+
+    // V2 Transaction Routes
+    $routes->group('v2', function($routes) {
+        $routes->post('transaction', 'TransactionControllerV2::create');
+        $routes->post('transaction/(:num)/payment', 'TransactionControllerV2::addPayment/$1');
+        $routes->post('transaction/(:num)/cancel', 'TransactionControllerV2::cancel/$1');
+        $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
+        $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
+        
+        // Expense Routes
+        $routes->get('expense/accounts', 'ExpenseController::accounts');
+        $routes->post('expense', 'ExpenseController::create');
+
+        // Purchase V2 (Overriding/Alternative to old Pembelian)
+        $routes->post('purchase', 'PembelianControllerV2::create');
+        $routes->post('purchase/(:num)/execute', 'PembelianControllerV2::execute/$1');
+
+        // Accounting Reports
+        $routes->get('report/journal', 'AccountingReportController::journal');
+        $routes->get('report/ledger', 'AccountingReportController::ledger');
+        $routes->get('report/income-statement', 'AccountingReportController::incomeStatement');
+        $routes->get('report/balance-sheet', 'AccountingReportController::balanceSheet');
+        
+        // Closing
+        $routes->get('closing/preview', 'ClosingControllerV2::preview');
+        $routes->post('closing/process', 'ClosingControllerV2::process');
+        
+        // Finance (Transfer & Profit)
+        $routes->post('finance/transfer', 'FinanceController::transfer');
+        $routes->post('finance/distribute-profit', 'FinanceController::distributeProfit');
+        
+        // Inventory (Stock Transfer)
+        $routes->post('inventory/transfer', 'InventoryController::transfer');
+    });
+
 });
 
 

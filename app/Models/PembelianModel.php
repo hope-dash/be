@@ -19,7 +19,8 @@ class PembelianModel extends Model
         'updated_at',
         'deleted_at',
         'created_by',
-        'id_toko'
+        'id_toko',
+        'bukti_foto'
     ];
 
     protected $useTimestamps = true;
