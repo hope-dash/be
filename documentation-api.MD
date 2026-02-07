@@ -787,3 +787,74 @@ Increment usage count setelah voucher digunakan di transaksi.
 2. Customer lihat produk → harga sudah include discount 10%
 3. Customer checkout → input voucher code "NEWYEAR2026" → dapat tambahan diskon
 4. Total discount = Customer Discount + Voucher Discount
+
+
+---
+
+## 11. WILAYAH INDONESIA API
+
+API untuk mendapatkan data provinsi dan kota/kabupaten di Indonesia.
+
+### A. Get All Provinces
+
+Mendapatkan daftar semua provinsi di Indonesia.
+
+- **URL**: `GET /api/wilayah/provinces`
+- **Auth**: No Auth Required
+
+**Response**:
+```json
+{
+  "status": 200,
+  "data": [
+    {
+      "id": "31",
+      "name": "DKI Jakarta"
+    },
+    {
+      "id": "32",
+      "name": "Jawa Barat"
+    }
+  ],
+  "total_data": 34
+}
+```
+
+### B. Get Cities by Province
+
+Mendapatkan daftar kota/kabupaten berdasarkan ID provinsi.
+
+- **URL**: `GET /api/wilayah/cities/{province_id}`
+- **Auth**: No Auth Required
+
+**Example**: `GET /api/wilayah/cities/31` (DKI Jakarta)
+
+**Response**:
+```json
+{
+  "status": 200,
+  "data": [
+    {
+      "id": "3171",
+      "name": "Jakarta Selatan"
+    },
+    {
+      "id": "3172",
+      "name": "Jakarta Timur"
+    }
+  ],
+  "total_data": 6
+}
+```
+
+### C. Search Cities
+
+Mencari kota/kabupaten berdasarkan nama.
+
+- **URL**: `GET /api/wilayah/cities/search?q={search_term}&province_id={province_id}`
+- **Auth**: No Auth Required
+
+**Note**: Semua endpoint wilayah adalah public (tidak perlu authentication).
+
+---
+

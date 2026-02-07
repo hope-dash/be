@@ -18,7 +18,7 @@ if (!function_exists('send_email')) {
             'SMTPHost' => env('email.SMTPHost'),
             'SMTPUser' => env('email.SMTPUser'),
             'SMTPPass' => env('email.SMTPPass'),
-            'SMTPPort' => env('email.SMTPPort'),
+            'SMTPPort' => (int) env('email.SMTPPort'),
             'SMTPCrypto' => env('email.SMTPCrypto'),
             'mailType' => 'html',
             'charset' => 'utf-8',
@@ -157,7 +157,7 @@ if (!function_exists('send_registration_email')) {
                 <p><strong>Password:</strong> ' . htmlspecialchars($password) . '</p>
             </div>
             
-            <p><strong>Penting:</strong> Silakan simpan informasi login Anda dengan aman. Kami merekomendasikan untuk mengganti password Anda setelah login pertama kali.</p>
+            <p><strong>Penting:</strong> Silakan simpan informasi login Anda dengan aman. Kami menyimpan password Anda dalam bentuk encryption, sehingga password hanya diketahui oleh anda.</p>
             
             <p>Untuk mengaktifkan akun Anda, silakan verifikasi email Anda dengan mengklik tombol di bawah ini:</p>
             

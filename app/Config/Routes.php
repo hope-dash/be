@@ -174,25 +174,35 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->get('voucher', 'VoucherController::index');
         $routes->put('voucher/(:num)', 'VoucherController::update/$1');
         $routes->delete('voucher/(:num)', 'VoucherController::delete/$1');
-        
-        // Customer V2 (Public - No Auth Required)
-        $routes->post('customer/register', 'CustomerControllerV2::register');
-        $routes->post('customer/verify-email', 'CustomerControllerV2::verifyEmail');
-        $routes->post('customer/login', 'CustomerControllerV2::login');
-        $routes->post('customer/voucher/validate', 'CustomerControllerV2::validateVoucher');
-    });
-    
-    // Customer Email Verification Page (Public - GET from email link)
-    $routes->get('customer/verify', 'CustomerControllerV2::verifyEmailPage');
-    
-    // Customer V2 (Protected - Requires Customer Auth)
-    $routes->group('v2/customer', ['filter' => 'customerJwtAuth'], function($routes) {
-        $routes->get('profile', 'CustomerControllerV2::getProfile');
-        $routes->put('profile', 'CustomerControllerV2::updateProfile');
-        $routes->get('products', 'CustomerControllerV2::getProducts');
-        $routes->post('voucher/(:num)/apply', 'CustomerControllerV2::applyVoucher/$1');
     });
 
+});
+
+// Customer V2 Public Routes (No Auth Required) - OUTSIDE jwtAuth group
+$routes->group('api/v2/customer', function($routes) {
+    $routes->post('register', 'CustomerControllerV2::register');
+    $routes->post('verify-email', 'CustomerControllerV2::verifyEmail');
+    $routes->post('login', 'CustomerControllerV2::login');
+    $routes->post('voucher/validate', 'CustomerControllerV2::validateVoucher');
+});
+
+// Customer Email Verification Page (Public - GET from email link)
+$routes->get('api/customer/verify', 'CustomerControllerV2::verifyEmailPage');
+
+// Customer V2 Protected Routes (Requires Customer Auth)
+$routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function($routes) {
+    $routes->get('profile', 'CustomerControllerV2::getProfile');
+    $routes->put('profile', 'CustomerControllerV2::updateProfile');
+    $routes->get('products', 'CustomerControllerV2::getProducts');
+    $routes->post('voucher/(:num)/apply', 'CustomerControllerV2::applyVoucher/$1');
+});
+
+// Wilayah Indonesia API (Public - No Auth Required)
+$routes->group('api/wilayah', function($routes) {
+    $routes->get('provinces', 'WilayahController::getProvinces');
+    $routes->get('provinces/search', 'WilayahController::searchProvinces');
+    $routes->get('cities/(:segment)', 'WilayahController::getCitiesByProvince/$1');
+    $routes->get('cities/search', 'WilayahController::searchCities');
 });
 
 
