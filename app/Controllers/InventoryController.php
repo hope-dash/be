@@ -129,6 +129,18 @@ class InventoryController extends ResourceController
             $j2 = $this->createJournal('TRANSFER_IN', $refId, "Inventory Move In <- $fromToko", $date, $toToko);
             $this->addJournalItem($j2, '1004', $totalValue, 0); // Dr Inventory
             $this->addJournalItem($j2, '1099', 0, $totalValue); // Cr Transit
+
+            // 3. Handle Shipping Cost (Ongkos Kirim)
+            if (isset($data->ongkos_kirim) && $data->ongkos_kirim > 0) {
+                $ongkir = $data->ongkos_kirim;
+                $paymentMethod = $data->payment_method ?? 'CASH';
+                $creditAccount = ($paymentMethod === 'BANK') ? '1002' : '1001'; // Default CASH
+                
+                // Expense Journal for Source Store
+                $j3 = $this->createJournal('EXPENSE', $refId, "Biaya Kirim Transfer Stock ($paymentMethod)", $date, $fromToko);
+                $this->addJournalItem($j3, '6001', $ongkir, 0); // Dr Expense (Biaya Kirim/Operasional)
+                $this->addJournalItem($j3, $creditAccount, 0, $ongkir); // Cr Cash/Bank
+            }
             
             $this->db->transComplete();
             

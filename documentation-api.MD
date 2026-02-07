@@ -144,6 +144,7 @@ Mencatat pembelian ke supplier. Stock bertambah. Update Harga Modal (Average).
 ### B. Stock Transfer (Antar Toko)
 
 Memindahkan stok fisik dan nilai modal antar toko.
+Jika ada **ongkos kirim**, biaya ini ditanggung oleh Toko Asal (`source_toko_id`) dan dicatat sebagai Pengeluaran (Expense).
 
 - **URL**: `POST /v2/inventory/transfer`
 - **Body**:
@@ -152,7 +153,9 @@ Memindahkan stok fisik dan nilai modal antar toko.
 {
   "source_toko_id": 1,
   "target_toko_id": 2,
-  "items": [{ "kode_barang": "A001", "qty": 10 }]
+  "items": [{ "kode_barang": "A001", "qty": 10 }],
+  "ongkos_kirim": 15000, // Optional: Biaya kirim antar toko
+  "payment_method": "CASH" // Sumber dana bayar ongkir (dari Toko 1)
 }
 ```
 
