@@ -1289,6 +1289,210 @@ class ProductController extends ResourceController
         }
     }
 
+    /**
+     * V2: Get product stock for pricelist with customer discount
+     * Uses customer JWT token to apply discount automatically
+     * 
+     * @return Response
+     */
+    public function getProductStockForPricelistV2()
+    {
+        try {
+            // === Ambil parameter ===
+            $sortBy = $this->request->getGet('sortBy') ?? 'product.id_barang';
+            $sortMethod = in_array(strtolower($this->request->getGet('sortMethod')), ['asc', 'desc'])
+                ? strtolower($this->request->getGet('sortMethod'))
+                : 'asc';
+            $namaProduct = trim($this->request->getGet('namaProduct') ?? '');
+            $id_toko = trim($this->request->getGet('id_toko') ?? '');
+            $seri = trim($this->request->getGet('seri') ?? '');
+            $model = trim($this->request->getGet('model') ?? '');
+            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+            $offset = ($page - 1) * $limit;
+
+            // === Get customer discount from JWT token (if authenticated) ===
+            $customer = $this->request->customer ?? null;
+            $discountType = null;
+            $discountValue = 0;
+
+            if ($customer) {
+                $discountType = $customer['discount_type'] ?? null;
+                $discountValue = (float) ($customer['discount_value'] ?? 0);
+            }
+
+            // Cache key (include customer discount in cache key)
+            $cacheKeyData = compact('sortBy', 'sortMethod', 'namaProduct', 'id_toko', 'seri', 'model', 'limit', 'page', 'discountType', 'discountValue');
+            $cacheKey = 'getProductStockForPricelistV2_' . md5(json_encode($cacheKeyData));
+            $cache = \Config\Services::cache();
+
+            if ($cached = $cache->get($cacheKey)) {
+                return $this->jsonResponse->multiResp('', $cached['data'], $cached['total_data'], $cached['total_page'], $page, $limit, 200);
+            }
+
+            // === LANGKAH 1: Ambil produk ===
+            $productBuilder = $this->productModel
+                ->select([
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
+                    'product.harga_modal',
+                    'product.harga_jual',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
+                    'model_barang.nama_model as nama_model',
+                    'seri.seri as seri',
+                ])
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+
+            // Filter teks
+            if (!empty($namaProduct)) {
+                $productBuilder->groupStart()
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->orLike("product.id_barang", $namaProduct)
+                    ->groupEnd();
+            }
+            if (!empty($seri))
+                $productBuilder->where('product.id_seri_barang', $seri);
+            if (!empty($model))
+                $productBuilder->where('product.id_model_barang', $model);
+
+            // Filter berdasarkan stock & toko
+            if (!empty($id_toko) && is_numeric($id_toko)) {
+                $productBuilder->whereIn('product.id_barang', function ($sub) use ($id_toko) {
+                    return $sub->select('id_barang')
+                        ->from('stock')
+                        ->where('id_toko', (int) $id_toko)
+                        ->where('stock >', 0);
+                });
+            } else {
+                $productBuilder->whereIn('product.id_barang', function ($sub) {
+                    return $sub->select('id_barang')
+                        ->from('stock')
+                        ->where('stock >', 0);
+                });
+            }
+
+            // Hitung & ambil data
+            $total_data = $productBuilder->countAllResults(false);
+            $total_page = $limit > 0 ? ceil($total_data / $limit) : 0;
+
+            if ($total_data === 0) {
+                $cache->save($cacheKey, ['data' => [], 'total_data' => 0, 'total_page' => 0], 300);
+                return $this->jsonResponse->multiResp('', [], 0, 0, $page, $limit, 200);
+            }
+
+            $products = $productBuilder
+                ->orderBy($sortBy, $sortMethod)
+                ->limit($limit, $offset)
+                ->get()
+                ->getResultArray();
+
+            // === LANGKAH 2: Ambil stock ===
+            $productCodes = array_unique(array_column($products, 'id_barang'));
+            $stockByProduct = [];
+            $tokoMap = [];
+
+            if (!empty($productCodes)) {
+                $stockQuery = $this->db->table('stock')
+                    ->select('id_barang, id_toko, stock, barang_cacat, dropship')
+                    ->whereIn('id_barang', $productCodes)
+                    ->where('stock >', 0);
+
+                if (!empty($id_toko) && is_numeric($id_toko)) {
+                    $stockQuery->where('id_toko', (int) $id_toko);
+                }
+
+                $allStocks = $stockQuery->get()->getResultArray();
+
+                $tokoIds = array_unique(array_column($allStocks, 'id_toko'));
+                if (!empty($tokoIds)) {
+                    $tokoList = $this->db->table('toko')
+                        ->select('id, toko_name')
+                        ->whereIn('id', $tokoIds)
+                        ->get()
+                        ->getResultArray();
+                    $tokoMap = array_column($tokoList, 'toko_name', 'id');
+                }
+
+                foreach ($allStocks as $s) {
+                    $stockByProduct[$s['id_barang']][] = [
+                        'stock' => (int) $s['stock'],
+                        'barang_cacat' => (int) $s['barang_cacat'],
+                        'toko_name' => $tokoMap[$s['id_toko']] ?? 'Toko Tidak Diketahui',
+                        'dropship' => in_array($s['dropship'], ['1', 1, true], true),
+                    ];
+                }
+            }
+
+            // === LANGKAH 3: Ambil images ===
+            $productIds = array_unique(array_column($products, 'id'));
+            $imageMap = [];
+            if (!empty($productIds)) {
+                $images = $this->imageModel
+                    ->select('kode, url')
+                    ->where('type', 'product')
+                    ->whereIn('kode', $productIds)
+                    ->findAll();
+                foreach ($images as $img) {
+                    $imageMap[$img['kode']][] = $img['url'];
+                }
+            }
+
+            // === LANGKAH 4: Format hasil dengan discount ===
+            $result = [];
+            foreach ($products as $p) {
+                $namaLengkap = trim(implode(' ', array_filter([
+                    $p['nama_barang'],
+                    $p['nama_model'] ?? '',
+                    $p['seri'] ?? ''
+                ])));
+
+                // Harga jual original
+                $hargaJualOriginal = (float) $p['harga_jual'];
+                $hargaJualFinal = $hargaJualOriginal;
+                $discountAmount = 0;
+
+                // Apply discount jika customer punya discount
+                if ($discountType && $discountValue > 0) {
+                    if ($discountType === 'PERCENTAGE') {
+                        // Discount percentage
+                        $discountAmount = $hargaJualOriginal * ($discountValue / 100);
+                        $hargaJualFinal = $hargaJualOriginal - $discountAmount;
+                    } elseif ($discountType === 'FIXED') {
+                        // Discount fixed amount
+                        $discountAmount = $discountValue;
+                        $hargaJualFinal = max(0, $hargaJualOriginal - $discountValue);
+                    }
+                }
+
+                $result[] = [
+                    'id' => $p['id'],
+                    'kode_barang' => $p['id_barang'],
+                    'nama_barang' => $p['nama_barang'],
+                    'nama_lengkap_barang' => $namaLengkap,
+                    'nama_model' => $p['nama_model'] ?? null,
+                    'seri' => $p['seri'] ?? null,
+                    'harga_jual' => (int) round($hargaJualFinal), // Harga setelah discount
+                    'stock' => $stockByProduct[$p['id_barang']] ?? [],
+                    'images' => $imageMap[$p['id']] ?? [],
+                ];
+            }
+
+            $cache->save($cacheKey, [
+                'data' => $result,
+                'total_data' => $total_data,
+                'total_page' => $total_page,
+            ], 300);
+
+            return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+        } catch (\Exception $e) {
+            log_message('error', '[getProductStockForPricelistV2] Error: ' . $e->getMessage());
+            return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data.', 500);
+        }
+    }
+
     public function getProductStockSummary()
     {
         try {

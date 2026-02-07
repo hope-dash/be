@@ -858,3 +858,83 @@ Mencari kota/kabupaten berdasarkan nama.
 
 ---
 
+
+
+---
+
+## 12. PRODUCT PRICELIST V2 (WITH CUSTOMER DISCOUNT)
+
+Endpoint untuk mendapatkan daftar produk dengan harga yang sudah include discount customer.
+
+### Get Product Pricelist with Discount
+
+Mendapatkan daftar produk dengan harga yang sudah dikurangi discount customer (jika ada).
+
+**Requires**: Customer JWT Token
+
+- **URL**: `POST /api/v2/customer/pricelist`
+- **Headers**: `Authorization: Bearer {customer_token}`
+- **Body** (optional query params):
+
+```json
+{
+  "namaProduct": "iPhone",
+  "id_toko": "1",
+  "seri": "2",
+  "model": "3",
+  "sortBy": "product.nama_barang",
+  "sortMethod": "asc",
+  "page": 1,
+  "limit": 10
+}
+```
+
+**Response**:
+```json
+{
+  "status": 200,
+  "data": [
+    {
+      "id": 1,
+      "kode_barang": "IPH001",
+      "nama_barang": "iPhone 15 Pro Max",
+      "nama_lengkap_barang": "iPhone 15 Pro Max 256GB Black",
+      "nama_model": "256GB",
+      "seri": "Black",
+      "harga_jual": 18000000,
+      "stock": [
+        {
+          "stock": 5,
+          "barang_cacat": 0,
+          "toko_name": "Toko Pusat",
+          "dropship": false
+        }
+      ],
+      "images": [
+        "https://example.com/image1.jpg"
+      ]
+    }
+  ],
+  "total_data": 100,
+  "total_page": 10,
+  "current_page": 1,
+  "limit": 10
+}
+```
+
+**Note**:
+- Endpoint ini **WAJIB** menggunakan customer JWT token
+- Harga yang ditampilkan (`harga_jual`) sudah otomatis dikurangi discount customer
+- Jika customer punya `discount_type = PERCENTAGE` dan `discount_value = 10`, maka harga akan dikurangi 10%
+- Jika customer punya `discount_type = FIXED` dan `discount_value = 100000`, maka harga akan dikurangi Rp 100.000
+- Jika customer tidak punya discount, harga akan tampil normal (harga jual original)
+- Response format sama persis dengan endpoint `/api/pricelist` yang lama
+- Tidak ada field `harga_jual_toko` atau `harga_special` - hanya fokus pada `harga_jual` yang sudah include discount
+
+**Example Calculation**:
+- Harga Original: Rp 20.000.000
+- Customer Discount: PERCENTAGE 10%
+- Harga Final: Rp 18.000.000 (20.000.000 - 2.000.000)
+
+---
+

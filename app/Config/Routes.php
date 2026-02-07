@@ -194,6 +194,7 @@ $routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function($rou
     $routes->get('profile', 'CustomerControllerV2::getProfile');
     $routes->put('profile', 'CustomerControllerV2::updateProfile');
     $routes->get('products', 'CustomerControllerV2::getProducts');
+    $routes->post('pricelist', 'ProductController::getProductStockForPricelistV2');
     $routes->post('voucher/(:num)/apply', 'CustomerControllerV2::applyVoucher/$1');
 });
 
