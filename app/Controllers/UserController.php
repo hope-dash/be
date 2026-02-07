@@ -163,6 +163,7 @@ class UserController extends ResourceController
                 "username" => $dataArray['username'],
                 "email" => $dataArray['email'],
                 "access" => json_encode($dataArray['access']),
+                "permissions" => isset($dataArray['permissions']) ? json_encode($dataArray['permissions']) : null,
                 "updated_by" => $token['user_id'],
             ];
 
@@ -212,11 +213,14 @@ class UserController extends ResourceController
     {
         try {
 
-            $query = $this->model->select('user_id, username, name, email, access, created_at, updated_at')->where("user_id", $id)->first();
+            $query = $this->model->select('user_id, username, name, email, access, permissions, created_at, updated_at')->where("user_id", $id)->first();
             if ($query) {
 
                 if (!empty($query['access'])) {
                     $query['access'] = json_decode($query['access'], true);
+                }
+                if (!empty($query['permissions'])) {
+                    $query['permissions'] = json_decode($query['permissions'], true);
                 }
 
                 return $this->jsonResponse->oneResp("", $query, 200);
@@ -235,6 +239,7 @@ class UserController extends ResourceController
         $user = $this->request->user;
 
         $accessArray = json_decode($user['access'], true);
+        $permissions = !empty($user['permissions']) ? json_decode($user['permissions'], true) : [];
 
         $tokoDetails = [];
 
@@ -255,6 +260,7 @@ class UserController extends ResourceController
             'name' => $user['name'],
             'email' => $user['email'],
             'access' => $accessArray,
+            'permissions' => $permissions,
             'toko' => $tokoDetails,
         ];
 

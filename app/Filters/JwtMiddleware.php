@@ -48,7 +48,7 @@ class JwtMiddleware implements FilterInterface
             
             // Cari user di database
             $userModel = new UserModel();
-            $user = $userModel->select('user_id, name,name, email, access')->find($userId);
+            $user = $userModel->select('user_id, name, email, access, permissions')->find($userId);
 
             if (!$user) {
                 return service('response')->setJSON([
