@@ -91,6 +91,132 @@ Batalkan transaksi.
 
 ---
 
+### C. Transaction Status Lifecycle
+
+**Status Transaksi** dan **Status Pengiriman** adalah dua hal yang berbeda.
+
+#### Status Transaksi (Payment Status):
+
+| Status           | Deskripsi                                        | Lifecycle                                                                 |
+| ---------------- | ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `UNPAID`         | Belum ada pembayaran sama sekali                 | Status awal saat transaksi dibuat                                         |
+| `PARTIALLY_PAID` | Sudah bayar DP/sebagian                          | Dari `UNPAID` → `PARTIALLY_PAID` (saat add payment pertama)               |
+| `PAID`           | Lunas                                            | Dari `UNPAID`/`PARTIALLY_PAID` → `PAID` (saat total payment = amount)     |
+| `CANCEL`         | Dibatalkan (belum bayar)                         | Dari `UNPAID` → `CANCEL` (via cancel endpoint)                            |
+| `NEED_REFUND`    | Butuh refund (sudah bayar tapi dibatalkan/retur) | Dari `PAID`/`PARTIALLY_PAID` → `NEED_REFUND` (via cancel/return endpoint) |
+
+#### Contoh Lifecycle:
+
+**Scenario 1: Normal Flow (DP → Lunas)**
+
+```
+UNPAID → PARTIALLY_PAID (add payment 50%) → PAID (add payment 50%)
+```
+
+**Scenario 2: Langsung Lunas**
+
+```
+UNPAID → PAID (add payment 100%)
+```
+
+**Scenario 3: Cancel sebelum bayar**
+
+```
+UNPAID → CANCEL (via cancel endpoint)
+```
+
+**Scenario 4: Cancel setelah bayar**
+
+```
+PAID → NEED_REFUND (via cancel endpoint, refund_needed disimpan di meta)
+```
+
+**Scenario 5: Retur dengan refund**
+
+```
+PAID → NEED_REFUND (via return endpoint dengan refund_money: true)
+```
+
+**Status Pengiriman** (Shipping Status) disimpan di `transaction_meta` dengan key seperti:
+
+- `resi` (nomor resi pengiriman)
+- `shipping_status` (e.g., "PENDING", "SHIPPED", "DELIVERED")
+- `courier` (e.g., "JNE", "J&T")
+
+### D. List Transactions by Status
+
+Mendapatkan daftar transaksi berdasarkan status pembayaran.
+
+- **URL**: `GET /v2/transaction/list?status={status}&id_toko={id_toko}&page={page}&limit={limit}`
+- **Query Parameters**:
+  - `status` (optional): Filter by payment status (PAID, PARTIALLY_PAID, UNPAID, CANCEL, NEED_REFUND)
+  - `id_toko` (optional): Filter by store ID
+  - `page` (optional): Page number (default: 1)
+  - `limit` (optional): Items per page (default: 20)
+
+- **Response**:
+
+```json
+{
+  "status": 200,
+  "message": "",
+  "data": [
+    {
+      "id": 1,
+      "invoice": "INV-001",
+      "status": "PAID",
+      "amount": 1000000,
+      "total_payment": 1000000,
+      "meta": {
+        "resi": "JNE123456789",
+        "shipping_status": "SHIPPED",
+        "courier": "JNE"
+      }
+    }
+  ],
+  "pagination": {
+    "total_data": 50,
+    "total_page": 3,
+    "current_page": 1,
+    "per_page": 20
+  }
+}
+```
+
+### E. Add Transaction Meta
+
+Menambahkan metadata ke transaksi (e.g., nomor resi, status pengiriman, catatan).
+
+- **URL**: `POST /v2/transaction/{id}/meta`
+- **Body**:
+
+```json
+{
+  "key": "resi",
+  "value": "JNE123456789"
+}
+```
+
+**Contoh penggunaan lain:**
+
+```json
+{
+  "key": "shipping_status",
+  "value": "SHIPPED"
+}
+```
+
+```json
+{
+  "key": "courier",
+  "value": "JNE"
+}
+```
+
+**Note**: Jika key sudah ada, value akan di-update. Jika belum ada, akan dibuat baru.
+
+---
+
 ## 3. PAYMENTS & REFUNDS
 
 ### A. Add Payment (Penerimaan Pembayaran)

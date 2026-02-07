@@ -690,4 +690,109 @@ class TransactionControllerV2 extends ResourceController
             'description' => $reason
         ]);
     }
+
+    // Get Transactions by Status
+    public function getTransactionsByStatus()
+    {
+        try {
+            $status = $this->request->getGet('status'); // e.g., PAID, PARTIALLY_PAID
+            $idToko = $this->request->getGet('id_toko');
+            $limit = (int) $this->request->getGet('limit') ?: 20;
+            $page = (int) $this->request->getGet('page') ?: 1;
+            $offset = ($page - 1) * $limit;
+
+            $builder = $this->transactionModel;
+
+            if (!empty($status)) {
+                $builder = $builder->where('status', $status);
+            }
+
+            if (!empty($idToko)) {
+                $builder = $builder->where('id_toko', $idToko);
+            }
+
+            $totalData = $builder->countAllResults(false);
+            $totalPage = ceil($totalData / $limit);
+
+            $transactions = $builder
+                ->orderBy('created_at', 'DESC')
+                ->limit($limit, $offset)
+                ->findAll();
+
+            // Enrich with meta data
+            foreach ($transactions as &$trx) {
+                $meta = $this->transactionMetaModel
+                    ->where('transaction_id', $trx['id'])
+                    ->findAll();
+                
+                $trx['meta'] = [];
+                foreach ($meta as $m) {
+                    $trx['meta'][$m['key']] = $m['value'];
+                }
+            }
+
+            return $this->jsonResponse->multiResp('', $transactions, $totalData, $totalPage, $page, $limit, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // Add Transaction Meta
+    public function addTransactionMeta($id = null)
+    {
+        try {
+            $data = $this->request->getJSON();
+            $userId = $this->request->user['user_id'] ?? 0;
+
+            if (!$id) {
+                return $this->jsonResponse->error("Transaction ID required", 400);
+            }
+
+            $trx = $this->transactionModel->find($id);
+            if (!$trx) {
+                return $this->jsonResponse->error("Transaction not found", 404);
+            }
+
+            if (empty($data->key) || !isset($data->value)) {
+                return $this->jsonResponse->error("Key and value are required", 400);
+            }
+
+            // Check if meta key already exists
+            $existingMeta = $this->transactionMetaModel
+                ->where('transaction_id', $id)
+                ->where('key', $data->key)
+                ->first();
+
+            if ($existingMeta) {
+                // Update existing
+                $this->transactionMetaModel->update($existingMeta['id'], [
+                    'value' => $data->value
+                ]);
+            } else {
+                // Insert new
+                $this->transactionMetaModel->insert([
+                    'transaction_id' => $id,
+                    'key' => $data->key,
+                    'value' => $data->value
+                ]);
+            }
+
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'UPDATE_META',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Added/Updated transaction meta: {$data->key}",
+                'detail' => [
+                    'invoice' => $trx['invoice'],
+                    'key' => $data->key,
+                    'value' => $data->value
+                ]
+            ]);
+
+            return $this->jsonResponse->oneResp('Transaction meta updated successfully', [], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
 }

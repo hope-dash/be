@@ -164,6 +164,10 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         // Product V2
         $routes->post('product', 'ProductController::createProductV2');
         $routes->put('product/(:num)', 'ProductController::updateProductV2/$1');
+        
+        // Transaction List & Meta
+        $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');
+        $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
     });
 
 });
