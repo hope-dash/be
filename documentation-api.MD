@@ -7,7 +7,47 @@ Dokumentasi untuk sistem akuntansi V2 yang mencakup Transaksi Penjualan, Pembeli
 
 ---
 
-## 1. TRANSACTION (Penjualan / Invoice)
+## 1. PRODUCT (Master Data)
+
+### A. Create Product (V2)
+
+Membuat data master barang baru.
+**Note**:
+
+- Stock awal otomatis 0. Penambahan stok harus melalui modul **Purchase (Belanja)**.
+- **Kode Barang (`id_barang`)** otomatis dibentuk dari `kode_awal` (dari `id_model`) + Nomor Urut (3 digit). Contoh: Model `IPH` -> `IPH001`.
+
+- **URL**: `POST /v2/product`
+- **Body**:
+
+```json
+{
+  "id_model": 1, // Menentukan kode awal barang (e.g. IPHONE -> IPH)
+  "id_seri_barang": 5, // Optional: Seri barang (e.g. 15 Pro, 14, etc - relational)
+  "nama_barang": "iPhone 15 Pro Max 256GB",
+  "harga_modal": 18500000,
+  "harga_jual": 21000000,
+  "harga_jual_toko": 20500000, // Optional: Harga khusus toko/reseller
+  "suplier": ["Distributor A", "Toko B"], // Optional: Array of supplier names
+  "description": "Garansi Resmi iBox 1 Tahun",
+  "notes": "Hati-hati barang sensitif",
+  "stock": [
+    { "id_toko": 1 }, // Stock value ignored (set 0)
+    { "id_toko": 2 }
+  ]
+}
+```
+
+### B. Update Product (V2)
+
+Update detail barang.
+**Note**: Tidak bisa update stok dari sini. Hanya update info barang dan ketersediaan toko.
+
+- **URL**: `PUT /v2/product/{id}`
+
+---
+
+## 2. TRANSACTION (Penjualan / Invoice)
 
 ### A. Create Transaction (Invoice Baru)
 
@@ -43,7 +83,7 @@ Batalkan transaksi.
 
 ---
 
-## 2. PAYMENTS & REFUNDS
+## 3. PAYMENTS & REFUNDS
 
 ### A. Add Payment (Penerimaan Pembayaran)
 
@@ -92,7 +132,7 @@ Mengembalikan stock barang. Jika ada penggantian uang, set `refund_money: true`.
 
 ---
 
-## 3. INVENTORY (Stok)
+## 4. INVENTORY (Stok)
 
 ### A. Purchase (Pembelian Barang / Re-stock)
 
@@ -118,7 +158,7 @@ Memindahkan stok fisik dan nilai modal antar toko.
 
 ---
 
-## 4. EXPENSE (Pengeluaran Operasional)
+## 5. EXPENSE (Pengeluaran Operasional)
 
 Mencatat biaya-biaya (Listrik, Sewa, Gaji, dll).
 
@@ -137,7 +177,7 @@ Mencatat biaya-biaya (Listrik, Sewa, Gaji, dll).
 
 ---
 
-## 5. FINANCE (Keuangan & Cashflow)
+## 6. FINANCE (Keuangan & Cashflow)
 
 ### A. Transfer Dana (Setor Bank / Pindah Buku)
 
@@ -177,7 +217,7 @@ Digunakan untuk mencatat pengambilan keuntungan oleh pemilik (Prive/Dividen).
 
 ---
 
-## 6. ACCOUNTING REPORTS (Laporan Keuangan)
+## 7. ACCOUNTING REPORTS (Laporan Keuangan)
 
 Semua report mendukung filter `id_toko`. Jika kosong = Konsolidasi (Gabungan).
 
@@ -229,7 +269,7 @@ Posisi Harta, Hutang, dan Modal per tanggal tertentu.
 
 ---
 
-## 7. CLOSING (Tutup Buku Bulanan)
+## 8. CLOSING (Tutup Buku Bulanan)
 
 Proses memindahkan Laba/Rugi periode ini ke Modal (Retained Earnings).
 

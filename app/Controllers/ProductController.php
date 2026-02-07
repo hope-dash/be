@@ -103,7 +103,6 @@ class ProductController extends ResourceController
 
         $stockData = [];
         foreach ($data->stock as $toko) {
-
             if (isset($toko->id_toko) && $toko->id_toko !== "" && $toko->id_toko !== "0") {
                 $stockData[] = [
                     'id_barang' => $productId,
@@ -115,10 +114,90 @@ class ProductController extends ResourceController
             }
         }
 
+        if (!empty($stockData)) {
+            $this->stockModel->insertBatch($stockData);
+        }
+
+        return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
+    }
+    
+    // V2: Create Product with 0 Stock (Inventory Managed via Purchase)
+    public function createProductV2()
+    {
+        $token = $this->request->user;
+        $data = $this->request->getJSON();
+
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'id_model' => 'required',
+            'harga_modal' => 'required',
+            'harga_jual' => 'required',
+            'harga_jual_toko' => 'permit_empty',
+            'id_seri_barang' => 'permit_empty',
+            'suplier' => 'permit_empty',
+            'description' => 'permit_empty',
+            'dropship' => 'permit_empty',
+        ]);
+
+        if (!$this->validate($validation->getRules())) {
+            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+        }
+
+        $model = $this->modelBarangModel->find($data->id_model);
+        if (!$model) {
+            return $this->jsonResponse->error("Kategori barang tidak valid", 400);
+        }
+
+        $kodeAwal = $model['kode_awal'];
+
+        $lastProduct = $this->productModel->withDeleted()->orderBy('id', 'DESC')->first();
+        $nextId = $lastProduct ? (int) $lastProduct['id'] + 1 : 1;
+        $productId = $kodeAwal . str_pad($nextId, 3, '0', STR_PAD_LEFT);
+
+        $productData = [
+            'id_barang' => $productId,
+            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
+            'description' => isset($data->description) ? $data->description : NULL,
+            'id_seri_barang' => $data->id_seri_barang ?? null,
+            'harga_modal' => $data->harga_modal,
+            'harga_jual' => $data->harga_jual,
+            'harga_jual_toko' => $data->harga_jual_toko,
+            'suplier' => $data->suplier ?? null,
+            'id_model_barang' => $data->id_model,
+            'notes' => $data->notes ?? null,
+            // 'dropship' => removed
+            "created_by" => $token['user_id'],
+        ];
+
+        $this->productModel->insert($productData);
+        log_aktivitas([
+            'user_id' => $token['user_id'],
+            'action_type' => 'CREATE_V2',
+            'target_table' => 'product',
+            'target_id' => $nextId,
+            'description' => 'Membuat produk baru (V2)',
+            'detail' => [
+                'new' => $data
+            ],
+        ]);
+
+        $stockData = [];
+        // Initial Stock 0 for V2
+        foreach ($data->stock as $toko) {
+            if (isset($toko->id_toko) && $toko->id_toko !== "" && $toko->id_toko !== "0") {
+                $stockData[] = [
+                    'id_barang' => $productId,
+                    'id_toko' => $toko->id_toko,
+                    'stock' => 0, 
+                    'barang_cacat' => 0,
+                    // dropship removed
+                ];
+            }
+        }
+
         $this->stockModel->insertBatch($stockData);
 
         return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
-
     }
     public function uploadImages()
     {
@@ -334,7 +413,6 @@ class ProductController extends ResourceController
             'dropship' => 'permit_empty',
         ]);
 
-
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
@@ -378,12 +456,9 @@ class ProductController extends ResourceController
             ],
         ]);
 
-
-        // Update stock data
+        // Update stock data (V1 Logic: Allow Overwrite)
         foreach ($data->stock as $toko) {
-            // Cek jika stock ID tersedia dan valid
             if (isset($toko->id) && $this->stockModel->find($toko->id)) {
-                // Update stock lama
                 $stockData = [
                     'stock' => $toko->stock,
                     'barang_cacat' => $toko->barang_cacat,
@@ -391,7 +466,6 @@ class ProductController extends ResourceController
                 ];
                 $this->stockModel->update($toko->id, $stockData);
             } else {
-                // Cek apakah kombinasi id_barang dan id_toko sudah ada
                 $existingStock = $this->stockModel
                     ->where('id_barang', $id)
                     ->where('id_toko', $toko->id_toko)
@@ -409,6 +483,93 @@ class ProductController extends ResourceController
                     $stockData['id_barang'] = $data->id_barang;
                     $stockData['id_toko'] = $toko->id_toko;
                     $this->stockModel->insert($stockData);
+                }
+            }
+        }
+
+        return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id], 200);
+    }
+    
+    // V2: Update Product (No Stock Update, Only Dropship/Store Relation)
+    public function updateProductV2($id = null)
+    {
+        $token = $this->request->user;
+        $data = $this->request->getJSON();
+
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'id_model' => 'required',
+            'harga_modal' => 'required',
+            'harga_jual' => 'required',
+            'harga_jual_toko' => 'permit_empty',
+            'id_seri_barang' => 'permit_empty',
+            'suplier' => 'permit_empty',
+            'description' => 'permit_empty',
+            'dropship' => 'permit_empty',
+        ]);
+
+        if (!$this->validate($validation->getRules())) {
+            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+        }
+
+        $model = $this->modelBarangModel->find($data->id_model);
+        if (!$model) {
+            return $this->jsonResponse->error("Kategori barang tidak valid", 400);
+        }
+
+        $oldProductData = $this->getProductDetailArray($id);
+        if (!$oldProductData) {
+            return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+        }
+
+        $productData = [
+            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
+            'description' => isset($data->description) ? $data->description : NULL,
+            'id_seri_barang' => $data->id_seri_barang ?? null,
+            'harga_modal' => $data->harga_modal,
+            'harga_jual' => $data->harga_jual,
+            'harga_jual_toko' => $data->harga_jual_toko,
+            'suplier' => $data->suplier ?? null,
+            'id_model_barang' => $data->id_model,
+            'notes' => $data->notes ?? null,
+            // 'dropship' => removed
+            "updated_by" => $token['user_id'],
+        ];
+
+        $this->productModel->update($id, $productData);
+        $changeLog = $this->generateChangeLogString($oldProductData, $data);
+
+        log_aktivitas([
+            'user_id' => $token['user_id'],
+            'action_type' => 'UPDATE_V2',
+            'target_table' => 'product',
+            'target_id' => $id,
+            'description' => $changeLog,
+            'detail' => [
+                'old' => $oldProductData,
+                'new' => $data
+            ],
+        ]);
+
+        // V2: Ensure Store Relation Exists (Stock Initialized to 0, No Dropship/Stock Updates)
+        foreach ($data->stock as $toko) {
+            // Only add if not exists. Do not update anything.
+            if (isset($toko->id) && $this->stockModel->find($toko->id)) {
+                // Existing relation found, do nothing.
+                continue;
+            } else {
+                $existingStock = $this->stockModel
+                    ->where('id_barang', $id)
+                    ->where('id_toko', $toko->id_toko)
+                    ->first();
+
+                if (!$existingStock) {
+                    $this->stockModel->insert([
+                        'id_barang' => $data->id_barang ?? $oldProductData['kode_barang'],
+                        'id_toko' => $toko->id_toko,
+                        'stock' => 0, 
+                        'barang_cacat' => 0,
+                    ]);
                 }
             }
         }

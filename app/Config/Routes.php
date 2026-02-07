@@ -160,6 +160,10 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         
         // Inventory (Stock Transfer)
         $routes->post('inventory/transfer', 'InventoryController::transfer');
+
+        // Product V2
+        $routes->post('product', 'ProductController::createProductV2');
+        $routes->put('product/(:num)', 'ProductController::updateProductV2/$1');
     });
 
 });
