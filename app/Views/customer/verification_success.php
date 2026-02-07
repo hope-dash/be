@@ -167,7 +167,7 @@
             </div>
         <?php endif; ?>
         
-        <a href="https://hopesparepart.com" class="button">Kembali ke Beranda</a>
+        <a href="<?= env('app.frontendURL') ?: 'https://hopesparepart.com' ?>" class="button">Kembali ke Beranda</a>
         
         <div class="footer">
             <p>&copy; <?= date('Y') ?> Hope Sparepart. All rights reserved.</p>
