@@ -182,6 +182,9 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('customer/voucher/validate', 'CustomerControllerV2::validateVoucher');
     });
     
+    // Customer Email Verification Page (Public - GET from email link)
+    $routes->get('customer/verify', 'CustomerControllerV2::verifyEmailPage');
+    
     // Customer V2 (Protected - Requires Customer Auth)
     $routes->group('v2/customer', ['filter' => 'customerJwtAuth'], function($routes) {
         $routes->get('profile', 'CustomerControllerV2::getProfile');

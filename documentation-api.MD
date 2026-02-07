@@ -475,14 +475,44 @@ Register customer baru dengan email dan password.
   "message": "Registration successful. Please check your email to verify your account.",
   "data": {
     "customer_id": 1,
-    "verification_token": "abc123..." // Remove in production
+    "email_sent": true
   }
 }
 ```
 
-### B. Email Verification
+**Email yang Dikirim:**
+Customer akan menerima email berisi:
 
-Verifikasi email customer setelah registrasi.
+- ✉️ **Informasi Login**: Email dan password mereka
+- 🔗 **Link Verifikasi**: Untuk mengaktifkan akun
+- 📝 **Instruksi**: Cara menggunakan akun
+
+**Note**: Password dikirim dalam plain text di email untuk kemudahan customer. Disarankan customer mengganti password setelah login pertama kali.
+
+### B. Email Verification (Via Email Link)
+
+Customer klik link verifikasi dari email → Diarahkan ke halaman thank you.
+
+- **URL**: `GET /customer/verify?token={verification_token}`
+- **Method**: GET (dari link di email)
+- **Response**: HTML Page (bukan JSON)
+
+**Success Page**:
+
+- ✅ Menampilkan pesan sukses
+- ✅ Menampilkan nama customer
+- ✅ Informasi next steps
+- ✅ Link kembali ke homepage
+
+**Error Page**:
+
+- ❌ Token invalid/kadaluarsa
+- ❌ Instruksi troubleshooting
+- ❌ Link contact support
+
+### C. Email Verification (API - Optional)
+
+Verifikasi email via API (jika diperlukan untuk mobile app).
 
 - **URL**: `POST /v2/customer/verify-email`
 - **Body**:
@@ -493,7 +523,7 @@ Verifikasi email customer setelah registrasi.
 }
 ```
 
-### C. Customer Login
+### D. Customer Login
 
 Login customer dan mendapatkan JWT token.
 

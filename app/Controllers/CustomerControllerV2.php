@@ -24,7 +24,7 @@ class CustomerControllerV2 extends ResourceController
 
     public function __construct()
     {
-        helper('log');
+        helper(['log', 'email']);
         $this->customerModel = new CustomerModel();
         $this->productModel = new ProductModel();
         $this->stockModel = new StockModel();
@@ -71,8 +71,13 @@ class CustomerControllerV2 extends ResourceController
             $this->customerModel->insert($customerData);
             $customerId = $this->customerModel->getInsertID();
 
-            // TODO: Send verification email
-            // For now, we'll just return the token (in production, send via email)
+            // Send registration email with credentials and verification link
+            $emailSent = send_registration_email(
+                $data->email,
+                $data->nama_customer,
+                $data->password, // Plain text password for email
+                $verificationToken
+            );
 
             log_aktivitas([
                 'user_id' => $customerId,
@@ -84,7 +89,7 @@ class CustomerControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Registration successful. Please check your email to verify your account.', [
                 'customer_id' => $customerId,
-                'verification_token' => $verificationToken // Remove this in production
+                'email_sent' => $emailSent
             ], 201);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -121,6 +126,60 @@ class CustomerControllerV2 extends ResourceController
             return $this->jsonResponse->oneResp('Email verified successfully', [], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // Email Verification Page (GET request from email link)
+    public function verifyEmailPage()
+    {
+        try {
+            $token = $this->request->getGet('token');
+
+            if (empty($token)) {
+                return view('customer/verification_error', [
+                    'message' => 'Token verifikasi tidak ditemukan.'
+                ]);
+            }
+
+            $customer = $this->customerModel
+                ->where('email_verification_token', $token)
+                ->first();
+
+            if (!$customer) {
+                return view('customer/verification_error', [
+                    'message' => 'Token verifikasi tidak valid atau sudah kadaluarsa.'
+                ]);
+            }
+
+            if ($customer['email_verified_at']) {
+                return view('customer/verification_success', [
+                    'message' => 'Email Anda sudah terverifikasi sebelumnya.',
+                    'already_verified' => true
+                ]);
+            }
+
+            $this->customerModel->update($customer['id'], [
+                'email_verified_at' => date('Y-m-d H:i:s'),
+                'email_verification_token' => null
+            ]);
+
+            log_aktivitas([
+                'user_id' => $customer['id'],
+                'action_type' => 'VERIFY_EMAIL',
+                'target_table' => 'customer',
+                'target_id' => $customer['id'],
+                'description' => "Customer verified email: {$customer['email']}",
+            ]);
+
+            return view('customer/verification_success', [
+                'message' => 'Email Anda berhasil diverifikasi!',
+                'customer_name' => $customer['nama_customer'],
+                'already_verified' => false
+            ]);
+        } catch (\Exception $e) {
+            return view('customer/verification_error', [
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ]);
         }
     }
 
