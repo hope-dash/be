@@ -145,7 +145,7 @@ if (!function_exists('send_registration_email')) {
     function send_registration_email($email, $name, $password, $verificationToken)
     {
         $baseUrl = env('app.baseURL');
-        $verificationUrl = $baseUrl . '/customer/verify?token=' . $verificationToken;
+        $verificationUrl = $baseUrl . '/api/customer/verify?token=' . $verificationToken;
 
         $content = '
             <h2>Selamat Datang, ' . htmlspecialchars($name) . '!</h2>
@@ -189,7 +189,7 @@ if (!function_exists('send_verification_email')) {
     function send_verification_email($email, $name, $verificationToken)
     {
         $baseUrl = env('app.baseURL');
-        $verificationUrl = $baseUrl . '/customer/verify?token=' . $verificationToken;
+        $verificationUrl = $baseUrl . '/api/customer/verify?token=' . $verificationToken;
 
         $content = '
             <h2>Halo, ' . htmlspecialchars($name) . '!</h2>
