@@ -332,6 +332,25 @@ class CustomerControllerV2 extends ResourceController
                 }
             }
 
+            // === FETCH IMAGES ===
+            $productTableIds = array_column($products, 'id');
+            $imageMap = [];
+            if (!empty($productTableIds)) {
+                // Remove duplicates just in case
+                $productTableIds = array_unique($productTableIds);
+                
+                $images = $this->db->table('image')
+                    ->select('kode, url')
+                    ->where('type', 'product')
+                    ->whereIn('kode', $productTableIds)
+                    ->get()
+                    ->getResultArray();
+                
+                foreach ($images as $img) {
+                    $imageMap[$img['kode']][] = $img['url'];
+                }
+            }
+
             // Apply customer discount & map stock & format response
             $finalProducts = [];
             foreach ($products as $product) {
@@ -368,6 +387,9 @@ class CustomerControllerV2 extends ResourceController
                     'customer_price' => (int) $customerPrice,
                     'discount_applied' => (int) $discountApplied,
                 ];
+
+                // Map images
+                $item['images'] = $imageMap[$product['id']] ?? [];
 
                 // Map stock
                 if ($idToko) {
