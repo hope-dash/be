@@ -36,6 +36,7 @@ class Filters extends BaseFilters
         'pagecache'     => PageCache::class,
         'performance'   => PerformanceMetrics::class,
         'jwtAuth' => \App\Filters\JwtMiddleware::class,
+        'customerJwtAuth' => \App\Filters\CustomerJwtMiddleware::class,
     ];
 
     /**

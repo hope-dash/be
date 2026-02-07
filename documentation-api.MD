@@ -442,3 +442,318 @@ Daftar akun standar yang digunakan dalam sistem (bisa bertambah sesuai input use
 | 6003            | Electricity Expense              | EXPENSE   | Debit          |
 | 6004            | Marketing & Admin Expense        | EXPENSE   | Debit          |
 | 6005            | Operational Expense              | EXPENSE   | Debit          |
+
+---
+
+## 9. CUSTOMER V2 (Customer Portal & Authentication)
+
+### A. Customer Registration
+
+Register customer baru dengan email dan password.
+
+- **URL**: `POST /v2/customer/register`
+- **Body**:
+
+```json
+{
+  "nama_customer": "John Doe",
+  "email": "john@example.com",
+  "password": "password123",
+  "no_hp_customer": "08123456789",
+  "alamat": "Jl. Example No. 123",
+  "provinsi": "DKI Jakarta",
+  "kota_kabupaten": "Jakarta Selatan",
+  "kode_pos": "12345"
+}
+```
+
+**Response**:
+
+```json
+{
+  "status": 201,
+  "message": "Registration successful. Please check your email to verify your account.",
+  "data": {
+    "customer_id": 1,
+    "verification_token": "abc123..." // Remove in production
+  }
+}
+```
+
+### B. Email Verification
+
+Verifikasi email customer setelah registrasi.
+
+- **URL**: `POST /v2/customer/verify-email`
+- **Body**:
+
+```json
+{
+  "token": "verification_token_from_email"
+}
+```
+
+### C. Customer Login
+
+Login customer dan mendapatkan JWT token.
+
+- **URL**: `POST /v2/customer/login`
+- **Body**:
+
+```json
+{
+  "email": "john@example.com",
+  "password": "password123"
+}
+```
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "message": "Login successful",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "customer": {
+      "id": 1,
+      "nama_customer": "John Doe",
+      "email": "john@example.com",
+      "no_hp_customer": "08123456789",
+      "discount_type": "PERCENTAGE",
+      "discount_value": 10
+    }
+  }
+}
+```
+
+### D. Get Product List (Customer View)
+
+Mendapatkan daftar produk dengan harga setelah discount customer (jika ada).
+
+**Requires**: Customer JWT Token in Authorization header
+
+- **URL**: `GET /v2/customer/products?id_toko={id_toko}&page={page}&limit={limit}`
+- **Headers**: `Authorization: Bearer {customer_token}`
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "data": [
+    {
+      "id": 1,
+      "id_barang": "IPH001",
+      "nama_barang": "iPhone 15 Pro Max",
+      "original_price": 20000000,
+      "customer_price": 18000000,
+      "discount_applied": 2000000,
+      "stock": 5
+    }
+  ]
+}
+```
+
+**Note**:
+
+- Jika customer memiliki `discount_type` dan `discount_value`, harga akan otomatis disesuaikan
+- `PERCENTAGE`: Diskon persentase (e.g., 10%)
+- `FIXED`: Diskon nominal tetap (e.g., Rp 100.000)
+
+### E. Get Customer Profile
+
+Mendapatkan data profile customer yang sedang login.
+
+**Requires**: Customer JWT Token
+
+- **URL**: `GET /v2/customer/profile`
+- **Headers**: `Authorization: Bearer {customer_token}`
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "data": {
+    "id": 1,
+    "nama_customer": "John Doe",
+    "email": "john@example.com",
+    "no_hp_customer": "08123456789",
+    "alamat": "Jl. Example No. 123",
+    "provinsi": "DKI Jakarta",
+    "kota_kabupaten": "Jakarta Selatan",
+    "kode_pos": "12345",
+    "discount_type": "PERCENTAGE",
+    "discount_value": 10
+  }
+}
+```
+
+### F. Update Customer Profile
+
+Update profile customer (nama, alamat, password, dll).
+
+**Requires**: Customer JWT Token
+
+- **URL**: `PUT /v2/customer/profile`
+- **Headers**: `Authorization: Bearer {customer_token}`
+- **Body**:
+
+```json
+{
+  "nama_customer": "John Doe Updated",
+  "no_hp_customer": "08123456789",
+  "alamat": "Jl. New Address No. 456",
+  "provinsi": "Jawa Barat",
+  "kota_kabupaten": "Bandung",
+  "kode_pos": "40123"
+}
+```
+
+**Update Password**:
+
+```json
+{
+  "current_password": "oldpassword123",
+  "password": "newpassword123"
+}
+```
+
+**Update Email** (requires re-verification):
+
+```json
+{
+  "email": "newemail@example.com"
+}
+```
+
+**Note**:
+
+- Semua field optional (partial update)
+- Untuk ganti password, wajib kirim `current_password`
+- Ganti email akan reset `email_verified_at` dan perlu verifikasi ulang
+- Response: `"Profile updated successfully"` atau `"Profile updated successfully. Please verify your new email address."`
+
+---
+
+## 10. VOUCHER MANAGEMENT
+
+### A. Create Voucher (Admin)
+
+Membuat voucher/promo code baru.
+
+- **URL**: `POST /v2/voucher`
+- **Body**:
+
+```json
+{
+  "code": "NEWYEAR2026",
+  "description": "New Year Promo 2026",
+  "discount_type": "PERCENTAGE",
+  "discount_value": 15,
+  "min_purchase": 500000,
+  "max_discount": 100000,
+  "usage_limit": 100,
+  "valid_from": "2026-01-01 00:00:00",
+  "valid_until": "2026-01-31 23:59:59",
+  "is_active": 1
+}
+```
+
+**Field Explanation**:
+
+- `code`: Kode voucher (unique, akan di-uppercase otomatis)
+- `discount_type`: `FIXED` atau `PERCENTAGE`
+- `discount_value`: Nilai diskon (nominal atau persentase)
+- `min_purchase`: Minimum pembelian untuk menggunakan voucher (optional)
+- `max_discount`: Maximum diskon untuk tipe PERCENTAGE (optional)
+- `usage_limit`: Batas total penggunaan voucher (null = unlimited)
+- `valid_from`: Tanggal mulai berlaku (optional)
+- `valid_until`: Tanggal kadaluarsa (optional)
+
+### B. List Vouchers (Admin)
+
+- **URL**: `GET /v2/voucher?is_active={1|0}&page={page}&limit={limit}`
+
+### C. Update Voucher (Admin)
+
+- **URL**: `PUT /v2/voucher/{id}`
+- **Body**: Same as create (partial update supported)
+
+### D. Delete Voucher (Admin)
+
+- **URL**: `DELETE /v2/voucher/{id}`
+
+### E. Validate Voucher (Public/Customer)
+
+Validasi voucher sebelum digunakan di transaksi.
+
+- **URL**: `POST /v2/customer/voucher/validate`
+- **Body**:
+
+```json
+{
+  "code": "NEWYEAR2026",
+  "purchase_amount": 1000000
+}
+```
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "message": "Voucher is valid",
+  "data": {
+    "voucher": {
+      "id": 1,
+      "code": "NEWYEAR2026",
+      "discount_type": "PERCENTAGE",
+      "discount_value": 15,
+      "min_purchase": 500000,
+      "max_discount": 100000
+    },
+    "discount_amount": 100000,
+    "final_amount": 900000
+  }
+}
+```
+
+**Validation Checks**:
+
+- ✅ Voucher exists and active
+- ✅ Valid period (valid_from - valid_until)
+- ✅ Usage limit not exceeded
+- ✅ Minimum purchase requirement met
+
+### F. Apply Voucher (Customer - Protected)
+
+Increment usage count setelah voucher digunakan di transaksi.
+
+**Requires**: Customer JWT Token
+
+- **URL**: `POST /v2/customer/voucher/{id}/apply`
+- **Headers**: `Authorization: Bearer {customer_token}`
+
+**Note**: Endpoint ini dipanggil setelah transaksi berhasil dibuat untuk increment `usage_count`.
+
+---
+
+## Customer Discount vs Voucher
+
+| Feature        | Customer Discount                  | Voucher                                      |
+| -------------- | ---------------------------------- | -------------------------------------------- |
+| **Setup**      | Set di customer profile            | Dibuat admin sebagai promo code              |
+| **Scope**      | Berlaku untuk semua produk         | Berlaku per transaksi                        |
+| **Type**       | FIXED atau PERCENTAGE              | FIXED atau PERCENTAGE                        |
+| **Limit**      | Tidak ada limit                    | Ada usage_limit dan valid_until              |
+| **Validation** | Otomatis apply saat login          | Perlu input code manual                      |
+| **Kombinasi**  | Bisa dikombinasikan dengan voucher | Bisa dikombinasikan dengan customer discount |
+
+**Example Flow**:
+
+1. Customer login → dapat discount 10% (customer discount)
+2. Customer lihat produk → harga sudah include discount 10%
+3. Customer checkout → input voucher code "NEWYEAR2026" → dapat tambahan diskon
+4. Total discount = Customer Discount + Voucher Discount

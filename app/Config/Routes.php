@@ -168,6 +168,26 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         // Transaction List & Meta
         $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');
         $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
+        
+        // Voucher Management (Admin)
+        $routes->post('voucher', 'VoucherController::create');
+        $routes->get('voucher', 'VoucherController::index');
+        $routes->put('voucher/(:num)', 'VoucherController::update/$1');
+        $routes->delete('voucher/(:num)', 'VoucherController::delete/$1');
+        
+        // Customer V2 (Public - No Auth Required)
+        $routes->post('customer/register', 'CustomerControllerV2::register');
+        $routes->post('customer/verify-email', 'CustomerControllerV2::verifyEmail');
+        $routes->post('customer/login', 'CustomerControllerV2::login');
+        $routes->post('customer/voucher/validate', 'CustomerControllerV2::validateVoucher');
+    });
+    
+    // Customer V2 (Protected - Requires Customer Auth)
+    $routes->group('v2/customer', ['filter' => 'customerJwtAuth'], function($routes) {
+        $routes->get('profile', 'CustomerControllerV2::getProfile');
+        $routes->put('profile', 'CustomerControllerV2::updateProfile');
+        $routes->get('products', 'CustomerControllerV2::getProducts');
+        $routes->post('voucher/(:num)/apply', 'CustomerControllerV2::applyVoucher/$1');
     });
 
 });
