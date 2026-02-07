@@ -671,6 +671,130 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
+
+    /**
+     * Get Product Detail for Customer
+     * - Applies customer discount if authenticated
+     * - Removes sensitive fields (harga_modal, supplier, etc)
+     */
+    public function getDetailByIdCustomer($id = null)
+    {
+        try {
+            // Optional: Get customer from token if provided
+            $authHeader = $this->request->getHeaderLine('Authorization');
+            $customer = null;
+
+            if ($authHeader && preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+                $token = $matches[1];
+                $jwt = new Jwtoken();
+                $decoded = $jwt->validateToken($token);
+                if ($decoded && isset($decoded->customer_id)) {
+                    // Fetch fresh customer data
+                    $customerModel = new \App\Models\CustomerModel();
+                    $customer = $customerModel
+                        ->select('id, discount_type, discount_value')
+                        ->find($decoded->customer_id);
+                }
+            }
+
+            // Fetch product basic info (Select specific fields only!)
+            $product = $this->productModel
+                ->select([
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
+                    'product.harga_jual',
+                    'product.deskripsi', // If exists
+                    'model_barang.nama_model',
+                    'seri.seri'
+                ])
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.id', $id)
+                ->first();
+
+            if (!$product) {
+                return $this->jsonResponse->error('Product Not Found', 404);
+            }
+
+            // Construct full name
+            $namaLengkap = trim(implode(' ', array_filter([
+                $product['nama_barang'],
+                $product['nama_model'] ?? '',
+                $product['seri'] ?? ''
+            ])));
+
+            // Calculate Customer Price
+            $basePrice = (float) $product['harga_jual'];
+            $customerPrice = $basePrice;
+            $discountApplied = 0;
+
+            if ($customer && !empty($customer['discount_type'])) {
+                $discountType = strtolower($customer['discount_type']);
+                $discountValue = (float) $customer['discount_value'];
+
+                if ($discountType === 'percentage') {
+                    $discount = ($basePrice * $discountValue) / 100;
+                    $customerPrice = max(0, $basePrice - $discount);
+                    $discountApplied = $discount;
+                } elseif ($discountType === 'fixed') {
+                    $discountApplied = min($basePrice, $discountValue);
+                    $customerPrice = max(0, $basePrice - $discountValue);
+                }
+            }
+
+            // Fetch Images
+            $images = $this->imageModel
+                ->select('url')
+                ->where('type', 'product')
+                ->where('kode', $product['id'])
+                ->findAll();
+            
+            $imageUrls = array_column($images, 'url');
+
+            // Fetch Stock Breakdown
+            $stockDetails = $this->stockModel
+                ->select('stock.stock, stock.id_toko, toko.toko_name')
+                ->join('toko', 'toko.id = stock.id_toko', 'left')
+                ->where('stock.id_barang', $product['id_barang'])
+                // ->where('stock.stock >', 0) // Uncomment if we want to hide 0 stock stores
+                ->findAll();
+
+            $totalStock = 0;
+            $formattedStock = [];
+            foreach ($stockDetails as $s) {
+                $formattedStock[] = [
+                    'id_toko' => $s['id_toko'],
+                    'toko_name' => $s['toko_name'] ?? 'Unknown Store',
+                    'stock' => (int)$s['stock']
+                ];
+                $totalStock += (int)$s['stock'];
+            }
+
+            // Construct Response
+            $response = [
+                'id' => $product['id'],
+                'id_barang' => $product['id_barang'],
+                'nama_barang' => $product['nama_barang'],
+                'nama_lengkap_barang' => $namaLengkap,
+                'nama_model' => $product['nama_model'] ?? null,
+                'seri' => $product['seri'] ?? null,
+                'deskripsi' => $product['deskripsi'] ?? null, // Assuming description exists
+                'harga_jual' => (int) $basePrice,
+                'customer_price' => (int) $customerPrice,
+                'discount_applied' => (int) $discountApplied,
+                'stock_total' => $totalStock,
+                'stock_details' => $formattedStock,
+                'images' => $imageUrls
+            ];
+
+            return $this->jsonResponse->oneResp('Data berhasil diambil', $response);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+    
     public function getListSeribySearchProduct()
     {
         $namaProduct = $this->request->getGet('namaProduct') ?? '';

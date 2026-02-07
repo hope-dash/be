@@ -634,13 +634,61 @@ Mendapatkan daftar produk dengan diskon customer (jika login).
 - `customer_price` adalah harga setelah diskon (jika login & eligible).
 - `discount_applied` adalah nominal diskon yang didapat.
 
-### E. Get Customer Profile
+### E. Get Product Detail
+
+Mendapatkan detail satu produk dengan informasi lengkap (termasuk stok per toko & gambar).
+
+**Requires**: Optional Customer JWT Token
+
+- **URL**: `GET /api/v2/customer/products/{id}`
+- **Method**: `GET`
+- **Headers**: `Authorization: Bearer {customer_token}` (Optional)
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "message": "Data berhasil diambil",
+  "data": {
+    "id": 1,
+    "id_barang": "IPH001",
+    "nama_barang": "iPhone 15 Pro Max",
+    "nama_lengkap_barang": "iPhone 15 Pro Max 256GB Black",
+    "nama_model": "iPhone 15 Pro Max",
+    "seri": "256GB Black",
+    "deskripsi": "Barang original garansi resmi...",
+    "harga_jual": 20000000,
+    "customer_price": 18000000,
+    "discount_applied": 2000000,
+    "stock_total": 15,
+    "stock_details": [
+      {
+        "id_toko": "1",
+        "toko_name": "Toko Pusat",
+        "stock": 10
+      },
+      {
+        "id_toko": "2",
+        "toko_name": "Cabang Jakarta",
+        "stock": 5
+      }
+    ],
+    "images": [
+      "https://example.com/image1.jpg",
+      "https://example.com/image2.jpg"
+    ]
+  }
+}
+```
+
+### F. Get Customer Profile
 
 Mendapatkan data profile customer yang sedang login.
 
 **Requires**: Customer JWT Token
 
-- **URL**: `GET /v2/customer/profile`
+- **URL**: `GET /api/v2/customer/profile`
 - **Headers**: `Authorization: Bearer {customer_token}`
 
 **Response**:
@@ -663,13 +711,13 @@ Mendapatkan data profile customer yang sedang login.
 }
 ```
 
-### F. Update Customer Profile
+### G. Update Customer Profile
 
 Update profile customer (nama, alamat, password, dll).
 
 **Requires**: Customer JWT Token
 
-- **URL**: `PUT /v2/customer/profile`
+- **URL**: `PUT /api/v2/customer/profile`
 - **Headers**: `Authorization: Bearer {customer_token}`
 - **Body**:
 

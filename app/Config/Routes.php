@@ -185,7 +185,7 @@ $routes->group('api/v2/customer', function($routes) {
     $routes->post('login', 'CustomerControllerV2::login');
     $routes->post('voucher/validate', 'CustomerControllerV2::validateVoucher');
     $routes->get('products', 'CustomerControllerV2::getProducts');
-    $routes->get('products/(:num)', 'ProductController::getDetailById/$1');
+    $routes->get('products/(:num)', 'ProductController::getDetailByIdCustomer/$1');
 
 });
 
