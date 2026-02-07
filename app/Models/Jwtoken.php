@@ -16,11 +16,10 @@ class Jwtoken
     public function generateToken($data, $expiry = 86400) {
         $iat = time();
         $exp = time() + $expiry;
-        $payload = [
+        $payload = array_merge([
             'exp' => $exp,
             'iat' => $iat,
-            'user_id' => $data['user_id'],
-        ];
+        ], $data);
         $token = JWT::encode($payload, $this->secretKey,'HS256');
         return $token;
     }

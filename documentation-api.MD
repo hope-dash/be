@@ -557,16 +557,22 @@ Login customer dan mendapatkan JWT token.
 }
 ```
 
-### D. Get Product List (Customer View)
+### D. Get Product List
 
-Mendapatkan daftar produk dengan harga setelah discount customer (jika ada).
+Mendapatkan daftar produk dengan diskon customer (jika login).
 
-**Requires**: Customer JWT Token in Authorization header
+**Requires**: Optional Customer JWT Token
 
-- **URL**: `GET /v2/customer/products?id_toko={id_toko}&page={page}&limit={limit}`
-- **Headers**: `Authorization: Bearer {customer_token}`
+- **URL**: `GET /api/v2/customer/products`
+- **Method**: `GET`
+- **Headers**: `Authorization: Bearer {customer_token}` (Optional)
+- **Query Params**:
+  - `limit`: Limit data per page (default: 20)
+  - `page`: Halaman ke berapa (default: 1)
+  - `id_toko`: (Optional) Filter by toko ID
+  - `search`: (Optional) Search by Nama Barang / Nama Model / Seri / Kode Barang
 
-**Response**:
+**Response (With id_toko)**:
 
 ```json
 {
@@ -576,7 +582,8 @@ Mendapatkan daftar produk dengan harga setelah discount customer (jika ada).
       "id": 1,
       "id_barang": "IPH001",
       "nama_barang": "iPhone 15 Pro Max",
-      "original_price": 20000000,
+      "nama_lengkap_barang": "iPhone 15 Pro Max 256GB Black",
+      "harga_jual": 20000000,
       "customer_price": 18000000,
       "discount_applied": 2000000,
       "stock": 5
@@ -585,11 +592,47 @@ Mendapatkan daftar produk dengan harga setelah discount customer (jika ada).
 }
 ```
 
+**Response (Without id_toko)**:
+
+```json
+{
+  "status": 200,
+  "data": [
+    {
+      "id": 1,
+      "id_barang": "IPH001",
+      "nama_barang": "iPhone 15 Pro Max",
+      "nama_lengkap_barang": "iPhone 15 Pro Max 256GB Black",
+      "harga_jual": 20000000,
+      "customer_price": 18000000,
+      "discount_applied": 2000000,
+      "stock_total": 15,
+      "stock_details": [
+        {
+          "id_toko": "1",
+          "toko_name": "Toko Pusat",
+          "stock": 10
+        },
+        {
+          "id_toko": "2",
+          "toko_name": "Cabang Jakarta",
+          "stock": 5
+        }
+      ]
+    }
+  ]
+}
+```
+
 **Note**:
 
-- Jika customer memiliki `discount_type` dan `discount_value`, harga akan otomatis disesuaikan
-- `PERCENTAGE`: Diskon persentase (e.g., 10%)
-- `FIXED`: Diskon nominal tetap (e.g., Rp 100.000)
+- Jika `Authorization` header dikirim, harga akan disesuaikan dengan diskon customer.
+- Jika `id_toko` dikirim, response akan berisi field `stock` (integer).
+- Jika `id_toko` TIDAK dikirim, response akan berisi field `stock_total` dan `stock_details` (per toko).
+- `search` akan mencari di kode barang, dan kombinasi nama + model + seri.
+- `harga_jual` adalah harga normal.
+- `customer_price` adalah harga setelah diskon (jika login & eligible).
+- `discount_applied` adalah nominal diskon yang didapat.
 
 ### E. Get Customer Profile
 
@@ -788,7 +831,6 @@ Increment usage count setelah voucher digunakan di transaksi.
 3. Customer checkout → input voucher code "NEWYEAR2026" → dapat tambahan diskon
 4. Total discount = Customer Discount + Voucher Discount
 
-
 ---
 
 ## 11. WILAYAH INDONESIA API
@@ -803,6 +845,7 @@ Mendapatkan daftar semua provinsi di Indonesia.
 - **Auth**: No Auth Required
 
 **Response**:
+
 ```json
 {
   "status": 200,
@@ -830,6 +873,7 @@ Mendapatkan daftar kota/kabupaten berdasarkan ID provinsi.
 **Example**: `GET /api/wilayah/cities/31` (DKI Jakarta)
 
 **Response**:
+
 ```json
 {
   "status": 200,
@@ -857,8 +901,6 @@ Mencari kota/kabupaten berdasarkan nama.
 **Note**: Semua endpoint wilayah adalah public (tidak perlu authentication).
 
 ---
-
-
 
 ---
 
@@ -890,6 +932,7 @@ Mendapatkan daftar produk dengan harga yang sudah dikurangi discount customer (j
 ```
 
 **Response**:
+
 ```json
 {
   "status": 200,
@@ -910,9 +953,7 @@ Mendapatkan daftar produk dengan harga yang sudah dikurangi discount customer (j
           "dropship": false
         }
       ],
-      "images": [
-        "https://example.com/image1.jpg"
-      ]
+      "images": ["https://example.com/image1.jpg"]
     }
   ],
   "total_data": 100,
@@ -923,6 +964,7 @@ Mendapatkan daftar produk dengan harga yang sudah dikurangi discount customer (j
 ```
 
 **Note**:
+
 - Endpoint ini **WAJIB** menggunakan customer JWT token
 - Harga yang ditampilkan (`harga_jual`) sudah otomatis dikurangi discount customer
 - Jika customer punya `discount_type = PERCENTAGE` dan `discount_value = 10`, maka harga akan dikurangi 10%
@@ -932,9 +974,9 @@ Mendapatkan daftar produk dengan harga yang sudah dikurangi discount customer (j
 - Tidak ada field `harga_jual_toko` atau `harga_special` - hanya fokus pada `harga_jual` yang sudah include discount
 
 **Example Calculation**:
+
 - Harga Original: Rp 20.000.000
 - Customer Discount: PERCENTAGE 10%
 - Harga Final: Rp 18.000.000 (20.000.000 - 2.000.000)
 
 ---
-

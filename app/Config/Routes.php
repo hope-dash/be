@@ -184,6 +184,7 @@ $routes->group('api/v2/customer', function($routes) {
     $routes->post('verify-email', 'CustomerControllerV2::verifyEmail');
     $routes->post('login', 'CustomerControllerV2::login');
     $routes->post('voucher/validate', 'CustomerControllerV2::validateVoucher');
+    $routes->get('products', 'CustomerControllerV2::getProducts');
 });
 
 // Customer Email Verification Page (Public - GET from email link)
@@ -193,7 +194,6 @@ $routes->get('api/customer/verify', 'CustomerControllerV2::verifyEmailPage');
 $routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function($routes) {
     $routes->get('profile', 'CustomerControllerV2::getProfile');
     $routes->put('profile', 'CustomerControllerV2::updateProfile');
-    $routes->get('products', 'CustomerControllerV2::getProducts');
     $routes->post('pricelist', 'ProductController::getProductStockForPricelistV2');
     $routes->post('voucher/(:num)/apply', 'CustomerControllerV2::applyVoucher/$1');
 });

@@ -68,8 +68,11 @@ class CustomerControllerV2 extends ResourceController
                 'email_verification_token' => $verificationToken,
             ];
 
-            $this->customerModel->insert($customerData);
-            $customerId = $this->customerModel->getInsertID();
+            $customerId = $this->customerModel->insert($customerData);
+
+            if (!$customerId) {
+                return $this->jsonResponse->error("Registration failed", 500);
+            }
 
             // Send registration email with credentials and verification link
             $emailSent = send_registration_email(
@@ -78,14 +81,6 @@ class CustomerControllerV2 extends ResourceController
                 $data->password, // Plain text password for email
                 $verificationToken
             );
-
-            log_aktivitas([
-                'user_id' => $customerId,
-                'action_type' => 'REGISTER',
-                'target_table' => 'customer',
-                'target_id' => $customerId,
-                'description' => "Customer registered: {$data->email}",
-            ]);
 
             return $this->jsonResponse->oneResp('Registration successful. Please check your email to verify your account.', [
                 'customer_id' => $customerId,
@@ -163,14 +158,6 @@ class CustomerControllerV2 extends ResourceController
                 'email_verification_token' => null
             ]);
 
-            log_aktivitas([
-                'user_id' => $customer['id'],
-                'action_type' => 'VERIFY_EMAIL',
-                'target_table' => 'customer',
-                'target_id' => $customer['id'],
-                'description' => "Customer verified email: {$customer['email']}",
-            ]);
-
             return view('customer/verification_success', [
                 'message' => 'Email Anda berhasil diverifikasi!',
                 'customer_name' => $customer['nama_customer'],
@@ -221,14 +208,6 @@ class CustomerControllerV2 extends ResourceController
                 'type' => 'customer'
             ]);
 
-            log_aktivitas([
-                'user_id' => $customer['id'],
-                'action_type' => 'LOGIN',
-                'target_table' => 'customer',
-                'target_id' => $customer['id'],
-                'description' => "Customer logged in: {$customer['email']}",
-            ]);
-
             return $this->jsonResponse->oneResp('Login successful', [
                 'token' => $token,
                 'customer' => [
@@ -249,51 +228,156 @@ class CustomerControllerV2 extends ResourceController
     public function getProducts()
     {
         try {
-            $customer = $this->request->customer ?? null;
+            // Optional: Get customer from token if provided
+            $authHeader = $this->request->getHeaderLine('Authorization');
+            $customer = null;
+
+            if ($authHeader && preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+                $token = $matches[1];
+                $jwt = new Jwtoken();
+                $decoded = $jwt->validateToken($token);
+                if ($decoded && isset($decoded->customer_id)) {
+                    $customerModel = new \App\Models\CustomerModel();
+                    $customerData = $customerModel->find($decoded->customer_id);
+                    if ($customerData) {
+                        $customer = $customerData;
+                    }
+                }
+            }
+
             $idToko = $this->request->getGet('id_toko');
+            $search = trim($this->request->getGet('search') ?? ''); // Search query
             $limit = (int) $this->request->getGet('limit') ?: 20;
             $page = (int) $this->request->getGet('page') ?: 1;
             $offset = ($page - 1) * $limit;
 
-            $builder = $this->productModel;
+            $builder = $this->productModel->select([
+                'product.id',
+                'product.id_barang',
+                'product.nama_barang',
+                'product.harga_jual',
+                'product.created_at',
+                'model_barang.nama_model',
+                'seri.seri'
+            ])
+            ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+            ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+
+            // Apply search filter
+            if (!empty($search)) {
+                $builder->groupStart()
+                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $search)
+                    ->orLike("product.id_barang", $search)
+                    ->groupEnd();
+            }
 
             $totalData = $builder->countAllResults(false);
             $totalPage = ceil($totalData / $limit);
 
             $products = $builder
-                ->orderBy('created_at', 'DESC')
+                ->orderBy('product.created_at', 'DESC')
                 ->limit($limit, $offset)
                 ->findAll();
 
-            // Apply customer discount if logged in
-            foreach ($products as &$product) {
-                $basePrice = $product['harga_jual'];
-                $product['original_price'] = $basePrice;
-                $product['customer_price'] = $basePrice;
-                $product['discount_applied'] = 0;
+            if (empty($products)) {
+                 return $this->jsonResponse->multiResp('', [], $totalData, $totalPage, $page, $limit, 200);
+            }
+
+            // === OPTIMIZED STOCK FETCHING ===
+            $productIds = array_column($products, 'id_barang');
+            $stockMap = [];
+            
+            // Load toko details if needed map
+            $tokoMap = [];
+            if (!$idToko) {
+                $tokoModel = new \App\Models\TokoModel();
+                $allTokos = $tokoModel->findAll();
+                foreach ($allTokos as $t) {
+                    $tokoMap[$t['id']] = $t['toko_name'];
+                }
+            }
+
+            if (!empty($productIds)) {
+                $stockBuilder = $this->stockModel->whereIn('id_barang', $productIds);
+                
+                if ($idToko) {
+                    $stockBuilder->where('id_toko', $idToko);
+                } else {
+                    $stockBuilder->where('stock >', 0);
+                }
+                
+                $stocks = $stockBuilder->findAll();
+
+                foreach ($stocks as $s) {
+                    if ($idToko) {
+                        // Single store mode
+                        $stockMap[$s['id_barang']] = (int)$s['stock'];
+                    } else {
+                        // Multi store mode
+                        if (!isset($stockMap[$s['id_barang']])) {
+                            $stockMap[$s['id_barang']] = [
+                                'total' => 0,
+                                'details' => []
+                            ];
+                        }
+                        
+                        $stockMap[$s['id_barang']]['total'] += (int)$s['stock'];
+                        $stockMap[$s['id_barang']]['details'][] = [
+                            'id_toko' => $s['id_toko'],
+                            'toko_name' => $tokoMap[$s['id_toko']] ?? 'Unknown Store',
+                            'stock' => (int)$s['stock']
+                        ];
+                    }
+                }
+            }
+
+            // Apply customer discount & map stock & format response
+            $finalProducts = [];
+            foreach ($products as $product) {
+                $namaLengkap = trim(implode(' ', array_filter([
+                    $product['nama_barang'],
+                    $product['nama_model'] ?? '',
+                    $product['seri'] ?? ''
+                ])));
+
+                $basePrice = (float) $product['harga_jual'];
+                $customerPrice = $basePrice;
+                $discountApplied = 0;
 
                 if ($customer && $customer['discount_type']) {
                     if ($customer['discount_type'] === 'PERCENTAGE') {
                         $discount = ($basePrice * $customer['discount_value']) / 100;
-                        $product['customer_price'] = $basePrice - $discount;
-                        $product['discount_applied'] = $discount;
+                        $customerPrice = max(0, $basePrice - $discount);
+                        $discountApplied = $discount;
                     } elseif ($customer['discount_type'] === 'FIXED') {
-                        $product['customer_price'] = $basePrice - $customer['discount_value'];
-                        $product['discount_applied'] = $customer['discount_value'];
+                        $discountApplied = min($basePrice, $customer['discount_value']);
+                        $customerPrice = max(0, $basePrice - $customer['discount_value']);
                     }
                 }
 
-                // Get stock if id_toko provided
+                $item = [
+                    'id' => $product['id'],
+                    'id_barang' => $product['id_barang'],
+                    'nama_barang' => $product['nama_barang'],
+                    'nama_lengkap_barang' => $namaLengkap,
+                    'harga_jual' => (int) $basePrice,
+                    'customer_price' => (int) $customerPrice,
+                    'discount_applied' => (int) $discountApplied,
+                ];
+
+                // Map stock
                 if ($idToko) {
-                    $stock = $this->stockModel
-                        ->where('id_barang', $product['id_barang'])
-                        ->where('id_toko', $idToko)
-                        ->first();
-                    $product['stock'] = $stock ? $stock['stock'] : 0;
+                    $item['stock'] = $stockMap[$product['id_barang']] ?? 0;
+                } else {
+                    $stockInfo = $stockMap[$product['id_barang']] ?? ['total' => 0, 'details' => []];
+                    $item['stock_total'] = $stockInfo['total'];
+                    $item['stock_details'] = $stockInfo['details'];
                 }
+
+                $finalProducts[] = $item;
             }
 
-            return $this->jsonResponse->multiResp('', $products, $totalData, $totalPage, $page, $limit, 200);
+            return $this->jsonResponse->multiResp('', $finalProducts, $totalData, $totalPage, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -466,15 +550,6 @@ class CustomerControllerV2 extends ResourceController
             }
 
             $this->customerModel->update($customer['id'], $updateData);
-
-            log_aktivitas([
-                'user_id' => $customer['id'],
-                'action_type' => 'UPDATE_PROFILE',
-                'target_table' => 'customer',
-                'target_id' => $customer['id'],
-                'description' => "Customer updated profile: {$customer['email']}",
-                'detail' => $updateData
-            ]);
 
             $message = 'Profile updated successfully';
             if (isset($updateData['email'])) {
