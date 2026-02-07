@@ -31,6 +31,7 @@ Membuat data master barang baru.
   "suplier": ["Distributor A", "Toko B"], // Optional: Array of supplier names
   "description": "Garansi Resmi iBox 1 Tahun",
   "notes": "Hati-hati barang sensitif",
+  "berat": 1000,
   "stock": [
     { "id_toko": 1 }, // Stock value ignored (set 0)
     { "id_toko": 2 }
@@ -80,6 +81,13 @@ Batalkan transaksi.
 - Jika **sudah bayar**: Status `NEED_REFUND`. (Journal cancel tercatat, tapi hutang refund muncul).
 
 - **URL**: `POST /v2/transaction/{id}/cancel`
+- **Body**:
+
+```json
+{
+  "cancel_reason": "Customer request / Stock tidak tersedia / etc"
+}
+```
 
 ---
 

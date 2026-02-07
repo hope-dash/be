@@ -137,6 +137,7 @@ class ProductController extends ResourceController
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
+            'berat' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -165,7 +166,7 @@ class ProductController extends ResourceController
             'suplier' => $data->suplier ?? null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
-            // 'dropship' => removed
+            'berat' => $data->berat ?? 0,
             "created_by" => $token['user_id'],
         ];
 
@@ -506,6 +507,7 @@ class ProductController extends ResourceController
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
+            'berat' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -532,7 +534,7 @@ class ProductController extends ResourceController
             'suplier' => $data->suplier ?? null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
-            // 'dropship' => removed
+            'berat' => $data->berat ?? 0,
             "updated_by" => $token['user_id'],
         ];
 

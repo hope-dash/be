@@ -385,6 +385,15 @@ class TransactionControllerV2 extends ResourceController
             $newStatus = 'CANCEL';
             $refundNeeded = 0;
             
+            // Store cancel reason if provided
+            if (isset($data->cancel_reason) && !empty($data->cancel_reason)) {
+                $this->transactionMetaModel->insert([
+                    'transaction_id' => $id,
+                    'key' => 'cancel_reason',
+                    'value' => $data->cancel_reason
+                ]);
+            }
+            
             if ($trx['total_payment'] > 0) {
                 $newStatus = 'NEED_REFUND';
                 $refundNeeded = $trx['total_payment'];
@@ -429,6 +438,8 @@ class TransactionControllerV2 extends ResourceController
         try {
             $cogsReversal = 0;
             $revenueReduction = 0; 
+            $returnDetails = [];
+            $returnSummary = [];
 
             foreach ($data->items as $item) {
                 $saleItem = $this->salesProductModel
@@ -440,6 +451,11 @@ class TransactionControllerV2 extends ResourceController
 
                 $qty = $item->qty;
                 $isDamaged = ($item->condition === 'bad'); 
+                $conditionText = $isDamaged ? 'CACAT' : 'BAIK';
+
+                // Get product name for logging
+                $product = $this->productModel->where('id_barang', $item->kode_barang)->first();
+                $productName = $product['nama_barang'] ?? $item->kode_barang;
 
                 $this->addStock($item->kode_barang, $trx['id_toko'], $qty, $id, "Retur Barang ({$item->condition})", $isDamaged);
 
@@ -448,7 +464,46 @@ class TransactionControllerV2 extends ResourceController
                 
                 $priceOne = $saleItem['total'] / $saleItem['jumlah'];
                 $revenueReduction += ($priceOne * $qty);
+
+                // Store detailed return info
+                $returnDetails[] = [
+                    'kode_barang' => $item->kode_barang,
+                    'nama_barang' => $productName,
+                    'qty' => $qty,
+                    'condition' => $item->condition,
+                    'is_damaged' => $isDamaged,
+                    'unit_price' => $priceOne,
+                    'total_value' => $priceOne * $qty
+                ];
+
+                // Create individual product log
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'RETUR_PRODUCT',
+                    'target_table' => 'product',
+                    'target_id' => $product['id'] ?? 0,
+                    'description' => "Retur: {$productName} ({$item->kode_barang}) - Qty: {$qty} - Kondisi: {$conditionText}" . ($isDamaged ? " - Masuk ke Barang Cacat" : " - Masuk ke Stock Normal"),
+                    'detail' => [
+                        'transaction_id' => $id,
+                        'invoice' => $trx['invoice'],
+                        'kode_barang' => $item->kode_barang,
+                        'nama_barang' => $productName,
+                        'qty' => $qty,
+                        'condition' => $item->condition,
+                        'is_damaged' => $isDamaged,
+                        'stock_type' => $isDamaged ? 'barang_cacat' : 'stock_normal'
+                    ]
+                ]);
+
+                $returnSummary[] = "{$productName} ({$item->kode_barang}): {$qty} pcs - {$conditionText}";
             }
+
+            // Store return details in transaction_meta
+            $this->transactionMetaModel->insert([
+                'transaction_id' => $id,
+                'key' => 'return_details',
+                'value' => json_encode($returnDetails)
+            ]);
 
             if ($cogsReversal > 0) {
                  $jid = $this->createJournal('RETUR_COGS', $id, $trx['invoice'], date('Y-m-d'), "Retur COGS Reversal", $trx['id_toko']);
@@ -464,33 +519,39 @@ class TransactionControllerV2 extends ResourceController
 
             $this->db->transComplete();
             
+            // Transaction-level summary log
+            $summaryText = "Retur Transaksi {$trx['invoice']} - " . count($returnDetails) . " item(s): " . implode(", ", $returnSummary);
             log_aktivitas([
                 'user_id' => $userId,
-                'action_type' => 'RETUR',
+                'action_type' => 'RETUR_TRANSACTION',
                 'target_table' => 'transaction',
                 'target_id' => $id,
-                'description' => "Product Return processed",
-                'detail' => $data->items
+                'description' => $summaryText,
+                'detail' => [
+                    'invoice' => $trx['invoice'],
+                    'total_items' => count($returnDetails),
+                    'items' => $returnDetails,
+                    'total_revenue_reduction' => $revenueReduction,
+                    'refund_money' => $data->refund_money ?? false
+                ]
             ]);
             
             // If return involves refund (money back), set status NEED_REFUND
-            // Check if user requested a refund for this return or it is an exchange?
-            // User requirement: "kalo dignti duit jadi need to redunf"
-            // Assume input flag 'refund_money' = true
             $refundMoney = $data->refund_money ?? false;
             
             if ($refundMoney) {
                  $this->transactionModel->update($id, ['status' => 'NEED_REFUND']);
-                 // Store potential refund amount? Revenue Reduction + any previous needed?
-                 // For now, simple flag.
                  $this->transactionMetaModel->insert([
                     'transaction_id' => $id,
                     'key' => 'refund_needed',
-                    'value' => $revenueReduction // Estimated refund amount from returned items
+                    'value' => $revenueReduction
                 ]);
             }
 
-            return $this->jsonResponse->oneResp('Return processed successfully', [], 200);
+            return $this->jsonResponse->oneResp('Return processed successfully', [
+                'items_returned' => count($returnDetails),
+                'total_value' => $revenueReduction
+            ], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
