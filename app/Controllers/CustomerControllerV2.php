@@ -237,13 +237,15 @@ class CustomerControllerV2 extends ResourceController
                 $jwt = new Jwtoken();
                 $decoded = $jwt->validateToken($token);
                 if ($decoded && isset($decoded->customer_id)) {
+                    // Fetch fresh customer data from DB to ensure latest discount rules
                     $customerModel = new \App\Models\CustomerModel();
-                    $customerData = $customerModel->find($decoded->customer_id);
-                    if ($customerData) {
-                        $customer = $customerData;
-                    }
+                    $customer = $customerModel
+                        ->select('id, discount_type, discount_value')
+                        ->find($decoded->customer_id);
                 }
             }
+            
+           
 
             $idToko = $this->request->getGet('id_toko');
             $search = trim($this->request->getGet('search') ?? ''); // Search query
@@ -284,7 +286,7 @@ class CustomerControllerV2 extends ResourceController
             }
 
             // === OPTIMIZED STOCK FETCHING ===
-            $productIds = array_column($products, 'id_barang');
+            $productIds = array_unique(array_column($products, 'id_barang'));
             $stockMap = [];
             
             // Load toko details if needed map
@@ -298,15 +300,14 @@ class CustomerControllerV2 extends ResourceController
             }
 
             if (!empty($productIds)) {
-                $stockBuilder = $this->stockModel->whereIn('id_barang', $productIds);
+                $stockBuilder = $this->db->table('stock')->whereIn('id_barang', $productIds);
                 
                 if ($idToko) {
                     $stockBuilder->where('id_toko', $idToko);
-                } else {
-                    $stockBuilder->where('stock >', 0);
-                }
+                } 
+                // Remove stock > 0 filter to show ALL stock records including 0
                 
-                $stocks = $stockBuilder->findAll();
+                $stocks = $stockBuilder->get()->getResultArray();
 
                 foreach ($stocks as $s) {
                     if ($idToko) {
@@ -344,14 +345,17 @@ class CustomerControllerV2 extends ResourceController
                 $customerPrice = $basePrice;
                 $discountApplied = 0;
 
-                if ($customer && $customer['discount_type']) {
-                    if ($customer['discount_type'] === 'PERCENTAGE') {
-                        $discount = ($basePrice * $customer['discount_value']) / 100;
+                if ($customer && !empty($customer['discount_type'])) {
+                    $discountType = strtolower($customer['discount_type']);
+                    $discountValue = (float) $customer['discount_value'];
+
+                    if ($discountType === 'percentage') {
+                        $discount = ($basePrice * $discountValue) / 100;
                         $customerPrice = max(0, $basePrice - $discount);
                         $discountApplied = $discount;
-                    } elseif ($customer['discount_type'] === 'FIXED') {
-                        $discountApplied = min($basePrice, $customer['discount_value']);
-                        $customerPrice = max(0, $basePrice - $customer['discount_value']);
+                    } elseif ($discountType === 'fixed') {
+                        $discountApplied = min($basePrice, $discountValue);
+                        $customerPrice = max(0, $basePrice - $discountValue);
                     }
                 }
 

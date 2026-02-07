@@ -1456,11 +1456,12 @@ class ProductController extends ResourceController
 
                 // Apply discount jika customer punya discount
                 if ($discountType && $discountValue > 0) {
-                    if ($discountType === 'PERCENTAGE') {
+                    $type = strtolower($discountType);
+                    if ($type === 'percentage') {
                         // Discount percentage
                         $discountAmount = $hargaJualOriginal * ($discountValue / 100);
                         $hargaJualFinal = $hargaJualOriginal - $discountAmount;
-                    } elseif ($discountType === 'FIXED') {
+                    } elseif ($type === 'fixed') {
                         // Discount fixed amount
                         $discountAmount = $discountValue;
                         $hargaJualFinal = max(0, $hargaJualOriginal - $discountValue);
