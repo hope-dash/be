@@ -440,7 +440,7 @@ class CustomerControllerV2 extends ResourceController
                     'product.id_barang',
                     'product.nama_barang',
                     'product.harga_jual',
-                    'product.deskripsi', // If exists
+                    'product.description',
                     'model_barang.nama_model',
                     'seri.seri'
                 ])
