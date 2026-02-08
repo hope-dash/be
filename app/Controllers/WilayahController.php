@@ -30,18 +30,38 @@ class WilayahController extends ResourceController
     }
 
     /**
-     * Get cities/regencies by province ID
+     * Get cities/regencies by province ID or Name
      * 
-     * @param string $provinceId
+     * @param string $provinceId (ID or Name)
      * @return Response
      */
     public function getCitiesByProvince($provinceId)
     {
         try {
+            // Support lookup by Province Name (if not numeric)
+            if (!is_numeric($provinceId)) {
+                $provinces = $this->loadProvinces();
+                $decodedName = urldecode($provinceId);
+                $foundId = null;
+                
+                foreach ($provinces as $province) {
+                    if (strcasecmp($province['name'], $decodedName) === 0) {
+                        $foundId = $province['id'];
+                        break;
+                    }
+                }
+
+                if ($foundId) {
+                    $provinceId = $foundId;
+                } else {
+                    return $this->jsonResponse->error('Province name not found', 404);
+                }
+            }
+
             $cities = $this->loadCities($provinceId);
             
             if (empty($cities)) {
-                return $this->jsonResponse->error('Province not found', 404);
+                return $this->jsonResponse->error('Cities not found for this province', 404);
             }
 
             return $this->jsonResponse->multiResp('', $cities, count($cities), 1, 1, count($cities), 200);
