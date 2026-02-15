@@ -243,6 +243,7 @@ class PembelianControllerV2 extends ResourceController
             'id_toko' => $tokoId,
             'reference_type' => $refType,
             'reference_id' => $refId,
+            'reference_no' => $refNo,
             'date' => $date,
             'description' => $desc,
             'created_at' => date('Y-m-d H:i:s')

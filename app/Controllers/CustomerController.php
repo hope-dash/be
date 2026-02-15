@@ -27,6 +27,13 @@ class CustomerController extends BaseController
                 'nama_customer' => 'required',
                 'alamat' => 'required',
                 'no_hp_customer' => 'required|min_length[10]|max_length[15]|is_unique[customer.no_hp_customer]',
+                'email' => 'permit_empty|valid_email|is_unique[customer.email]',
+                'provinsi' => 'permit_empty',
+                'kota_kabupaten' => 'permit_empty',
+                'kode_pos' => 'permit_empty',
+                'discount_type' => 'permit_empty|in_list[percentage,fixed]',
+                'discount_value' => 'permit_empty|numeric',
+                'type' => 'permit_empty|in_list[regular,special]',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -39,6 +46,12 @@ class CustomerController extends BaseController
                 'type' => $data->type ?? 'regular',
                 'alamat' => $data->alamat,
                 'no_hp_customer' => $data->no_hp_customer,
+                'email' => $data->email ?? NULL,
+                'provinsi' => $data->provinsi ?? NULL,
+                'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? NULL,
+                'kode_pos' => $data->kode_pos ?? NULL,
+                'discount_type' => $data->discount_type ?? NULL,
+                'discount_value' => $data->discount_value ?? 0,
             ];
 
 
@@ -66,6 +79,13 @@ class CustomerController extends BaseController
                 'nama_customer' => 'required',
                 'alamat' => 'required',
                 'no_hp_customer' => "required|min_length[10]|max_length[15]|is_unique[customer.no_hp_customer,id,{$id}]",
+                'email' => "permit_empty|valid_email|is_unique[customer.email,id,{$id}]",
+                'provinsi' => 'permit_empty',
+                'kota_kabupaten' => 'permit_empty',
+                'kode_pos' => 'permit_empty',
+                'discount_type' => 'permit_empty|in_list[percentage,fixed]',
+                'discount_value' => 'permit_empty|numeric',
+                'type' => 'permit_empty|in_list[regular,special]',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -78,6 +98,12 @@ class CustomerController extends BaseController
                 'type' => $data->type ?? 'regular',
                 'alamat' => $data->alamat,
                 'no_hp_customer' => $data->no_hp_customer,
+                'email' => $data->email ?? NULL,
+                'provinsi' => $data->provinsi ?? NULL,
+                'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? NULL,
+                'kode_pos' => $data->kode_pos ?? NULL,
+                'discount_type' => $data->discount_type ?? NULL,
+                'discount_value' => $data->discount_value ?? 0,
             ];
 
             $query = $this->customer->update($id, $customerData);
@@ -85,7 +111,7 @@ class CustomerController extends BaseController
             if ($query) {
                 return $this->jsonResponse->oneResp('Customer Updated', ['customer_id' => $id]);
             } else {
-                return $this->jsonResponse->error("Add Customer Failed");
+                return $this->jsonResponse->error("Update Customer Failed");
 
             }
         } catch (\Exception $e) {

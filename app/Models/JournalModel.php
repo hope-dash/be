@@ -10,7 +10,7 @@ class JournalModel extends Model
     protected $primaryKey = 'id';
     protected $allowedFields = [
         'id_toko',
-        'reference_type', 'reference_id', 'date', 
+        'reference_type', 'reference_id', 'reference_no', 'date', 
         'description', 'total_debit', 'total_credit', 
         'created_at', 'updated_at'
     ];

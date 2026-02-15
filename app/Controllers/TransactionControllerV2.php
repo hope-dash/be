@@ -78,6 +78,9 @@ class TransactionControllerV2 extends ResourceController
                         'nama_customer' => $data->customer_name ?? 'Guest',
                         'no_hp_customer' => $data->customer_phone,
                         'alamat' => $data->alamat ?? '',
+                        'provinsi' => $data->provinsi ?? null,
+                        'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? null,
+                        'kode_pos' => $data->kode_pos ?? null,
                         'created_at' => date('Y-m-d H:i:s')
                     ];
                     $this->customerModel->insert($custData);
@@ -87,7 +90,8 @@ class TransactionControllerV2 extends ResourceController
 
 
             // -- 1. Calculate Totals --
-            $totalAmount = 0;
+            $grossAmount = 0; // Total sum of (price * qty) before any discounts
+            $totalItemDiscount = 0;
             $itemsProcessed = [];
             $totalModal = 0;
 
@@ -103,6 +107,20 @@ class TransactionControllerV2 extends ResourceController
                 $product = $this->productModel->where('id_barang', $idBarang)->first();
                 if (!$product) throw new \Exception("Product {$idBarang} not found");
 
+                // Item Level Discount
+                $itemDiscountType = $item->discount_type ?? 'FIXED';
+                $itemDiscountAmount = $item->discount_amount ?? 0;
+                $itemTotal = $price * $qty;
+                $itemDiscountValue = 0;
+
+                if (strtoupper($itemDiscountType) === 'PERCENTAGE' || strtoupper($itemDiscountType) === 'PERCENT') {
+                    $itemDiscountType = 'PERCENTAGE';
+                    $itemDiscountValue = ($itemTotal * $itemDiscountAmount) / 100;
+                } else {
+                    $itemDiscountType = 'FIXED';
+                    $itemDiscountValue = $itemDiscountAmount;
+                }
+
                 // Validate Stock
                 $stockEntry = $this->stockModel->where('id_barang', $idBarang)->where('id_toko', $data->id_toko)->first();
                 $currentStock = $stockEntry ? $stockEntry['stock'] : 0;
@@ -110,31 +128,51 @@ class TransactionControllerV2 extends ResourceController
                     throw new \Exception("Insufficient stock for {$product['nama_barang']}");
                 }
 
-                $totalAmount += ($price * $qty);
+                $grossAmount += $itemTotal;
+                $totalItemDiscount += $itemDiscountValue;
+                
                 $modal = $product['harga_modal'] * $qty;
                 $totalModal += $modal;
                 
                 $itemsProcessed[] = [
                     'product' => $product,
                     'qty' => $qty,
-                    'price' => $price
+                    'price' => $price,
+                    'discount_type' => $itemDiscountType,
+                    'discount_amount' => $itemDiscountAmount,
+                    'discount_value' => $itemDiscountValue,
+                    'total_modal' => $modal
                 ];
             }
 
-            $discountAmount = $data->discount_amount ?? 0;
+            // Transaction Level Discount
+            $txDiscountType = $data->discount_type ?? 'FIXED';
+            $txDiscountAmount = $data->discount_amount ?? 0;
+            $itemActualSubtotal = $grossAmount - $totalItemDiscount;
+            $txDiscountValue = 0;
+
+            if (strtoupper($txDiscountType) === 'PERCENTAGE' || strtoupper($txDiscountType) === 'PERCENT') {
+                $txDiscountType = 'PERCENTAGE';
+                $txDiscountValue = ($itemActualSubtotal * $txDiscountAmount) / 100;
+            } else {
+                $txDiscountType = 'FIXED';
+                $txDiscountValue = $txDiscountAmount;
+            }
+
+            $totalDiscount = $totalItemDiscount + $txDiscountValue;
+            $afterDiscountSubtotal = $itemActualSubtotal - $txDiscountValue;
+
+            // PPN Calculation
+            $ppnPercent = $data->ppn ?? 0;
+            $ppnValue = ($afterDiscountSubtotal * $ppnPercent) / 100;
             
             // Shipping Cost Logic
             $shippingCost = $data->biaya_pengiriman ?? 0;
             $isFreeOngkir = $data->free_ongkir ?? false;
             
             // Grand Total Calculation
-            // Subtotal - Discount + Shipping (if not free)
-            // If free ongkir, customer doesn't pay shipping, but we record the expense later?
-            // "kalo ada ongkir tapi free ongkir true maka jadi beban dikitia biaya ongkirnya"
-            // Means: Receivable amount does NOT include shipping.
-            // But we might need to pay the courier.
-            
-            $grandTotal = $totalAmount - $discountAmount;
+            // actual_total = total dari amount stlh discount dan ada ppn atau ongkir lain lain
+            $grandTotal = $afterDiscountSubtotal + $ppnValue;
             
             if (!$isFreeOngkir) {
                 $grandTotal += $shippingCost;
@@ -144,24 +182,28 @@ class TransactionControllerV2 extends ResourceController
 
             // -- Insert Transaction --
             $trxData = [
-                'invoice' => 'INV-' . date('ymd') . rand(1000,9999), 
+                'invoice' => 'INV-TMP-' . time(),
                 'id_toko' => $data->id_toko,
-                'amount' => $grandTotal,
-                'actual_total' => $grandTotal,
+                'amount' => $grossAmount, // amount = total dari semua total barang
+                'actual_total' => $grandTotal, // actual_total = total dari amount stlh discount dan ada ppn atau ongkir lain lain
                 'total_payment' => 0,
                 'status' => 'WAITING_PAYMENT',
-                'delivery_status' => 'READY_TO_PICKUP',
-                'discount_type' => $data->discount_type ?? 'FIXED',
-                'discount_amount' => $discountAmount,
+                'delivery_status' => '',
+                'discount_type' => $txDiscountType,
+                'discount_amount' => $txDiscountAmount,
                 'total_modal' => $totalModal,
                 'po' => $data->po ?? false,
                 'created_by' => $userId,
                 'date_time' => date('Y-m-d H:i:s'),
-                'invoice' => 'INV-' . date('ymd') . rand(1000, 9999), // Temporary, will update with ID if needed
             ];
             
             $this->transactionModel->insert($trxData);
             $trxId = $this->transactionModel->getInsertID();
+
+            // Update Invoice to use ID
+            $invoice = 'INV' . date('ymd') . $trxId;
+            $this->transactionModel->update($trxId, ['invoice' => $invoice]);
+            $trxData['invoice'] = $invoice; // Update local variable for later use in journals/logs
 
             // Save Metadata (Customer, Shipping info, etc)
             $metaData = [
@@ -169,12 +211,18 @@ class TransactionControllerV2 extends ResourceController
                 'customer_name' => $data->customer_name ?? '',
                 'customer_phone' => $data->customer_phone ?? '',
                 'alamat' => $data->alamat ?? '',
+                'provinsi' => $data->provinsi ?? '',
+                'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? '',
+                'kode_pos' => $data->kode_pos ?? '',
                 'source' => $data->source ?? '',
                 'jatuh_tempo' => $data->jatuh_tempo ?? '',
                 'pengiriman' => $data->pengiriman ?? '',
                 'biaya_pengiriman' => $shippingCost,
                 'free_ongkir' => $isFreeOngkir ? '1' : '0',
-                'ppn' => $data->ppn ?? 0
+                'ppn' => $ppnPercent,
+                'ppn_value' => $ppnValue,
+                'item_discount_total' => $totalItemDiscount,
+                'tx_discount_value' => $txDiscountValue
             ];
             
             foreach ($metaData as $key => $val) {
@@ -195,41 +243,24 @@ class TransactionControllerV2 extends ResourceController
             $this->addJournalItem($journalId, '1003', $grandTotal, 0); 
             
             // 2. Dr Discount (if any)
-            if ($discountAmount > 0) {
-                 $this->addJournalItem($journalId, '4002', $discountAmount, 0); 
+            if ($totalDiscount > 0) {
+                 $this->addJournalItem($journalId, '4002', $totalDiscount, 0); 
             }
             
             // 3. Cr Sales Revenue (Gross Sales from Items)
-            // Revenue only comes from the ITEM Sales.
-            $this->addJournalItem($journalId, '4001', 0, $totalAmount); 
+            $this->addJournalItem($journalId, '4001', 0, $grossAmount); 
             
-            // 4. Shipping Logic
-            // If Customer pays shipping (!FreeOngkir):
-            // We credit a Liability/Income account for shipping? Or Revenue?
-            // Usually "Shipping Revenue" or "Shipping Payable" (if pass-through).
-            // Let's assume Credit '4004' (Shipping Revenue) or reuse 4001 if simple.
-            // If FreeOngkir:
-            // We Debit "Shipping Expense" (Beban Ongkir) and Credit "Cash/Payable" to courier later?
-            // "Maka jadi beban di kita" -> This happens when we PAY the courier. 
-            // In the SALES invoice, if it's free, we just don't charge the customer.
-            // IF we want to accrue the expense NOW (provision):
-            // Dr Shipping Expense, Cr Accrued Shipping.
-            // For MVP: If customer pays -> Cr Shipping Revenue.
-            
+            // 4. Cr PPN Payable (using 2001 or 2005 if exists)
+            if ($ppnValue > 0) {
+                $this->addJournalItem($journalId, '2001', 0, $ppnValue);
+            }
+
+            // 5. Shipping Logic
             if (!$isFreeOngkir && $shippingCost > 0) {
-                 // We don't have Shipping Revenue account in seeds, put to Sales or Other Revenue.
-                 // Using 4001 Sales Revenue for now to balance.
-                 $this->addJournalItem($journalId, '4001', 0, $shippingCost);
+                  $this->addJournalItem($journalId, '4001', 0, $shippingCost);
             }
             
             if ($isFreeOngkir && $shippingCost > 0) {
-                // "Jadi beban di kita". We recognize expense.
-                // Dr Shipping Expense (6005 Operational or new 6006 Shipping)
-                // Cr Freight Payable (200x).
-                // Assuming we pay later.
-                // Let's create account 6006 if not exists, or use 6005. 
-                // Using 6005 Operational for now.
-                // And Credit 2001 AP.
                 $this->addJournalItem($journalId, '6005', $shippingCost, 0); // Dr Expense
                 $this->addJournalItem($journalId, '2001', 0, $shippingCost); // Cr Payable
             }
@@ -243,21 +274,28 @@ class TransactionControllerV2 extends ResourceController
                 $p = $itemData['product'];
                 $qty = $itemData['qty'];
                 $price = $itemData['price'];
-                $modal = $p['harga_modal'] * $qty;
+                $modal = $itemData['total_modal'];
+                $discountValue = $itemData['discount_value'];
 
                 // Deduct Stock
                 $this->deductStock($p['id_barang'], $data->id_toko, $qty, $trxId, "Invoice {$trxData['invoice']}");
+
+                $priceAfterDiscount = ($qty > 0) ? ($qty * $price - $discountValue) / $qty : 0;
+                $totalAfterDiscount = $qty * $price - $discountValue;
 
                 $salesProductData[] = [
                     'id_transaction' => $trxId,
                     'kode_barang' => $p['id_barang'],
                     'jumlah' => $qty,
-                    'harga_jual' => $price,
-                    'total' => $qty * $price,
+                    'harga_system' => $price,
+                    'harga_jual' => $priceAfterDiscount,
+                    'total' => $totalAfterDiscount,
                     'modal_system' => $p['harga_modal'],
                     'total_modal' => $modal,
-                    'actual_per_piece' => $price,
-                    'actual_total' => $qty * $price,
+                    'actual_per_piece' => $priceAfterDiscount,
+                    'actual_total' => $totalAfterDiscount,
+                    'discount_type' => $itemData['discount_type'],
+                    'discount_amount' => $itemData['discount_amount']
                 ];
 
                 $cogsTotal += $modal;
@@ -293,6 +331,76 @@ class TransactionControllerV2 extends ResourceController
         }
     }
 
+    // 1.5 Calculate/Count Transaction (Preview)
+    public function calculate()
+    {
+        try {
+            $data = $this->request->getJSON();
+            $items = $data->items ?? $data->item ?? [];
+            if (empty($items)) throw new \Exception("Items cannot be empty");
+
+            $grossAmount = 0;
+            $totalItemDiscount = 0;
+
+            foreach ($items as $item) {
+                $price = $item->price ?? $item->harga_jual ?? 0;
+                $qty = $item->qty ?? $item->jumlah ?? 0;
+
+                $itemDiscountType = $item->discount_type ?? 'FIXED';
+                $itemDiscountAmount = $item->discount_amount ?? 0;
+                $itemTotal = $price * $qty;
+                $itemDiscountValue = 0;
+
+                if (strtoupper($itemDiscountType) === 'PERCENTAGE' || strtoupper($itemDiscountType) === 'PERCENT') {
+                    $itemDiscountValue = ($itemTotal * $itemDiscountAmount) / 100;
+                } else {
+                    $itemDiscountValue = $itemDiscountAmount;
+                }
+
+                $grossAmount += $itemTotal;
+                $totalItemDiscount += $itemDiscountValue;
+            }
+
+            // Transaction Level Discount
+            $txDiscountType = $data->discount_type ?? 'FIXED';
+            $txDiscountAmount = $data->discount_amount ?? 0;
+            $itemActualSubtotal = $grossAmount - $totalItemDiscount;
+            $txDiscountValue = 0;
+
+            if (strtoupper($txDiscountType) === 'PERCENTAGE' || strtoupper($txDiscountType) === 'PERCENT') {
+                $txDiscountValue = ($itemActualSubtotal * $txDiscountAmount) / 100;
+            } else {
+                $txDiscountValue = $txDiscountAmount;
+            }
+
+            $afterDiscountSubtotal = $itemActualSubtotal - $txDiscountValue;
+
+            // PPN Calculation
+            $ppnPercent = $data->ppn ?? 10;
+            $ppnValue = ($afterDiscountSubtotal * $ppnPercent) / 100;
+            
+            // Shipping Cost
+            $shippingCost = $data->biaya_pengiriman ?? 0;
+            $isFreeOngkir = $data->free_ongkir ?? false;
+            
+            $chargedShipping = $isFreeOngkir ? 0 : $shippingCost;
+            $grandTotal = $afterDiscountSubtotal + $ppnValue + $chargedShipping;
+
+            return $this->jsonResponse->oneResp('Calculation successful', [
+                'subtotal' => $grossAmount,
+                'diskon_item' => $totalItemDiscount,
+                'diskon_tambahan' => $txDiscountValue,
+                'subtotal_setelah_diskon' => $afterDiscountSubtotal,
+                'ppn' => $ppnValue,
+                'biaya_pengiriman' => $chargedShipping,
+                'grand_total' => $grandTotal
+            ], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
     // 2. Add Payment
     public function addPayment($id = null)
     {
@@ -322,7 +430,7 @@ class TransactionControllerV2 extends ResourceController
             $this->addJournalItem($journalId, '1003', 0, $amount); // Cr AR
 
             $newTotalPaid = $trx['total_payment'] + $amount;
-            $newStatus = ($newTotalPaid >= $trx['amount']) ? 'PAID' : 'PARTIALLY_PAID';
+            $newStatus = ($newTotalPaid >= $trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
 
             $this->transactionModel->update($id, [
                 'total_payment' => $newTotalPaid,
@@ -376,11 +484,43 @@ class TransactionControllerV2 extends ResourceController
 
             // Reverse Sales
             $jIdSales = $this->createJournal('CANCEL_SALES', $id, $trx['invoice'], date('Y-m-d'), "Cancellation {$trx['invoice']}", $trx['id_toko']);
-            $this->addJournalItem($jIdSales, '4001', $trx['amount'] + $trx['discount_amount'], 0); 
-            if ($trx['discount_amount'] > 0) {
-                 $this->addJournalItem($jIdSales, '4002', 0, $trx['discount_amount']);
+            
+            // Get meta for accurate reversal
+            $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+            $metaMap = [];
+            foreach ($metas as $m) { $metaMap[$m['key']] = $m['value']; }
+            
+            $ppnValue = (float)($metaMap['ppn_value'] ?? 0);
+            $itemDiscountTotal = (float)($metaMap['item_discount_total'] ?? 0);
+            $txDiscountValue = (float)($metaMap['tx_discount_value'] ?? 0);
+            $totalDiscount = $itemDiscountTotal + $txDiscountValue;
+            $shippingCost = (float)($metaMap['biaya_pengiriman'] ?? 0);
+            $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
+
+            // Reverse AR
+            $this->addJournalItem($jIdSales, '1003', 0, $trx['actual_total']);
+            
+            // Reverse Discount (Contra-Revenue)
+            if ($totalDiscount > 0) {
+                 $this->addJournalItem($jIdSales, '4002', 0, $totalDiscount);
             }
-            $this->addJournalItem($jIdSales, '1003', 0, $trx['amount']);
+
+            // Reverse Gross Sales
+            $this->addJournalItem($jIdSales, '4001', $trx['amount'], 0);
+            
+            // Reverse PPN
+            if ($ppnValue > 0) {
+                $this->addJournalItem($jIdSales, '2001', $ppnValue, 0);
+            }
+
+            // Reverse Shipping
+            if (!$isFreeOngkir && $shippingCost > 0) {
+                $this->addJournalItem($jIdSales, '4001', $shippingCost, 0);
+            }
+            if ($isFreeOngkir && $shippingCost > 0) {
+                $this->addJournalItem($jIdSales, '2001', $shippingCost, 0); // Reverse AP
+                $this->addJournalItem($jIdSales, '6005', 0, $shippingCost); // Reverse Expense
+            }
 
             $newStatus = 'CANCEL';
             $refundNeeded = 0;
@@ -617,6 +757,7 @@ class TransactionControllerV2 extends ResourceController
             'id_toko' => $tokoId,
             'reference_type' => $refType,
             'reference_id' => $refId,
+            'reference_no' => $refNo,
             'date' => $date,
             'description' => $desc,
             'created_at' => date('Y-m-d H:i:s')
@@ -689,6 +830,64 @@ class TransactionControllerV2 extends ResourceController
             'reference_id' => $trxId,
             'description' => $reason
         ]);
+    }
+
+    // Get Full Transaction Detail
+    public function getDetail($id = null)
+    {
+        try {
+            if (!$id) return $this->jsonResponse->error("ID is required", 400);
+
+            $db = \Config\Database::connect();
+            
+            // 1. Get Transaction with Toko info
+            $transaction = $this->transactionModel
+                ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo')
+                ->join('toko', 'transaction.id_toko = toko.id', 'left')
+                ->find($id);
+
+            if (!$transaction) return $this->jsonResponse->error("Transaction not found", 404);
+
+            // 2. Get All Metadata
+            $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+            $metaMap = [];
+            foreach ($metas as $m) {
+                $metaMap[$m['key']] = $m['value'];
+            }
+            $transaction['meta'] = $metaMap;
+
+            // 3. Get Items (Sales Product)
+            $items = $db->table('sales_product sp')
+                ->select("
+                    sp.*,
+                    p.nama_barang,
+                    mb.nama_model,
+                    s.seri,
+                    CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang
+                ")
+                ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+                ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+                ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+                ->where('sp.id_transaction', $id)
+                ->get()
+                ->getResultArray();
+            
+            $transaction['items'] = $items;
+
+            // 4. Get Payments
+            $payments = $db->table('transaction_payments')
+                ->where('transaction_id', $id)
+                ->orderBy('paid_at', 'DESC')
+                ->get()
+                ->getResultArray();
+            
+            $transaction['payments'] = $payments;
+
+            return $this->jsonResponse->oneResp('Success', $transaction, 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
     }
 
     // Get Transactions by Status

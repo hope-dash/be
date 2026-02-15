@@ -131,6 +131,8 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     // V2 Transaction Routes
     $routes->group('v2', function($routes) {
         $routes->post('transaction', 'TransactionControllerV2::create');
+        $routes->get('transaction/(:num)', 'TransactionControllerV2::getDetail/$1');
+        $routes->post('transaction/count', 'TransactionControllerV2::calculate');
         $routes->post('transaction/(:num)/payment', 'TransactionControllerV2::addPayment/$1');
         $routes->post('transaction/(:num)/cancel', 'TransactionControllerV2::cancel/$1');
         $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
@@ -174,6 +176,8 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->get('voucher', 'VoucherController::index');
         $routes->put('voucher/(:num)', 'VoucherController::update/$1');
         $routes->delete('voucher/(:num)', 'VoucherController::delete/$1');
+        // Global Upload
+        $routes->post('upload/image', 'UploadController::uploadImage');
     });
 
 });

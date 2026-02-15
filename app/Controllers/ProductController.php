@@ -181,23 +181,7 @@ class ProductController extends ResourceController
                 'new' => $data
             ],
         ]);
-
-        $stockData = [];
-        // Initial Stock 0 for V2
-        foreach ($data->stock as $toko) {
-            if (isset($toko->id_toko) && $toko->id_toko !== "" && $toko->id_toko !== "0") {
-                $stockData[] = [
-                    'id_barang' => $productId,
-                    'id_toko' => $toko->id_toko,
-                    'stock' => 0, 
-                    'barang_cacat' => 0,
-                    // dropship removed
-                ];
-            }
-        }
-
-        $this->stockModel->insertBatch($stockData);
-
+        
         return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
     }
     public function uploadImages()

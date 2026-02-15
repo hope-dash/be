@@ -32,22 +32,51 @@ class AccountingReportController extends ResourceController
         $endDate = $this->request->getGet('end_date') ?? date('Y-m-d');
         $tokoId = $this->request->getGet('id_toko');
 
-        $builder = $this->journalModel
-            ->select('journals.*, journal_items.debit, journal_items.credit, accounts.code, accounts.name as account_name')
-            ->join('journal_items', 'journal_items.journal_id = journals.id')
-            ->join('accounts', 'accounts.id = journal_items.account_id')
-            ->where('journals.date >=', $startDate)
-            ->where('journals.date <=', $endDate);
+        $builder = $this->db->table('journals j')
+            ->select('j.id as journal_id, j.date, j.reference_no, j.description, ji.debit, ji.credit, a.code as account_code, a.name as account_name')
+            ->join('journal_items ji', 'ji.journal_id = j.id')
+            ->join('accounts a', 'a.id = ji.account_id')
+            ->where('j.date >=', $startDate)
+            ->where('j.date <=', $endDate);
         
         if ($tokoId) {
-            $builder->where('journals.id_toko', $tokoId);
+            $builder->where('j.id_toko', $tokoId);
         }
 
-        $journal = $builder->orderBy('journals.date', 'ASC')
-            ->orderBy('journals.id', 'ASC')
-            ->findAll();
+        $results = $builder->orderBy('j.date', 'ASC')
+            ->orderBy('j.id', 'ASC')
+            ->get()->getResultArray();
         
-        return $this->jsonResponse->oneResp('Journal Report', $journal, 200);
+        $journals = [];
+        $totalDebit = 0;
+        $totalCredit = 0;
+
+        foreach ($results as $row) {
+            $jid = $row['journal_id'];
+            if (!isset($journals[$jid])) {
+                $journals[$jid] = [
+                    'id' => $jid,
+                    'date' => $row['date'],
+                    'reference_no' => $row['reference_no'] ?? '',
+                    'description' => $row['description'],
+                    'items' => []
+                ];
+            }
+            $journals[$jid]['items'][] = [
+                'account_code' => $row['account_code'],
+                'account_name' => $row['account_name'],
+                'debit' => (float)$row['debit'],
+                'credit' => (float)$row['credit']
+            ];
+            $totalDebit += (float)$row['debit'];
+            $totalCredit += (float)$row['credit'];
+        }
+
+        return $this->jsonResponse->oneResp('Journal Report', [
+            'journals' => array_values($journals),
+            'total_debit' => $totalDebit,
+            'total_credit' => $totalCredit
+        ], 200);
     }
 
     // 2. GET LEDGER (Account Balances per Period)

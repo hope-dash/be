@@ -55,10 +55,12 @@ class ExpenseController extends ResourceController
 
         try {
             // Create Journal Header
+            $refId = date('YmdHis');
             $journalData = [
-                'id_toko' => $data->id_toko ?? null, // Capture id_toko from request
+                'id_toko' => $data->id_toko ?? null,
                 'reference_type' => 'EXPENSE',
-                'reference_id' => date('YmdHis'), // Simple ID or link to expense_log table if created
+                'reference_id' => $refId,
+                'reference_no' => "EXP-{$refId}",
                 'date' => $data->date ?? date('Y-m-d'),
                 'description' => $data->description ?? "Expense {$expenseAccount['name']}",
                 'total_debit' => $data->amount,

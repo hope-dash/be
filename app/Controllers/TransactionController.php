@@ -545,7 +545,7 @@ class TransactionController extends BaseController
             // OPTIMIZED PATH (Search with Subqueries, Simple Sort)
             // ==========================================
             $builder = $db->table('transaction t')
-                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.po, t.total_payment, t.status, t.id_toko, t.date_time, toko.toko_name')
+                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount,t.actual_total, t.po, t.total_payment, t.status, t.id_toko, t.date_time, toko.toko_name')
                 ->join('toko', 't.id_toko = toko.id', 'left');
 
             // Apply Basic Filters
@@ -671,6 +671,7 @@ class TransactionController extends BaseController
                 ->select("
                 t.id AS transaction_id,
                 t.invoice AS invoice_number,
+                t.actual_total,
                 t.amount,
                 t.po,
                 t.total_payment,
@@ -791,7 +792,10 @@ class TransactionController extends BaseController
             MAX(CASE WHEN tm.key = 'biaya_pengiriman' THEN tm.value END) AS biaya_pengiriman,
             MAX(CASE WHEN tm.key = 'notes' THEN tm.value END) AS notes,
             MAX(CASE WHEN tm.key = 'free_ongkir' THEN tm.value END) AS free_ongkir,
-            MAX(CASE WHEN tm.key = 'potongan_ongkir' THEN tm.value END) AS potongan_ongkir
+            MAX(CASE WHEN tm.key = 'potongan_ongkir' THEN tm.value END) AS potongan_ongkir,
+            MAX(CASE WHEN tm.key = 'provinsi' THEN tm.value END) AS provinsi,
+            MAX(CASE WHEN tm.key = 'kota_kabupaten' THEN tm.value END) AS kota_kabupaten,
+            MAX(CASE WHEN tm.key = 'kode_pos' THEN tm.value END) AS kode_pos
         ")
             ->join('toko tk', 't.id_toko = tk.id', 'left')
             ->join('transaction_meta tm_cust', "t.id = tm_cust.transaction_id AND tm_cust.key = 'customer_id'", 'left')
@@ -821,11 +825,14 @@ class TransactionController extends BaseController
             sp.kode_barang,
             sp.jumlah,
             sp.harga_jual,
+            sp.harga_system,
             sp.total,
             sp.modal_system as harga_modal,
             sp.total_modal,
             sp.actual_per_piece,
             sp.actual_total,
+            sp.discount_type,
+            sp.discount_amount,
             CONCAT(
                 COALESCE(p.nama_barang, ''), 
                 ' ', 
@@ -874,6 +881,7 @@ class TransactionController extends BaseController
 
         return $this->jsonResponse->oneResp('Success', $transaction, 200);
     }
+    
     public function createUpdateNotesTransaction()
     {
         $transactionId = $this->request->getVar('transaction_id');
