@@ -102,15 +102,17 @@ class ProductController extends ResourceController
         ]);
 
         $stockData = [];
-        foreach ($data->stock as $toko) {
-            if (isset($toko->id_toko) && $toko->id_toko !== "" && $toko->id_toko !== "0") {
-                $stockData[] = [
-                    'id_barang' => $productId,
-                    'id_toko' => $toko->id_toko,
-                    'stock' => $toko->stock,
-                    'barang_cacat' => $toko->barang_cacat,
-                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
-                ];
+        if (isset($data->stock) && is_array($data->stock)) {
+            foreach ($data->stock as $toko) {
+                if (isset($toko->id_toko) && $toko->id_toko !== "" && $toko->id_toko !== "0") {
+                    $stockData[] = [
+                        'id_barang' => $productId,
+                        'id_toko' => $toko->id_toko,
+                        'stock' => $toko->stock,
+                        'barang_cacat' => $toko->barang_cacat,
+                        'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
+                    ];
+                }
             }
         }
 
@@ -538,24 +540,26 @@ class ProductController extends ResourceController
         ]);
 
         // V2: Ensure Store Relation Exists (Stock Initialized to 0, No Dropship/Stock Updates)
-        foreach ($data->stock as $toko) {
-            // Only add if not exists. Do not update anything.
-            if (isset($toko->id) && $this->stockModel->find($toko->id)) {
-                // Existing relation found, do nothing.
-                continue;
-            } else {
-                $existingStock = $this->stockModel
-                    ->where('id_barang', $id)
-                    ->where('id_toko', $toko->id_toko)
-                    ->first();
+        if (isset($data->stock) && is_array($data->stock)) {
+            foreach ($data->stock as $toko) {
+                // Only add if not exists. Do not update anything.
+                if (isset($toko->id) && $this->stockModel->find($toko->id)) {
+                    // Existing relation found, do nothing.
+                    continue;
+                } else {
+                    $existingStock = $this->stockModel
+                        ->where('id_barang', $id)
+                        ->where('id_toko', $toko->id_toko)
+                        ->first();
 
-                if (!$existingStock) {
-                    $this->stockModel->insert([
-                        'id_barang' => $data->id_barang ?? $oldProductData['kode_barang'],
-                        'id_toko' => $toko->id_toko,
-                        'stock' => 0, 
-                        'barang_cacat' => 0,
-                    ]);
+                    if (!$existingStock) {
+                        $this->stockModel->insert([
+                            'id_barang' => $data->id_barang ?? $oldProductData['kode_barang'],
+                            'id_toko' => $toko->id_toko,
+                            'stock' => 0, 
+                            'barang_cacat' => 0,
+                        ]);
+                    }
                 }
             }
         }
