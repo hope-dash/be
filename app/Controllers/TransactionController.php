@@ -517,6 +517,7 @@ class TransactionController extends BaseController
         $request = $this->request;
 
         $status = $request->getGet('status');
+        $delivery_status = $request->getGet('delivery_status');
         $id_toko = $request->getGet('id_toko');
         $date_start = $request->getGet('date_start');
         $date_end = $request->getGet('date_end');
@@ -549,7 +550,14 @@ class TransactionController extends BaseController
                 ->join('toko', 't.id_toko = toko.id', 'left');
 
             // Apply Basic Filters
-            if ($status) $builder->where('t.status', $status);
+            if ($status) {
+                if (strpos($status, ',') !== false) {
+                    $builder->whereIn('t.status', explode(',', $status));
+                } else {
+                    $builder->where('t.status', $status);
+                }
+            }
+            if ($delivery_status) $builder->like('t.delivery_status', $delivery_status, 'both');
             if (!empty($role) && !$id_toko) $builder->whereIn('t.id_toko', $role);
             if ($id_toko) $builder->where('t.id_toko', $id_toko);
             if ($date_start && $date_end) {
@@ -694,7 +702,13 @@ class TransactionController extends BaseController
                 ->join('toko', 't.id_toko = toko.id', 'left');
 
             // Apply Filters
-            if ($status) $builder->where('t.status', $status);
+            if ($status) {
+                if (strpos($status, ',') !== false) {
+                     $builder->whereIn('t.status', explode(',', $status));
+                } else {
+                     $builder->where('t.status', $status);
+                }
+            }
             if (!empty($role) && !$id_toko) $builder->whereIn('t.id_toko', $role);
             if ($id_toko) $builder->where('t.id_toko', $id_toko);
             if ($date_start && $date_end) {

@@ -215,7 +215,24 @@ Menambahkan metadata ke transaksi (e.g., nomor resi, status pengiriman, catatan)
 
 **Note**: Jika key sudah ada, value akan di-update. Jika belum ada, akan dibuat baru.
 
-### F. Get Transaction Detail
+### F. Update Delivery Status (Status Pengiriman)
+
+Khusus untuk update status pengiriman, resi, dan kurir. Sinkron dengan data internal `delivery_status`.
+
+- **URL**: `POST /v2/transaction/{id}/delivery-status`
+- **Body**:
+
+```json
+{
+  "status": "SHIPPED",
+  "resi": "JNE0019283",
+  "courier": "JNE"
+}
+```
+
+- **Note**: Field optional, kirim yang perlu di-update saja.
+
+### G. Get Transaction Detail
 
 Mendapatkan detail lengkap transaksi termasuk items, metadata, dan payment history.
 
@@ -240,7 +257,68 @@ Mendapatkan detail lengkap transaksi termasuk items, metadata, dan payment histo
       "province": "Jawa Barat",
       "city": "Bandung"
     },
-    "items": [
+    "items": [{ "nama_barang": "Laptop", "quantity": 1, "price": 1000000 }],
+    "payments": [
+      {
+        "amount": 50000,
+        "payment_method": "CASH",
+        "paid_at": "...",
+        "image_url": "..."
+      }
+    ]
+  }
+}
+```
+
+### H. Cancel Transaction
+
+Membatalkan transaksi. Jika status `PAID` atau `PARTIALLY_PAID`, akan berubah jadi `NEED_REFUND`.
+Stock dikembalikan. Jurnal dibalik.
+
+- **URL**: `POST /v2/transaction/{id}/cancel`
+- **Body**:
+
+```json
+{
+  "cancel_reason": "Salah input barang"
+}
+```
+
+### I. Refund Transaction
+
+Mengembalikan dana customer. Mengurangi `total_payment` (bersih). Status menjadi `PARTIALLY_REFUNDED` atau `REFUNDED` tergantung sisa `refund_needed` (misal 90rb).
+
+- **URL**: `POST /v2/transaction/{id}/refund`
+- **Body**:
+
+```json
+{
+  "amount": 50000,
+  "reason": "Barang kosong",
+  "image": "https://..." // Bukti transfer refund (optional)
+}
+```
+
+### J. Return Product (Retur Barang)
+
+Retur barang sebagian atau seluruhnya. Stock bertambah. Mengurangi value sales di jurnal.
+
+- **URL**: `POST /v2/transaction/{id}/return`
+- **Body**:
+
+```json
+{
+  "items": [
+    {
+      "kode_barang": "PROD001",
+      "qty": 1,
+      "condition": "good" // good = masuk stock normal, bad = masuk barang cacat
+    }
+  ],
+  "refund_money": true // Jika true, status jadi NEED_REFUND
+}
+```
+
       {
         "kode_barang": "A001",
         "nama_lengkap_barang": "iPhone 15 Pro Max",
@@ -258,9 +336,11 @@ Mendapatkan detail lengkap transaksi termasuk items, metadata, dan payment histo
         "paid_at": "2025-01-01 10:00:00"
       }
     ]
-  }
+
 }
-```
+}
+
+````
 
 ---
 
@@ -280,7 +360,7 @@ Mencatat pembayaran masuk (In).
   "image": "url_bukti.jpg",
   "note": "Pelunasan"
 }
-```
+````
 
 ### B. Refund Money (Pengembalian Dana)
 

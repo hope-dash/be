@@ -137,6 +137,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('transaction/(:num)/cancel', 'TransactionControllerV2::cancel/$1');
         $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
         $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
+        $routes->post('transaction/(:num)/delivery-status', 'TransactionControllerV2::updateDeliveryStatus/$1');
         
         // Expense Routes
         $routes->get('expense/accounts', 'ExpenseController::accounts');

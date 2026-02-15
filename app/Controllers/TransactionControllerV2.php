@@ -188,7 +188,7 @@ class TransactionControllerV2 extends ResourceController
                 'actual_total' => $grandTotal, // actual_total = total dari amount stlh discount dan ada ppn atau ongkir lain lain
                 'total_payment' => 0,
                 'status' => 'WAITING_PAYMENT',
-                'delivery_status' => '',
+                'delivery_status' => 'NOT_READY',
                 'discount_type' => $txDiscountType,
                 'discount_amount' => $txDiscountAmount,
                 'total_modal' => $totalModal,
@@ -434,7 +434,8 @@ class TransactionControllerV2 extends ResourceController
 
             $this->transactionModel->update($id, [
                 'total_payment' => $newTotalPaid,
-                'status' => $newStatus
+                'status' => $newStatus,
+                'delivery_status' => 'PENDING'
             ]);
 
             $this->db->transComplete();
@@ -513,13 +514,19 @@ class TransactionControllerV2 extends ResourceController
                 $this->addJournalItem($jIdSales, '2001', $ppnValue, 0);
             }
 
-            // Reverse Shipping
-            if (!$isFreeOngkir && $shippingCost > 0) {
-                $this->addJournalItem($jIdSales, '4001', $shippingCost, 0);
-            }
-            if ($isFreeOngkir && $shippingCost > 0) {
-                $this->addJournalItem($jIdSales, '2001', $shippingCost, 0); // Reverse AP
-                $this->addJournalItem($jIdSales, '6005', 0, $shippingCost); // Reverse Expense
+            // Reverse Shipping (Only if NOT delivered)
+            // If DELIVERED, we assume the service is consumed and we don't refund shipping (as per refund logic),
+            // so we should NOT reverse the shipping revenue/expense.
+            $isDelivered = (strtoupper($trx['delivery_status'] ?? '') === 'DELIVERED');
+
+            if (!$isDelivered) {
+                if (!$isFreeOngkir && $shippingCost > 0) {
+                    $this->addJournalItem($jIdSales, '4001', $shippingCost, 0);
+                }
+                if ($isFreeOngkir && $shippingCost > 0) {
+                    $this->addJournalItem($jIdSales, '2001', $shippingCost, 0); // Reverse AP
+                    $this->addJournalItem($jIdSales, '6005', 0, $shippingCost); // Reverse Expense
+                }
             }
 
             $newStatus = 'CANCEL';
@@ -536,7 +543,13 @@ class TransactionControllerV2 extends ResourceController
             
             if ($trx['total_payment'] > 0) {
                 $newStatus = 'NEED_REFUND';
-                $refundNeeded = $trx['total_payment'];
+                $refundNeeded = (float)$trx['total_payment'];
+                
+                // Logic: Ongkir tidak dikembalikan jika status pengiriman DELIVERED (dan bukan free ongkir)
+                if (strtoupper($trx['delivery_status'] ?? '') === 'DELIVERED' && !$isFreeOngkir && $shippingCost > 0) {
+                    $refundNeeded -= $shippingCost;
+                    if ($refundNeeded < 0) $refundNeeded = 0;
+                }
                 
                 // Store refund needed amount in meta
                 $this->transactionMetaModel->insert([
@@ -725,11 +738,29 @@ class TransactionControllerV2 extends ResourceController
             $this->addJournalItem($jid, '1003', $amount, 0); 
             $this->addJournalItem($jid, '1001', 0, $amount); 
 
-            $newTotalPaid = $trx['total_payment'] - $amount; 
+            $refundMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'refund_needed')->first();
+            $newStatus = 'PARTIALLY_REFUNDED';
+
+            if ($refundMeta) {
+                // User Request: newTotalPaid derived from meta (refund_needed) - amount
+                $remaining = (float)$refundMeta['value'] - $amount;
+                
+                if ($remaining <= 100) { 
+                    $remaining = 0;
+                    $newStatus = 'REFUNDED';
+                }
+                
+                $this->transactionMetaModel->update($refundMeta['id'], ['value' => $remaining]);
+                $newTotalPaid = $remaining; 
+            } else {
+                // Fallback
+                $newTotalPaid = $trx['total_payment'] - $amount;
+                if ($newTotalPaid <= 0) $newStatus = 'REFUNDED';
+            }
             
             $this->transactionModel->update($id, [
                 'total_payment' => $newTotalPaid,
-                'status' => ($newTotalPaid <= 0) ? 'REFUNDED' : 'PARTIALLY_REFUNDED' 
+                'status' => $newStatus
             ]);
 
             $this->db->transComplete();
@@ -747,6 +778,66 @@ class TransactionControllerV2 extends ResourceController
 
         } catch (\Exception $e) {
              return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // 6. Update Delivery Status
+    public function updateDeliveryStatus($id = null)
+    {
+        $data = $this->request->getJSON();
+        
+        $trx = $this->transactionModel->find($id);
+        if (!$trx) return $this->jsonResponse->error("Transaction not found", 404);
+
+        $status = $data->status ?? null;
+        $resi = $data->resi ?? null;
+        $courier = $data->courier ?? null;
+        
+        if (!$status && !$resi && !$courier) {
+            return $this->jsonResponse->error("At least one field (status, resi, courier) is required", 400);
+        }
+
+        $this->db->transStart();
+        try {
+            // Update Delivery Status locally in transaction table (if using that column)
+            // or just in Meta. Documentation says Meta.
+            // But we also added `delivery_status` column in migration calling it "Shipping Status"
+            
+            if ($status) {
+                 $this->transactionModel->update($id, ['delivery_status' => $status]);
+                 
+                 // Also sync to meta for consistency if needed, or stick to one source of truth.
+                 // Let's update meta 'shipping_status' as well for backward compat or flexible query
+                 $this->updateMeta($id, 'shipping_status', $status);
+            }
+            
+            if ($resi) {
+                $this->updateMeta($id, 'resi', $resi);
+            }
+            
+            if ($courier) {
+                $this->updateMeta($id, 'courier', $courier);
+            }
+
+            $this->db->transComplete();
+
+            return $this->jsonResponse->oneResp('Delivery status updated', [], 200);
+            
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+    
+    private function updateMeta($trxId, $key, $value) {
+        $existing = $this->transactionMetaModel->where('transaction_id', $trxId)->where('key', $key)->first();
+        if ($existing) {
+            $this->transactionMetaModel->update($existing['id'], ['value' => $value]);
+        } else {
+             $this->transactionMetaModel->insert([
+                'transaction_id' => $trxId,
+                'key' => $key,
+                'value' => $value
+            ]);
         }
     }
 
@@ -875,11 +966,10 @@ class TransactionControllerV2 extends ResourceController
             $transaction['items'] = $items;
 
             // 4. Get Payments
-            $payments = $db->table('transaction_payments')
+            $payments = $this->paymentModel
                 ->where('transaction_id', $id)
                 ->orderBy('paid_at', 'DESC')
-                ->get()
-                ->getResultArray();
+                ->findAll();
             
             $transaction['payments'] = $payments;
 
