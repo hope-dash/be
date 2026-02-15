@@ -147,8 +147,10 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('purchase/(:num)/execute', 'PembelianControllerV2::execute/$1');
 
         // Accounting Reports
+        $routes->get('accounts', 'AccountingReportController::getAccounts');
         $routes->get('report/journal', 'AccountingReportController::journal');
         $routes->get('report/ledger', 'AccountingReportController::ledger');
+        $routes->get('report/ledger/detail', 'AccountingReportController::ledgerDetail');
         $routes->get('report/income-statement', 'AccountingReportController::incomeStatement');
         $routes->get('report/balance-sheet', 'AccountingReportController::balanceSheet');
         

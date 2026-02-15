@@ -28,7 +28,7 @@ Membuat data master barang baru.
   "harga_modal": 18500000,
   "harga_jual": 21000000,
   "harga_jual_toko": 20500000, // Optional: Harga khusus toko/reseller
-  "suplier": ["Distributor A", "Toko B"], // Optional: Array of supplier names
+  "suplier": ["Distributor A", "Toko B"], // Optional: Array of supplier names or String
   "description": "Garansi Resmi iBox 1 Tahun",
   "notes": "Hati-hati barang sensitif",
   "berat": 1000,
@@ -215,6 +215,53 @@ Menambahkan metadata ke transaksi (e.g., nomor resi, status pengiriman, catatan)
 
 **Note**: Jika key sudah ada, value akan di-update. Jika belum ada, akan dibuat baru.
 
+### F. Get Transaction Detail
+
+Mendapatkan detail lengkap transaksi termasuk items, metadata, dan payment history.
+
+- **URL**: `GET /v2/transaction/{id}`
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "data": {
+    "id": 1,
+    "invoice": "INV-001",
+    "status": "PAID",
+    "amount": 1000000,
+    "actual_total": 950000,
+    "discount_value": 50000,
+    "discount_type": "FIXED",
+    "meta": {
+      "resi": "JNE123",
+      "shipping_status": "SHIPPED",
+      "province": "Jawa Barat",
+      "city": "Bandung"
+    },
+    "items": [
+      {
+        "kode_barang": "A001",
+        "nama_lengkap_barang": "iPhone 15 Pro Max",
+        "jumlah": 1,
+        "harga_system": 100000,
+        "harga_jual": 90000,
+        "total": 90000
+      }
+    ],
+    "payments": [
+      {
+        "id": 1,
+        "amount": 1000000,
+        "method": "BANK",
+        "paid_at": "2025-01-01 10:00:00"
+      }
+    ]
+  }
+}
+```
+
 ---
 
 ## 3. PAYMENTS & REFUNDS
@@ -270,10 +317,45 @@ Mengembalikan stock barang. Jika ada penggantian uang, set `refund_money: true`.
 
 ### A. Purchase (Pembelian Barang / Re-stock)
 
-Mencatat pembelian ke supplier. Stock bertambah. Update Harga Modal (Average).
+Mencatat pembelian ke supplier. Stock bertambah otomatis dan _Weighted Average Cost_ (Harga Modal) akan dihitung ulang.
 
-1. `POST /v2/purchase` (Draft)
-2. `POST /v2/purchase/{id}/execute` (Finalize & Jurnal)
+#### 1. Create Purchase (Draft)
+
+- **URL**: `POST /v2/purchase`
+- **Body**:
+
+```json
+{
+  "tanggal_belanja": "2025-06-01",
+  "supplier_id": 1, // Optional
+  "id_toko": 1,
+  "catatan": "Restock bulanan",
+  "bukti_foto": "uploads/purchase/struk_1.webp",
+  "detail": [
+    {
+      "kode_barang": "A001",
+      "jumlah": 50,
+      "harga_satuan": 95000,
+      "ongkir": 1000 // Ongkir per item (optional)
+    }
+  ],
+  "biaya": [{ "nama_biaya": "Parkir", "jumlah": 5000 }]
+}
+```
+
+**Response**: `{ "status": 201, "data": { "id": 15 } }`
+
+#### 2. Execute Purchase (Finalize)
+
+Mengunci pembelian, update stok, dan catat jurnal.
+
+- **URL**: `POST /v2/purchase/{id}/execute`
+- **Body**: `{}` (Empty)
+
+**Jurnal Otomatis**:
+
+- (Dr) Inventory
+- (Cr) Cash / Bank
 
 ### B. Stock Transfer (Antar Toko)
 
@@ -297,7 +379,15 @@ Jika ada **ongkos kirim**, biaya ini ditanggung oleh Toko Asal (`source_toko_id`
 
 ## 5. EXPENSE (Pengeluaran Operasional)
 
-Mencatat biaya-biaya (Listrik, Sewa, Gaji, dll).
+### A. Get Expense Accounts
+
+Mendapatkan daftar akun biaya yang tersedia.
+
+- **URL**: `GET /v2/expense/accounts`
+
+### B. Create Expense
+
+Mencatat pengeluaran operasional. Data disimpan di tabel `expenses` dan otomatis tercatat di Jurnal.
 
 - **URL**: `POST /v2/expense`
 - **Body**:
@@ -308,7 +398,21 @@ Mencatat biaya-biaya (Listrik, Sewa, Gaji, dll).
   "account_code": "703", // Beban Listrik
   "amount": 500000,
   "payment_method": "CASH",
-  "date": "2025-05-15"
+  "date": "2025-05-15",
+  "description": "Bayar Token Listrik"
+}
+```
+
+**Response**:
+
+```json
+{
+  "status": 201,
+  "message": "Expense recorded successfully",
+  "data": {
+    "expense_id": 15,
+    "journal_id": 102
+  }
 }
 ```
 
@@ -358,35 +462,113 @@ Digunakan untuk mencatat pengambilan keuntungan oleh pemilik (Prive/Dividen).
 
 Semua report mendukung filter `id_toko`. Jika kosong = Konsolidasi (Gabungan).
 
-### A. Journal Report (Jurnal Umum)
+### A. Get All Accounts (Dropdown)
 
-Detail pergerakan debit/kredit setiap transaksi.
+Mendapatkan daftar semua akun untuk keperluan dropdown (Jurnal, Expense, dll).
+
+- **URL**: `GET /v2/accounts?type={type}`
+- **Query Params**:
+  - `type` (optional): Filter account type (e.g., REVENUE, EXPENSE, ASSET, LIABILITY, EQUITY)
+
+### B. Journal Report (Jurnal Umum)
+
+Detail pergerakan debit/kredit setiap transaksi, dikelompokkan per jurnal.
 
 - **URL**: `GET /v2/report/journal?start_date=...&end_date=...&id_toko=...`
 
-### B. General Ledger (Buku Besar)
+**Response**:
+
+```json
+{
+  "journals": [
+    {
+      "id": 101,
+      "date": "2025-01-01",
+      "reference_no": "INV-202501",
+      "description": "Sales Invoice #1",
+      "items": [
+        { "account_code": "1001", "name": "Cash", "debit": 1000, "credit": 0 },
+        { "account_code": "4001", "name": "Sales", "debit": 0, "credit": 1000 }
+      ]
+    }
+  ],
+  "total_debit": 1000,
+  "total_credit": 1000
+}
+```
+
+### C. General Ledger (Buku Besar)
 
 Mutasi saldo per akun (Opening, Debit, Credit, Closing).
 
 - **URL**: `GET /v2/report/ledger?start_date=...&end_date=...`
 
-### C. Income Statement (Laporan Laba Rugi)
+### D. General Ledger Detail (Mutasi Saldo per Akun)
+
+Mutasi rinci per transaksi untuk satu akun (seperti di screenshot report).
+
+- **URL**: `GET /v2/report/ledger/detail?account_id={id}&start_date={start}&end_date={end}&id_toko={id}`
+
+**Response**:
+
+```json
+{
+  "account": { "id": 1, "code": "1101", "name": "Kas Besar", "type": "ASSET" },
+  "period": { "start": "2025-01-01", "end": "2025-01-31" },
+  "opening_balance": 50000000,
+  "transactions": [
+    {
+      "date": "2025-01-05",
+      "reference_no": "INV-2025-001",
+      "description": "Penjualan Tunai",
+      "debit": 2500000,
+      "credit": 0,
+      "balance": 52500000
+    },
+    {
+      "date": "2025-01-10",
+      "reference_no": "EXP-2025-012",
+      "description": "Pembayaran Listrik",
+      "debit": 0,
+      "credit": 750000,
+      "balance": 51750000
+    }
+  ],
+  "closing_balance": 52950000,
+  "total_mutation": { "debit": 3700000, "credit": 750000 }
+}
+```
+
+### E. Income Statement (Laporan Laba Rugi)
 
 Ringkasan Pendapatan vs Pengeluaran dalam periode tertentu.
 
 - **URL**: `GET /v2/report/income-statement?start_date=...&end_date=...&id_toko=...`
 - **Response**:
 
+**Response**:
+
 ```json
 {
-  "period": "2025-01-01 to 2025-01-31",
+  "period": "2025-02-01 to 2025-02-28",
+  "prev_period": "2025-01-04 to 2025-01-31",
+  "summary_highlights": {
+    "gross_margin": 40.5,
+    "net_profit_margin": 25.2,
+    "expense_ratio": 15.3
+  },
+  "performance": {
+    "title": "Performa Positif",
+    "description": "Laba bersih periode ini meningkat 12.5% dibandingkan periode sebelumnya. Pengeluaran operasional terkendali.",
+    "is_positive": true
+  },
   "revenues": { "total": 50000000, "details": [...] },
   "expenses": { "total": 30000000, "details": [...] },
   "net_income": 20000000
 }
 ```
 
-### D. Balance Sheet (Neraca Saldo)
+### F. Balance Sheet (Neraca Saldo)
 
 Posisi Harta, Hutang, dan Modal per tanggal tertentu.
 
@@ -1026,5 +1208,32 @@ Mendapatkan daftar produk dengan harga yang sudah dikurangi discount customer (j
 - Harga Original: Rp 20.000.000
 - Customer Discount: PERCENTAGE 10%
 - Harga Final: Rp 18.000.000 (20.000.000 - 2.000.000)
+
+---
+
+## 13. UTILITIES
+
+### A. Upload Image (Auto WebP)
+
+Upload gambar (Product, Bukti Bayar, dll) dengan konversi otomatis ke format WebP dan manajemen folder.
+
+- **URL**: `POST /v2/upload/image`
+- **Header**: `Content-Type: multipart/form-data`
+- **Body**:
+  - `file`: (File) Image file (JPG, PNG, AVIF, WebP)
+  - `folder`: (String) Subfolder name (e.g., `products`, `transactions/payment`, `toko/logo`). Default: `general`
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "message": "Image uploaded and converted to WebP successfully",
+  "data": {
+    "path": "uploads/products/a1b2c3d4e5f6.webp",
+    "url": "http://domain.com/uploads/products/a1b2c3d4e5f6.webp"
+  }
+}
+```
 
 ---

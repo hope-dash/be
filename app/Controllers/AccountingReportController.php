@@ -23,9 +23,25 @@ class AccountingReportController extends ResourceController
         $this->accountModel = new AccountModel();
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
+        $this->db = \Config\Database::connect();
     }
 
-    // 1. GET JOURNAL (Detailed Entries)
+    // 0. GET ALL ACCOUNTS (Dropdown)
+    public function getAccounts()
+    {
+        $type = $this->request->getGet('type'); // Optional: REVENUE, EXPENSE, ASSET, LIABILITY, EQUITY
+        $builder = $this->accountModel;
+        
+        if ($type) {
+            $builder->where('type', $type);
+        }
+        
+        $accounts = $builder->orderBy('code', 'ASC')->findAll();
+        
+        // Transform for dropdown if needed, or return full object
+        // Returning full object to let frontend handle display
+        return $this->jsonResponse->oneResp('List Accounts', $accounts, 200);
+    }
     public function journal()
     {
         $startDate = $this->request->getGet('start_date') ?? date('Y-m-d');
@@ -140,6 +156,108 @@ class AccountingReportController extends ResourceController
         return $this->jsonResponse->oneResp('General Ledger Summary' . ($tokoId ? " Toko #$tokoId" : ""), $ledger, 200);
     }
     
+    // 2.5 GET LEDGER DETAIL (Single Account)
+    public function ledgerDetail()
+    {
+        $accountId = $this->request->getGet('account_id');
+        $startDate = $this->request->getGet('start_date') ?? date('Y-m-01');
+        $endDate = $this->request->getGet('end_date') ?? date('Y-m-t');
+        $tokoId = $this->request->getGet('id_toko');
+
+        if (!$accountId) {
+             return $this->jsonResponse->error('Account ID is required', 400);
+        }
+
+        $account = $this->accountModel->find($accountId);
+        if (!$account) {
+             return $this->jsonResponse->error('Account not found', 404);
+        }
+        
+        // 1. Calculate Opening Balance
+        $builderOpen = $this->db->table('journal_items ji')
+            ->join('journals j', 'j.id = ji.journal_id')
+            ->where('ji.account_id', $accountId)
+            ->where('j.date <', $startDate);
+            
+        if ($tokoId) $builderOpen->where('j.id_toko', $tokoId);
+        
+        $openResult = $builderOpen->selectSum('ji.debit', 'total_debit')
+                                  ->selectSum('ji.credit', 'total_credit')
+                                  ->get()->getRow();
+                                  
+        $openDebit = (float)($openResult->total_debit ?? 0);
+        $openCredit = (float)($openResult->total_credit ?? 0);
+        
+        // Determine Normal Balance direction
+        // ASSET, EXPENSE: Debit is positive
+        // LIABILITY, EQUITY, REVENUE: Credit is positive
+        $isNormalDebit = in_array($account['type'], ['ASSET', 'EXPENSE']);
+        
+        if ($isNormalDebit) {
+            $openingBalance = $openDebit - $openCredit;
+        } else {
+            $openingBalance = $openCredit - $openDebit;
+        }
+
+        // 2. Get Transactions
+        $builderTrans = $this->db->table('journal_items ji')
+            ->select('j.date, j.reference_no, j.description, ji.debit, ji.credit')
+            ->join('journals j', 'j.id = ji.journal_id')
+            ->where('ji.account_id', $accountId)
+            ->where('j.date >=', $startDate)
+            ->where('j.date <=', $endDate);
+            
+        if ($tokoId) $builderTrans->where('j.id_toko', $tokoId);
+        
+        $transactions = $builderTrans->orderBy('j.date', 'ASC')
+            ->orderBy('j.id', 'ASC')
+            ->get()->getResultArray();
+            
+        // 3. Process Running Balance
+        $resultData = [];
+        $currentBalance = $openingBalance;
+        $totalDebit = 0;
+        $totalCredit = 0;
+        
+        foreach ($transactions as $row) {
+            $d = (float)$row['debit'];
+            $c = (float)$row['credit'];
+            
+            if ($isNormalDebit) {
+                $currentBalance += ($d - $c);
+            } else {
+                $currentBalance += ($c - $d);
+            }
+            
+            $resultData[] = [
+                'date' => $row['date'],
+                'reference_no' => $row['reference_no'],
+                'description' => $row['description'],
+                'debit' => $d,
+                'credit' => $c,
+                'balance' => $currentBalance
+            ];
+            
+            $totalDebit += $d;
+            $totalCredit += $c;
+        }
+        
+        return $this->jsonResponse->oneResp('Ledger Detail', [
+            'account' => $account,
+            'period' => [
+                'start' => $startDate,
+                'end' => $endDate
+            ],
+            'opening_balance' => $openingBalance,
+            'transactions' => $resultData,
+            'closing_balance' => $currentBalance,
+            'total_mutation' => [
+                'debit' => $totalDebit,
+                'credit' => $totalCredit
+            ]
+        ], 200);
+    }
+    
     // 3. INCOME STATEMENT (Laba Rugi)
     public function incomeStatement()
     {
@@ -147,13 +265,84 @@ class AccountingReportController extends ResourceController
         $endDate = $this->request->getGet('end_date') ?? date('Y-m-t');
         $tokoId = $this->request->getGet('id_toko');
         
+        // --- Current Period Data ---
         $revenues = $this->getAccountGroupBalance('REVENUE', $startDate, $endDate, $tokoId);
         $expenses = $this->getAccountGroupBalance('EXPENSE', $startDate, $endDate, $tokoId);
         
-        $netIncome = $revenues['total'] - $expenses['total'];
+        $totalRevenue = $revenues['total'];
+        $totalExpense = $expenses['total'];
+        $netIncome = $totalRevenue - $totalExpense;
+
+        // --- Calculate COGS & OPEX ---
+        // Assuming COGS accounts start with '5' and OPEX with '6'
+        $cogs = 0;
+        $opex = 0;
+        
+        foreach ($expenses['details'] as $exp) {
+            if (strpos($exp['code'], '5') === 0) {
+                $cogs += $exp['balance'];
+            } else {
+                $opex += $exp['balance'];
+            }
+        }
+        
+        $grossProfit = $totalRevenue - $cogs;
+        
+        // --- Metrics (Summary Highlights) ---
+        $grossMargin = ($totalRevenue > 0) ? ($grossProfit / $totalRevenue) * 100 : 0;
+        $netProfitMargin = ($totalRevenue > 0) ? ($netIncome / $totalRevenue) * 100 : 0;
+        $expenseRatio = ($totalRevenue > 0) ? ($totalExpense / $totalRevenue) * 100 : 0; // Total Expense Ratio
+        // Or Opex Ratio: ($opex / $totalRevenue) * 100
+        
+        // --- Previous Period Comparison ---
+        $startObj = new \DateTime($startDate);
+        $endObj = new \DateTime($endDate);
+        $interval = $startObj->diff($endObj);
+        $days = $interval->days + 1;
+        
+        $prevEndObj = (clone $startObj)->modify('-1 day');
+        $prevStartObj = (clone $prevEndObj)->modify("-" . ($days - 1) . " days");
+        
+        $prevStartDate = $prevStartObj->format('Y-m-d');
+        $prevEndDate = $prevEndObj->format('Y-m-d');
+        
+        $prevRevenues = $this->getAccountGroupBalance('REVENUE', $prevStartDate, $prevEndDate, $tokoId);
+        $prevExpenses = $this->getAccountGroupBalance('EXPENSE', $prevStartDate, $prevEndDate, $tokoId);
+        $prevNetIncome = $prevRevenues['total'] - $prevExpenses['total'];
+        
+        // Growth Calculation
+        $growth = 0;
+        if ($prevNetIncome != 0) {
+            $growth = (($netIncome - $prevNetIncome) / abs($prevNetIncome)) * 100;
+        } else if ($netIncome > 0) {
+            $growth = 100; // From 0 to Positive
+        }
+        
+        // Performance Text
+        $performanceTitle = ($growth >= 0) ? "Performa Positif" : "Performa Menurun";
+        $trend = ($growth >= 0) ? "meningkat" : "menurun";
+        $absGrowth = number_format(abs($growth), 1);
+        
+        // Expense Analysis Text
+        $prevTotalExpense = $prevExpenses['total'];
+        $expGrowth = ($prevTotalExpense > 0) ? (($totalExpense - $prevTotalExpense) / $prevTotalExpense) * 100 : 0;
+        $expText = ($expGrowth <= 5) ? "Pengeluaran operasional terkendali." : "Pengeluaran operasional meningkat " . number_format($expGrowth, 1) . "%.";
+
+        $description = "Laba bersih periode ini $trend $absGrowth% dibandingkan periode sebelumnya. $expText";
         
         return $this->jsonResponse->oneResp('Income Statement', [
             'period' => "$startDate to $endDate",
+            'prev_period' => "$prevStartDate to $prevEndDate",
+            'summary_highlights' => [
+                'gross_margin' => round($grossMargin, 1),
+                'net_profit_margin' => round($netProfitMargin, 1),
+                'expense_ratio' => round($expenseRatio, 1)
+            ],
+            'performance' => [
+                'title' => $performanceTitle,
+                'description' => $description,
+                'is_positive' => ($growth >= 0)
+            ],
             'revenues' => $revenues,
             'expenses' => $expenses,
             'net_income' => $netIncome

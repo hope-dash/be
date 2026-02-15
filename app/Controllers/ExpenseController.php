@@ -6,6 +6,7 @@ use CodeIgniter\RESTful\ResourceController;
 use App\Models\JournalModel;
 use App\Models\JournalItemModel;
 use App\Models\AccountModel;
+use App\Models\ExpenseModel;
 use App\Models\JsonResponse;
 
 class ExpenseController extends ResourceController
@@ -13,6 +14,7 @@ class ExpenseController extends ResourceController
     protected $journalModel;
     protected $journalItemModel;
     protected $accountModel;
+    protected $expenseModel;
     protected $jsonResponse;
     protected $db;
 
@@ -21,6 +23,7 @@ class ExpenseController extends ResourceController
         $this->journalModel = new JournalModel();
         $this->journalItemModel = new JournalItemModel();
         $this->accountModel = new AccountModel();
+        $this->expenseModel = new ExpenseModel();
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
     }
@@ -54,13 +57,25 @@ class ExpenseController extends ResourceController
         $this->db->transStart();
 
         try {
-            // Create Journal Header
-            $refId = date('YmdHis');
+            // 1. Insert into Expense Table
+            $expenseData = [
+                'id_toko' => $data->id_toko ?? null,
+                'account_id' => $expenseAccount['id'],
+                'amount' => $data->amount,
+                'payment_method' => $data->payment_method,
+                'date' => $data->date ?? date('Y-m-d'),
+                'description' => $data->description ?? "Expense {$expenseAccount['name']}",
+            ];
+            
+            $this->expenseModel->insert($expenseData);
+            $expenseId = $this->expenseModel->getInsertID();
+
+            // 2. Create Journal Header
             $journalData = [
                 'id_toko' => $data->id_toko ?? null,
                 'reference_type' => 'EXPENSE',
-                'reference_id' => $refId,
-                'reference_no' => "EXP-{$refId}",
+                'reference_id' => (string)$expenseId,
+                'reference_no' => "EXP-" . date('ymd') . "-" . str_pad($expenseId, 4, '0', STR_PAD_LEFT),
                 'date' => $data->date ?? date('Y-m-d'),
                 'description' => $data->description ?? "Expense {$expenseAccount['name']}",
                 'total_debit' => $data->amount,
@@ -72,7 +87,7 @@ class ExpenseController extends ResourceController
             $journalId = $this->journalModel->getInsertID();
 
             // Journal Lines
-            // 1. Dr Expense
+            // 3. Dr Expense
             $this->journalItemModel->insert([
                 'journal_id' => $journalId,
                 'account_id' => $expenseAccount['id'],
@@ -81,7 +96,7 @@ class ExpenseController extends ResourceController
                 'created_at' => date('Y-m-d H:i:s')
             ]);
 
-            // 2. Cr Cash/Bank
+            // 4. Cr Cash/Bank
             $this->journalItemModel->insert([
                 'journal_id' => $journalId,
                 'account_id' => $cashAccount['id'],
@@ -96,7 +111,10 @@ class ExpenseController extends ResourceController
                  return $this->jsonResponse->error('Failed to record expense', 500);
             }
 
-            return $this->jsonResponse->oneResp('Expense recorded successfully', ['journal_id' => $journalId], 201);
+            return $this->jsonResponse->oneResp('Expense recorded successfully', [
+                'expense_id' => $expenseId,
+                'journal_id' => $journalId
+            ], 201);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
