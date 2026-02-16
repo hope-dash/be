@@ -5,18 +5,23 @@ namespace App\Controllers;
 use App\Controllers\BaseController;
 use App\Models\JsonResponse;
 use App\Models\TokoModel;
+use App\Models\AccountModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
 class TokoController extends BaseController
 {
     protected $modelToko;
+    protected $accountModel;
     protected $jsonResponse;
+    protected $db;
 
 
     public function __construct()
     {
         $this->modelToko = new TokoModel();
+        $this->accountModel = new AccountModel();
         $this->jsonResponse = new JsonResponse();
+        $this->db = \Config\Database::connect();
     }
 
     public function create()
@@ -41,6 +46,9 @@ class TokoController extends BaseController
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
             }
 
+            $this->db->transStart();
+
+            // 1. Insert Toko first
             $tokoData = [
                 "toko_name" => $data->toko_name,
                 "alamat" => $data->alamat,
@@ -54,8 +62,53 @@ class TokoController extends BaseController
             ];
 
             $this->modelToko->insert($tokoData);
+            $tokoId = $this->modelToko->insertID();
 
-            return $this->jsonResponse->oneResp('Add ' . $data->toko_name . ' successfully', ['id' => $this->modelToko->insertID()], 201);
+            // 2. Get next available account code (sequential from last ASSET account)
+            $lastAccount = $this->accountModel
+                ->where('type', 'ASSET')
+                ->orderBy('code', 'DESC')
+                ->first();
+
+            $nextCode = $lastAccount ? (int) $lastAccount['code'] + 1 : 1003;
+
+            // 3. Create Cash Account for this Toko
+            $cashAccountData = [
+                'code' => (string) $nextCode,
+                'name' => "Cash {$data->toko_name}",
+                'type' => 'ASSET',
+                'description' => "Cash account for {$data->toko_name}"
+            ];
+            $this->accountModel->insert($cashAccountData);
+            $cashAccountId = $this->accountModel->insertID();
+
+            // 4. Create Bank Account for this Toko
+            $bankAccountData = [
+                'code' => (string) ($nextCode + 1),
+                'name' => "Bank {$data->toko_name}",
+                'type' => 'ASSET',
+                'description' => "Bank account for {$data->toko_name}"
+            ];
+            $this->accountModel->insert($bankAccountData);
+            $bankAccountId = $this->accountModel->insertID();
+
+            // 5. Update Toko with account IDs
+            $this->modelToko->update($tokoId, [
+                'cash_account_id' => $cashAccountId,
+                'bank_account_id' => $bankAccountId
+            ]);
+
+            $this->db->transComplete();
+
+            if ($this->db->transStatus() === false) {
+                return $this->jsonResponse->error('Failed to create toko and accounts', 500);
+            }
+
+            return $this->jsonResponse->oneResp('Add ' . $data->toko_name . ' successfully', [
+                'id' => $tokoId,
+                'cash_account_id' => $cashAccountId,
+                'bank_account_id' => $bankAccountId
+            ], 201);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
@@ -183,7 +236,7 @@ class TokoController extends BaseController
             $tokoParam = $this->request->getGet('role');
             $tokoIds = array_filter(array_map('trim', explode(',', $tokoParam)));
 
-            $query = $this->modelToko->select('id, toko_name, phone_number,bank,nama_pemilik, nomer_rekening');
+            $query = $this->modelToko->select('id, toko_name, phone_number, bank, nama_pemilik, nomer_rekening, bank_account_id, cash_account_id');
             if (!empty($tokoIds)) {
                 $query->whereIn('id', $tokoIds);
             }
@@ -198,6 +251,8 @@ class TokoController extends BaseController
                     'bank' => $row->bank,
                     'nama_pemilik' => $row->nama_pemilik,
                     'nomer_rekening' => $row->nomer_rekening,
+                    'bank_account_id' => $row->bank_account_id,
+                    'cash_account_id' => $row->cash_account_id,
                 ];
             }, $result);
 

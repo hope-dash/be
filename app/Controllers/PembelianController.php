@@ -9,6 +9,9 @@ use App\Models\PembelianDetailModel;
 use App\Models\PembelianBiayaModel;
 use App\Models\ProductModel;
 use App\Models\StockModel;
+use App\Models\AccountModel;
+use App\Models\JournalModel;
+use App\Models\JournalItemModel;
 use CodeIgniter\RESTful\ResourceController;
 
 class PembelianController extends ResourceController
@@ -22,6 +25,10 @@ class PembelianController extends ResourceController
     protected $db;
     protected $jsonResponse;
     protected $CashflowModel;
+    protected $accountModel;
+    protected $journalModel;
+    protected $journalItemModel;
+
     public function __construct()
     {
         helper('log');
@@ -32,6 +39,9 @@ class PembelianController extends ResourceController
         $this->productModel = new ProductModel();
         $this->stockModel = new StockModel();
         $this->CashflowModel = new CashflowModel();
+        $this->accountModel = new AccountModel();
+        $this->journalModel = new JournalModel();
+        $this->journalItemModel = new JournalItemModel();
         $this->db = \Config\Database::connect();
     }
 
@@ -213,8 +223,7 @@ class PembelianController extends ResourceController
     public function executePembelian($pembelianId = null)
     {
         if ($pembelianId === null) {
-            return $this->jsonResponse->error('Terjadi kesalahan internal saat membatalkan pembelian: ' . $e->getMessage(), 400);
-            return $this->failValidationErrors('ID Pembelian wajib diisi.');
+            return $this->jsonResponse->error('ID Pembelian wajib diisi.', 400);
         }
 
         $token = $this->request->user;
@@ -334,6 +343,59 @@ class PembelianController extends ResourceController
             // Jika menggunakan model: $this->cashflowModel->insert($cashflowData)
             if (!$db->table('cashflow')->insert($cashflowData)) {
                 throw new \Exception('Gagal mencatat transaksi ke cashflow.');
+            }
+
+            // ==========================================
+            // CREATE JOURNAL ENTRIES
+            // ==========================================
+            try {
+                $toko = $db->table('toko')->where('id', $idToko)->get()->getRowArray();
+                $cashAccountId = $toko['cash_account_id']; // Default to Cash for Purchases
+
+                // Find Purchase Account (Expense/Asset) - Default 'Pembelian'
+                $purchaseAccount = $this->accountModel->like('name', 'Pembelian', 'both')->first();
+                if (!$purchaseAccount) {
+                    $purchaseAccount = $this->accountModel->where('type', 'EXPENSE')->first();
+                }
+
+                if ($cashAccountId && $purchaseAccount) {
+                    $dateTime = date('Y-m-d H:i:s');
+                    // 1. Journal Header
+                    $journalData = [
+                        'id_toko' => $idToko,
+                        'reference_type' => 'PURCHASE',
+                        'reference_id' => (string) $pembelianId,
+                        'reference_no' => 'PO-' . $pembelianId,
+                        'date' => date('Y-m-d'),
+                        'description' => "Purchase Execution ID " . $pembelianId,
+                        'total_debit' => $pembelian['total_belanja'],
+                        'total_credit' => $pembelian['total_belanja'],
+                        'created_at' => $dateTime,
+                        'updated_at' => $dateTime
+                    ];
+                    $this->journalModel->insert($journalData);
+                    $journalId = $this->journalModel->getInsertID();
+
+                    // 2. Dr. Purchase (Expense/Asset)
+                    $this->journalItemModel->insert([
+                        'journal_id' => $journalId,
+                        'account_id' => $purchaseAccount['id'],
+                        'debit' => $pembelian['total_belanja'],
+                        'credit' => 0,
+                        'created_at' => $dateTime
+                    ]);
+
+                    // 3. Cr. Cash (Asset) - Money Out
+                    $this->journalItemModel->insert([
+                        'journal_id' => $journalId,
+                        'account_id' => $cashAccountId,
+                        'debit' => 0,
+                        'credit' => $pembelian['total_belanja'],
+                        'created_at' => $dateTime
+                    ]);
+                }
+            } catch (\Exception $e) {
+                log_message('error', 'Journal Entry Failed for Purchase: ' . $e->getMessage());
             }
 
 

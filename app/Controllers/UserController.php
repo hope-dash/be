@@ -106,7 +106,7 @@ class UserController extends ResourceController
     {
         try {
             $data = $this->request->getJSON();
-            $query = $this->model->where("username", $data->umail)->orWhere("email", $data->umail)->first();
+            $query = $this->model->where("username", $data->umail)->orWhere("email", $data->umail)->where('deleted_at', NULL)->first();
 
             if ($query && password_verify($data->password, $query['password'])) {
                 $userData = [
@@ -328,6 +328,26 @@ class UserController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
+    public function dropdownUser()
+    {
+        try {
+
+            $result = $this->model->select('user_id, name')->where('deleted_at', NULL)->get()->getResult();
+
+
+            $formattedResult = array_map(function ($row) {
+                return [
+                    'label' => $row->name,
+                    'value' => $row->user_id
+                ];
+            }, $result);
+            return $this->jsonResponse->oneResp('', $formattedResult, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
 
 
 }

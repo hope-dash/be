@@ -30,6 +30,7 @@ class LogAktivitasController extends ResourceController
         $targetId = $this->request->getGet('target_id');
         $actionType = $this->request->getGet('action_type');
         $username = $this->request->getGet('username');
+        $user_id = $this->request->getGet('user_id');
         $startDate = $this->request->getGet('start_date');
         $endDate = $this->request->getGet('end_date');
 
@@ -44,6 +45,9 @@ class LogAktivitasController extends ResourceController
         }
         if ($username) {
             $builder->like('users.name', $username);
+        }
+        if ($user_id) {
+            $builder->like('users.user_id', $user_id);
         }
         if ($startDate) {
             $builder->where('DATE(log_aktivitas.created_at) >=', $startDate);

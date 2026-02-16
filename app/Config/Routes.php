@@ -33,6 +33,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->put('user/(:num)', 'UserController::edit/$1');
     $routes->delete('user/(:num)', 'UserController::delete/$1');
     $routes->get('user/detail', 'UserController::userByToken');
+    $routes->get('user/dropdown', 'UserController::dropdownUser');
 
     //customer
     $routes->post('customer', 'CustomerController::createCustomer');

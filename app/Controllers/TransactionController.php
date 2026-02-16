@@ -11,6 +11,9 @@ use App\Models\TransactionModel;
 use App\Models\SalesProductModel;
 use App\Models\ProductModel;
 use App\Models\CashflowModel;
+use App\Models\AccountModel;
+use App\Models\JournalModel;
+use App\Models\JournalItemModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTime;
 use PhpParser\Node\Scalar\Float_;
@@ -27,6 +30,9 @@ class TransactionController extends BaseController
     protected $stockModel;
 
     protected $CashflowModel;
+    protected $accountModel;
+    protected $journalModel;
+    protected $journalItemModel;
 
     public function __construct()
     {
@@ -39,6 +45,9 @@ class TransactionController extends BaseController
         $this->ProductModel = new ProductModel();
         $this->stockModel = new StockModel();
         $this->CashflowModel = new CashflowModel();
+        $this->accountModel = new AccountModel();
+        $this->journalModel = new JournalModel();
+        $this->journalItemModel = new JournalItemModel();
         $this->db = \Config\Database::connect(); // Memuat database
     }
 
@@ -166,9 +175,9 @@ class TransactionController extends BaseController
         // Calculate discount amount
         $discountAmount = 0;
         if ($discountType === 'percentage') {
-             $discountAmount = ($totalAmount * $discountValue) / 100;
+            $discountAmount = ($totalAmount * $discountValue) / 100;
         } else {
-             $discountAmount = $discountValue;
+            $discountAmount = $discountValue;
         }
 
         $totalPpn = ($totalAmount * $ppn) / 100;
@@ -476,7 +485,7 @@ class TransactionController extends BaseController
             $discountValue = $data->discount_value ?? 0;
             $discountType = $data->discount_type ?? 'fixed';
             $discountAmount = 0;
-            
+
             if ($discountType === 'percentage') {
                 $discountAmount = ($totalAmount * $discountValue) / 100;
             } else {
@@ -557,9 +566,12 @@ class TransactionController extends BaseController
                     $builder->where('t.status', $status);
                 }
             }
-            if ($delivery_status) $builder->like('t.delivery_status', $delivery_status, 'both');
-            if (!empty($role) && !$id_toko) $builder->whereIn('t.id_toko', $role);
-            if ($id_toko) $builder->where('t.id_toko', $id_toko);
+            if ($delivery_status)
+                $builder->like('t.delivery_status', $delivery_status, 'both');
+            if (!empty($role) && !$id_toko)
+                $builder->whereIn('t.id_toko', $role);
+            if ($id_toko)
+                $builder->where('t.id_toko', $id_toko);
             if ($date_start && $date_end) {
                 $builder->where('t.date_time >=', "{$date_start} 00:00:00");
                 $builder->where('t.date_time <=', "{$date_end} 23:59:59");
@@ -568,13 +580,15 @@ class TransactionController extends BaseController
             } elseif ($date_end) {
                 $builder->where('t.date_time <=', "{$date_end} 23:59:59");
             }
-            if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) $builder->where('t.total_payment >=', (float) $total_min);
-            if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) $builder->where('t.total_payment <=', (float) $total_max);
+            if ($total_min !== null && $total_min !== '' && is_numeric($total_min))
+                $builder->where('t.total_payment >=', (float) $total_min);
+            if ($total_max !== null && $total_max !== '' && is_numeric($total_max))
+                $builder->where('t.total_payment <=', (float) $total_max);
 
             // Apply Search using EXISTS subqueries to maintain performance
             if ($search) {
                 $builder->groupStart();
-                
+
                 // 1. Search by Invoice (Direct Column)
                 $builder->like('t.invoice', $search);
 
@@ -704,13 +718,15 @@ class TransactionController extends BaseController
             // Apply Filters
             if ($status) {
                 if (strpos($status, ',') !== false) {
-                     $builder->whereIn('t.status', explode(',', $status));
+                    $builder->whereIn('t.status', explode(',', $status));
                 } else {
-                     $builder->where('t.status', $status);
+                    $builder->where('t.status', $status);
                 }
             }
-            if (!empty($role) && !$id_toko) $builder->whereIn('t.id_toko', $role);
-            if ($id_toko) $builder->where('t.id_toko', $id_toko);
+            if (!empty($role) && !$id_toko)
+                $builder->whereIn('t.id_toko', $role);
+            if ($id_toko)
+                $builder->where('t.id_toko', $id_toko);
             if ($date_start && $date_end) {
                 $builder->where('t.date_time >=', "{$date_start} 00:00:00");
                 $builder->where('t.date_time <=', "{$date_end} 23:59:59");
@@ -719,8 +735,10 @@ class TransactionController extends BaseController
             } elseif ($date_end) {
                 $builder->where('t.date_time <=', "{$date_end} 23:59:59");
             }
-            if ($total_min !== null && $total_min !== '' && is_numeric($total_min)) $builder->where('t.total_payment >=', (float) $total_min);
-            if ($total_max !== null && $total_max !== '' && is_numeric($total_max)) $builder->where('t.total_payment <=', (float) $total_max);
+            if ($total_min !== null && $total_min !== '' && is_numeric($total_min))
+                $builder->where('t.total_payment >=', (float) $total_min);
+            if ($total_max !== null && $total_max !== '' && is_numeric($total_max))
+                $builder->where('t.total_payment <=', (float) $total_max);
 
             if ($search) {
                 $builder->groupStart()
@@ -895,7 +913,7 @@ class TransactionController extends BaseController
 
         return $this->jsonResponse->oneResp('Success', $transaction, 200);
     }
-    
+
     public function createUpdateNotesTransaction()
     {
         $transactionId = $this->request->getVar('transaction_id');
@@ -1686,6 +1704,69 @@ class TransactionController extends BaseController
         $db->table('cashflow')->insert($cashflowData);
         $cashflowId = $db->insertID();
 
+        // ==========================================
+        // CREATE JOURNAL ENTRIES
+        // ==========================================
+        try {
+            // Determine Payment Method
+            $metodeRow = $db->table('transaction_meta')
+                ->select('value')
+                ->where('transaction_id', $transactionId)
+                ->whereIn('key', ['metode_pembayaran_pelunasan', 'metode_pembayaran_dp'])
+                ->orderBy('id', 'DESC')
+                ->get()
+                ->getRowArray();
+            $metode = $metodeRow ? $metodeRow['value'] : 'CASH';
+
+            $toko = $db->table('toko')->where('id', $transaction['id_toko'])->get()->getRowArray();
+            $payerAccountId = ($metode === 'BANK') ? $toko['bank_account_id'] : $toko['cash_account_id'];
+
+            // Find Sales Account (Revenue) - Default code 4001 or Type REVENUE
+            $salesAccount = $this->accountModel->where('code', '4001')->first();
+            if (!$salesAccount) {
+                $salesAccount = $this->accountModel->where('type', 'REVENUE')->first();
+            }
+
+            if ($payerAccountId && $salesAccount && $refundValue > 0) {
+                // 1. Create Journal Header for Refund
+                $dateTime = date('Y-m-d H:i:s');
+                $journalData = [
+                    'id_toko' => $transaction['id_toko'],
+                    'reference_type' => 'TRANSACTION_REFUND',
+                    'reference_id' => (string) $transactionId,
+                    'reference_no' => $transaction['invoice'] . '-REF',
+                    'date' => date('Y-m-d'),
+                    'description' => "Refund for " . $transaction['invoice'],
+                    'total_debit' => $refundValue,
+                    'total_credit' => $refundValue,
+                    'created_at' => $dateTime,
+                    'updated_at' => $dateTime
+                ];
+                $this->journalModel->insert($journalData);
+                $journalId = $this->journalModel->getInsertID();
+
+                // 2. Dr. Sales (Revenue) - Reduce Revenue
+                $this->journalItemModel->insert([
+                    'journal_id' => $journalId,
+                    'account_id' => $salesAccount['id'],
+                    'debit' => $refundValue,
+                    'credit' => 0,
+                    'created_at' => $dateTime
+                ]);
+
+                // 3. Cr. Bank/Cash (Asset) - Money Out
+                $this->journalItemModel->insert([
+                    'journal_id' => $journalId,
+                    'account_id' => $payerAccountId,
+                    'debit' => 0,
+                    'credit' => $refundValue,
+                    'created_at' => $dateTime
+                ]);
+            }
+        } catch (\Exception $e) {
+            log_message('error', 'Journal Entry Failed for Refund: ' . $e->getMessage());
+        }
+
         // Cek apakah ada complaint
         $hasComplaint = $db->table('transaction_meta')
             ->where('transaction_id', $transactionId)
@@ -1966,6 +2047,59 @@ class TransactionController extends BaseController
             $db->table('transaction_meta')->insert($data);
         }
 
+        // ==========================================
+        // CREATE JOURNAL ENTRIES
+        // ==========================================
+        try {
+            $toko = $db->table('toko')->where('id', $transaction['id_toko'])->get()->getRowArray();
+            $receiverAccountId = ($metode === 'BANK') ? $toko['bank_account_id'] : $toko['cash_account_id'];
+
+            // Find Sales Account (Revenue) - Default code 4001 or Type REVENUE
+            $salesAccount = $this->accountModel->where('code', '4001')->first();
+            if (!$salesAccount) {
+                $salesAccount = $this->accountModel->where('type', 'REVENUE')->first();
+            }
+
+            if ($receiverAccountId && $salesAccount && $amount > 0) {
+                // 1. Create Journal Header for DP
+                $dateTime = date('Y-m-d H:i:s');
+                $journalData = [
+                    'id_toko' => $transaction['id_toko'],
+                    'reference_type' => 'TRANSACTION_DP',
+                    'reference_id' => (string) $transactionId,
+                    'reference_no' => $transaction['invoice'] . '-DP',
+                    'date' => date('Y-m-d'),
+                    'description' => "Down Payment for " . $transaction['invoice'],
+                    'total_debit' => $amount,
+                    'total_credit' => $amount,
+                    'created_at' => $dateTime,
+                    'updated_at' => $dateTime
+                ];
+                $this->journalModel->insert($journalData);
+                $journalId = $this->journalModel->getInsertID();
+
+                // 2. Dr. Bank/Cash (Asset)
+                $this->journalItemModel->insert([
+                    'journal_id' => $journalId,
+                    'account_id' => $receiverAccountId,
+                    'debit' => $amount,
+                    'credit' => 0,
+                    'created_at' => $dateTime
+                ]);
+
+                // 3. Cr. Sales (Revenue)
+                $this->journalItemModel->insert([
+                    'journal_id' => $journalId,
+                    'account_id' => $salesAccount['id'],
+                    'debit' => 0,
+                    'credit' => $amount,
+                    'created_at' => $dateTime
+                ]);
+            }
+        } catch (\Exception $e) {
+            log_message('error', 'Journal Entry Failed for DP: ' . $e->getMessage());
+        }
+
 
         if ($db->transStatus() === false) {
             $db->transRollback();
@@ -2043,7 +2177,7 @@ class TransactionController extends BaseController
 
         $ongkir = isset($ongkirMeta['value']) ? (float) $ongkirMeta['value'] : 0;
 
-        
+
 
         // Update status transaksi
         $db->table('transaction')
@@ -2158,6 +2292,104 @@ class TransactionController extends BaseController
                     ]);
                 }
             }
+        }
+
+        // ==========================================
+        // CREATE JOURNAL ENTRIES
+        // ==========================================
+        try {
+            $toko = $db->table('toko')->where('id', $transaction['id_toko'])->get()->getRowArray();
+            $receiverAccountId = ($data->metode_pembayaran === 'BANK') ? $toko['bank_account_id'] : $toko['cash_account_id'];
+
+            // Find Sales Account (Revenue) - Default code 4001 or Type REVENUE
+            $salesAccount = $this->accountModel->where('code', '4001')->first();
+            if (!$salesAccount) {
+                $salesAccount = $this->accountModel->where('type', 'REVENUE')->first();
+            }
+
+            if ($receiverAccountId && $salesAccount && $newTotalPayment > 0) {
+                // 1. Create Journal Header for Sales
+                $journalData = [
+                    'id_toko' => $transaction['id_toko'],
+                    'reference_type' => 'TRANSACTION_PAYMENT',
+                    'reference_id' => (string) $transactionId,
+                    'reference_no' => $transaction['invoice'],
+                    'date' => date('Y-m-d'),
+                    'description' => "Full Payment for " . $transaction['invoice'],
+                    'total_debit' => $newTotalPayment,
+                    'total_credit' => $newTotalPayment,
+                    'created_at' => $dateTime,
+                    'updated_at' => $dateTime
+                ];
+                $this->journalModel->insert($journalData);
+                $journalId = $this->journalModel->getInsertID();
+
+                // 2. Dr. Bank/Cash (Asset)
+                $this->journalItemModel->insert([
+                    'journal_id' => $journalId,
+                    'account_id' => $receiverAccountId,
+                    'debit' => $newTotalPayment,
+                    'credit' => 0,
+                    'created_at' => $dateTime
+                ]);
+
+                // 3. Cr. Sales (Revenue)
+                $this->journalItemModel->insert([
+                    'journal_id' => $journalId,
+                    'account_id' => $salesAccount['id'],
+                    'debit' => 0,
+                    'credit' => $newTotalPayment,
+                    'created_at' => $dateTime
+                ]);
+            }
+
+            // Journal for Shipping Expense (if we pay courier)
+            if ($ongkir > 0 && !$ongkirAlreadyPaid) {
+                // Find Shipping Expense Account
+                $shippingAccount = $this->accountModel->like('name', 'Ongkos Kirim', 'both')->first();
+                if (!$shippingAccount)
+                    $shippingAccount = $this->accountModel->where('type', 'EXPENSE')->first();
+
+                if ($receiverAccountId && $shippingAccount) {
+                    // Create Journal Header for Shipping
+                    $journalDataInfo = [
+                        'id_toko' => $transaction['id_toko'],
+                        'reference_type' => 'TRANSACTION_SHIPPING',
+                        'reference_id' => (string) $transactionId,
+                        'reference_no' => $transaction['invoice'] . '-SHIPPING',
+                        'date' => date('Y-m-d'),
+                        'description' => "Shipping Expense for " . $transaction['invoice'],
+                        'total_debit' => $ongkir,
+                        'total_credit' => $ongkir,
+                        'created_at' => $dateTime,
+                        'updated_at' => $dateTime
+                    ];
+                    $this->journalModel->insert($journalDataInfo);
+                    $journalIdInfo = $this->journalModel->getInsertID();
+
+                    // Dr. Shipping Expense
+                    $this->journalItemModel->insert([
+                        'journal_id' => $journalIdInfo,
+                        'account_id' => $shippingAccount['id'],
+                        'debit' => $ongkir,
+                        'credit' => 0,
+                        'created_at' => $dateTime
+                    ]);
+
+                    // Cr. Bank/Cash
+                    $this->journalItemModel->insert([
+                        'journal_id' => $journalIdInfo,
+                        'account_id' => $receiverAccountId,
+                        'debit' => 0,
+                        'credit' => $ongkir,
+                        'created_at' => $dateTime
+                    ]);
+                }
+            }
+
+        } catch (\Exception $e) {
+            // Log error but don't fail transaction for now
+            log_message('error', 'Journal Entry Failed: ' . $e->getMessage());
         }
 
         // Selesaikan transaction
@@ -2502,10 +2734,10 @@ class TransactionController extends BaseController
 
             // 6. Calculate new totals dengan free_ongkir
             $freeOngkir = isset($data->free_ongkir) ? (bool) $data->free_ongkir : false;
-            
-             // Calculate discount based on type
-             $discount_type = $data->discount_type ?? 'fixed';
-             $discount_value = $data->discount_value ?? 0;
+
+            // Calculate discount based on type
+            $discount_type = $data->discount_type ?? 'fixed';
+            $discount_value = $data->discount_value ?? 0;
 
             [$totalAmount, $ppn_value, $grandTotal, $potongan_ongkir, $discount_nominal] = $this->calculateTransactionTotals(
                 $data->item,
