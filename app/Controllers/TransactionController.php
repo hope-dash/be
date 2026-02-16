@@ -1704,68 +1704,7 @@ class TransactionController extends BaseController
         $db->table('cashflow')->insert($cashflowData);
         $cashflowId = $db->insertID();
 
-        // ==========================================
-        // CREATE JOURNAL ENTRIES
-        // ==========================================
-        try {
-            // Determine Payment Method
-            $metodeRow = $db->table('transaction_meta')
-                ->select('value')
-                ->where('transaction_id', $transactionId)
-                ->whereIn('key', ['metode_pembayaran_pelunasan', 'metode_pembayaran_dp'])
-                ->orderBy('id', 'DESC')
-                ->get()
-                ->getRowArray();
-            $metode = $metodeRow ? $metodeRow['value'] : 'CASH';
 
-            $toko = $db->table('toko')->where('id', $transaction['id_toko'])->get()->getRowArray();
-            $payerAccountId = ($metode === 'BANK') ? $toko['bank_account_id'] : $toko['cash_account_id'];
-
-            // Find Sales Account (Revenue) - Default code 4001 or Type REVENUE
-            $salesAccount = $this->accountModel->where('code', '4001')->first();
-            if (!$salesAccount) {
-                $salesAccount = $this->accountModel->where('type', 'REVENUE')->first();
-            }
-
-            if ($payerAccountId && $salesAccount && $refundValue > 0) {
-                // 1. Create Journal Header for Refund
-                $dateTime = date('Y-m-d H:i:s');
-                $journalData = [
-                    'id_toko' => $transaction['id_toko'],
-                    'reference_type' => 'TRANSACTION_REFUND',
-                    'reference_id' => (string) $transactionId,
-                    'reference_no' => $transaction['invoice'] . '-REF',
-                    'date' => date('Y-m-d'),
-                    'description' => "Refund for " . $transaction['invoice'],
-                    'total_debit' => $refundValue,
-                    'total_credit' => $refundValue,
-                    'created_at' => $dateTime,
-                    'updated_at' => $dateTime
-                ];
-                $this->journalModel->insert($journalData);
-                $journalId = $this->journalModel->getInsertID();
-
-                // 2. Dr. Sales (Revenue) - Reduce Revenue
-                $this->journalItemModel->insert([
-                    'journal_id' => $journalId,
-                    'account_id' => $salesAccount['id'],
-                    'debit' => $refundValue,
-                    'credit' => 0,
-                    'created_at' => $dateTime
-                ]);
-
-                // 3. Cr. Bank/Cash (Asset) - Money Out
-                $this->journalItemModel->insert([
-                    'journal_id' => $journalId,
-                    'account_id' => $payerAccountId,
-                    'debit' => 0,
-                    'credit' => $refundValue,
-                    'created_at' => $dateTime
-                ]);
-            }
-        } catch (\Exception $e) {
-            log_message('error', 'Journal Entry Failed for Refund: ' . $e->getMessage());
-        }
 
         // Cek apakah ada complaint
         $hasComplaint = $db->table('transaction_meta')
@@ -2047,58 +1986,7 @@ class TransactionController extends BaseController
             $db->table('transaction_meta')->insert($data);
         }
 
-        // ==========================================
-        // CREATE JOURNAL ENTRIES
-        // ==========================================
-        try {
-            $toko = $db->table('toko')->where('id', $transaction['id_toko'])->get()->getRowArray();
-            $receiverAccountId = ($metode === 'BANK') ? $toko['bank_account_id'] : $toko['cash_account_id'];
 
-            // Find Sales Account (Revenue) - Default code 4001 or Type REVENUE
-            $salesAccount = $this->accountModel->where('code', '4001')->first();
-            if (!$salesAccount) {
-                $salesAccount = $this->accountModel->where('type', 'REVENUE')->first();
-            }
-
-            if ($receiverAccountId && $salesAccount && $amount > 0) {
-                // 1. Create Journal Header for DP
-                $dateTime = date('Y-m-d H:i:s');
-                $journalData = [
-                    'id_toko' => $transaction['id_toko'],
-                    'reference_type' => 'TRANSACTION_DP',
-                    'reference_id' => (string) $transactionId,
-                    'reference_no' => $transaction['invoice'] . '-DP',
-                    'date' => date('Y-m-d'),
-                    'description' => "Down Payment for " . $transaction['invoice'],
-                    'total_debit' => $amount,
-                    'total_credit' => $amount,
-                    'created_at' => $dateTime,
-                    'updated_at' => $dateTime
-                ];
-                $this->journalModel->insert($journalData);
-                $journalId = $this->journalModel->getInsertID();
-
-                // 2. Dr. Bank/Cash (Asset)
-                $this->journalItemModel->insert([
-                    'journal_id' => $journalId,
-                    'account_id' => $receiverAccountId,
-                    'debit' => $amount,
-                    'credit' => 0,
-                    'created_at' => $dateTime
-                ]);
-
-                // 3. Cr. Sales (Revenue)
-                $this->journalItemModel->insert([
-                    'journal_id' => $journalId,
-                    'account_id' => $salesAccount['id'],
-                    'debit' => 0,
-                    'credit' => $amount,
-                    'created_at' => $dateTime
-                ]);
-            }
-        } catch (\Exception $e) {
-            log_message('error', 'Journal Entry Failed for DP: ' . $e->getMessage());
-        }
 
 
         if ($db->transStatus() === false) {
@@ -2294,103 +2182,7 @@ class TransactionController extends BaseController
             }
         }
 
-        // ==========================================
-        // CREATE JOURNAL ENTRIES
-        // ==========================================
-        try {
-            $toko = $db->table('toko')->where('id', $transaction['id_toko'])->get()->getRowArray();
-            $receiverAccountId = ($data->metode_pembayaran === 'BANK') ? $toko['bank_account_id'] : $toko['cash_account_id'];
 
-            // Find Sales Account (Revenue) - Default code 4001 or Type REVENUE
-            $salesAccount = $this->accountModel->where('code', '4001')->first();
-            if (!$salesAccount) {
-                $salesAccount = $this->accountModel->where('type', 'REVENUE')->first();
-            }
-
-            if ($receiverAccountId && $salesAccount && $newTotalPayment > 0) {
-                // 1. Create Journal Header for Sales
-                $journalData = [
-                    'id_toko' => $transaction['id_toko'],
-                    'reference_type' => 'TRANSACTION_PAYMENT',
-                    'reference_id' => (string) $transactionId,
-                    'reference_no' => $transaction['invoice'],
-                    'date' => date('Y-m-d'),
-                    'description' => "Full Payment for " . $transaction['invoice'],
-                    'total_debit' => $newTotalPayment,
-                    'total_credit' => $newTotalPayment,
-                    'created_at' => $dateTime,
-                    'updated_at' => $dateTime
-                ];
-                $this->journalModel->insert($journalData);
-                $journalId = $this->journalModel->getInsertID();
-
-                // 2. Dr. Bank/Cash (Asset)
-                $this->journalItemModel->insert([
-                    'journal_id' => $journalId,
-                    'account_id' => $receiverAccountId,
-                    'debit' => $newTotalPayment,
-                    'credit' => 0,
-                    'created_at' => $dateTime
-                ]);
-
-                // 3. Cr. Sales (Revenue)
-                $this->journalItemModel->insert([
-                    'journal_id' => $journalId,
-                    'account_id' => $salesAccount['id'],
-                    'debit' => 0,
-                    'credit' => $newTotalPayment,
-                    'created_at' => $dateTime
-                ]);
-            }
-
-            // Journal for Shipping Expense (if we pay courier)
-            if ($ongkir > 0 && !$ongkirAlreadyPaid) {
-                // Find Shipping Expense Account
-                $shippingAccount = $this->accountModel->like('name', 'Ongkos Kirim', 'both')->first();
-                if (!$shippingAccount)
-                    $shippingAccount = $this->accountModel->where('type', 'EXPENSE')->first();
-
-                if ($receiverAccountId && $shippingAccount) {
-                    // Create Journal Header for Shipping
-                    $journalDataInfo = [
-                        'id_toko' => $transaction['id_toko'],
-                        'reference_type' => 'TRANSACTION_SHIPPING',
-                        'reference_id' => (string) $transactionId,
-                        'reference_no' => $transaction['invoice'] . '-SHIPPING',
-                        'date' => date('Y-m-d'),
-                        'description' => "Shipping Expense for " . $transaction['invoice'],
-                        'total_debit' => $ongkir,
-                        'total_credit' => $ongkir,
-                        'created_at' => $dateTime,
-                        'updated_at' => $dateTime
-                    ];
-                    $this->journalModel->insert($journalDataInfo);
-                    $journalIdInfo = $this->journalModel->getInsertID();
-
-                    // Dr. Shipping Expense
-                    $this->journalItemModel->insert([
-                        'journal_id' => $journalIdInfo,
-                        'account_id' => $shippingAccount['id'],
-                        'debit' => $ongkir,
-                        'credit' => 0,
-                        'created_at' => $dateTime
-                    ]);
-
-                    // Cr. Bank/Cash
-                    $this->journalItemModel->insert([
-                        'journal_id' => $journalIdInfo,
-                        'account_id' => $receiverAccountId,
-                        'debit' => 0,
-                        'credit' => $ongkir,
-                        'created_at' => $dateTime
-                    ]);
-                }
-            }
-
-        } catch (\Exception $e) {
-            // Log error but don't fail transaction for now
-            log_message('error', 'Journal Entry Failed: ' . $e->getMessage());
-        }
 
         // Selesaikan transaction
         $db->transComplete();

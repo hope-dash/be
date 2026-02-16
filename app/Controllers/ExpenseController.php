@@ -130,16 +130,14 @@ class ExpenseController extends ResourceController
             return $this->jsonResponse->error('Toko not found', 404);
         }
 
-        // Use toko's bank or cash account based on payment method
-        $cashAccountId = ($data->payment_method === 'BANK')
-            ? $toko['bank_account_id']
-            : $toko['cash_account_id'];
+        // Revert to using default accounts: 1002 (Bank) or 1001 (Cash)
+        $cashAccountCode = ($data->payment_method === 'BANK') ? '1002' : '1001';
+        $cashAccount = $this->accountModel->where('code', $cashAccountCode)->first();
+        $cashAccountId = $cashAccount ? $cashAccount['id'] : null;
 
         if (!$cashAccountId) {
-            return $this->jsonResponse->error('Toko does not have ' . $data->payment_method . ' account configured', 400);
+            return $this->jsonResponse->error('Default ' . $data->payment_method . ' account not found', 400);
         }
-
-        $cashAccount = $this->accountModel->find($cashAccountId);
 
         $this->db->transStart();
 

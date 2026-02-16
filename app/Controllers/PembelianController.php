@@ -345,60 +345,7 @@ class PembelianController extends ResourceController
                 throw new \Exception('Gagal mencatat transaksi ke cashflow.');
             }
 
-            // ==========================================
-            // CREATE JOURNAL ENTRIES
-            // ==========================================
-            try {
-                // User Request: Use Bank Utama (1002) for Purchases
-                // Instead of store-specific account, we specifically use the Main Bank
-                $bankAccount = $this->accountModel->where('code', '1002')->first();
-                $creditAccountId = $bankAccount ? $bankAccount['id'] : null;
 
-                // Find Purchase Account (Expense/Asset) - Default 'Pembelian'
-                $purchaseAccount = $this->accountModel->like('name', 'Pembelian', 'both')->first();
-                if (!$purchaseAccount) {
-                    $purchaseAccount = $this->accountModel->where('type', 'EXPENSE')->first();
-                }
-
-                if ($creditAccountId && $purchaseAccount) {
-                    $dateTime = date('Y-m-d H:i:s');
-                    // 1. Journal Header
-                    $journalData = [
-                        'id_toko' => $idToko,
-                        'reference_type' => 'PURCHASE',
-                        'reference_id' => (string) $pembelianId,
-                        'reference_no' => 'PO-' . $pembelianId,
-                        'date' => date('Y-m-d'),
-                        'description' => "Purchase Execution ID " . $pembelianId,
-                        'total_debit' => $pembelian['total_belanja'],
-                        'total_credit' => $pembelian['total_belanja'],
-                        'created_at' => $dateTime,
-                        'updated_at' => $dateTime
-                    ];
-                    $this->journalModel->insert($journalData);
-                    $journalId = $this->journalModel->getInsertID();
-
-                    // 2. Dr. Purchase (Expense/Asset)
-                    $this->journalItemModel->insert([
-                        'journal_id' => $journalId,
-                        'account_id' => $purchaseAccount['id'],
-                        'debit' => $pembelian['total_belanja'],
-                        'credit' => 0,
-                        'created_at' => $dateTime
-                    ]);
-
-                    // 3. Cr. Bank Utama (Asset) - Money Out
-                    $this->journalItemModel->insert([
-                        'journal_id' => $journalId,
-                        'account_id' => $creditAccountId,
-                        'debit' => 0,
-                        'credit' => $pembelian['total_belanja'],
-                        'created_at' => $dateTime
-                    ]);
-                }
-            } catch (\Exception $e) {
-                log_message('error', 'Journal Entry Failed for Purchase: ' . $e->getMessage());
-            }
 
 
             $updatePembelianData = [
