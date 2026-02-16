@@ -122,7 +122,7 @@ class PembelianControllerV2 extends ResourceController
         $user = $this->request->user;
         $pembelian = $this->pembelianModel->find($pembelianId);
 
-        if (!$pembelian || $pembelian['status'] !== 'REVIEW') {
+        if (!$pembelian || $pembelian['status'] !== 'APPROVED') {
             return $this->jsonResponse->error('Pembelian tidak ditemukan atau status bukan REVIEW', 400);
         }
 
@@ -141,14 +141,14 @@ class PembelianControllerV2 extends ResourceController
             // Dr Inventory (Total Value)
             // Cr Cash (Assuming Cash Purchase for simplicity, user can expand later)
             // Value = Total Belanja (Details + Biaya)
-            
+
             $journalId = $this->createJournal('PURCHASE', $pembelianId, "PO-{$pembelianId}", $pembelian['tanggal_belanja'], "Pembelian Barang", $pembelian['id_toko']);
-            
+
             // Debit Inventory
             $this->addJournalItem($journalId, '1004', $pembelian['total_belanja'], 0);
-            
-            // Credit Cash (Using Cash Account 1001 default)
-            $this->addJournalItem($journalId, '1001', 0, $pembelian['total_belanja']);
+
+            // Credit Bank (Using Bank Account 1002 default)
+            $this->addJournalItem($journalId, '1002', 0, $pembelian['total_belanja']);
 
 
             // Process Stock & Average Cost Updating
@@ -156,8 +156,9 @@ class PembelianControllerV2 extends ResourceController
                 $qty = $item['jumlah'];
                 $costPerUnit = $item['harga_satuan'] + $item['ongkir'] + $biayaPerUnit;
                 $product = $this->productModel->where('id_barang', $item['kode_barang'])->first();
-                
-                if (!$product) continue;
+
+                if (!$product)
+                    continue;
 
                 // 1. Calculate New Average Cost (Weighted Average)
                 $currentStockTotal = 0; // Across all stores? usually average cost is per product globally or per store? 
@@ -165,7 +166,7 @@ class PembelianControllerV2 extends ResourceController
                 // But stock quantity is per store. 
                 // Moving Average Cost Formula:
                 // New Price = ((Old Stock * Old Price) + (New Qty * New Price)) / (Old Stock + New Qty)
-                
+
                 // We need TOTAL stock across all stores to be accurate or just assume current stock is retrieved.
                 // Let's us total stock from validation logic in previous controller:
                 // Actually previous controller used `stock` from `stockModel` based on `id_toko`.
@@ -180,12 +181,12 @@ class PembelianControllerV2 extends ResourceController
                     ->where('id_barang', $item['kode_barang'])
                     ->where('id_toko', $pembelian['id_toko'])
                     ->first();
-                
+
                 $oldQty = $stockEntry ? $stockEntry['stock'] : 0;
                 $oldCost = $product['harga_modal'];
-                
+
                 $totalNewQty = $oldQty + $qty;
-                
+
                 $newAvgCost = (($oldQty * $oldCost) + ($qty * $costPerUnit)) / ($totalNewQty > 0 ? $totalNewQty : 1);
 
                 // Update Product Master Cost
@@ -217,7 +218,7 @@ class PembelianControllerV2 extends ResourceController
 
             // Update Header
             $this->pembelianModel->update($pembelianId, [
-                'status' => 'SUCCESS', 
+                'status' => 'SUCCESS',
                 'updated_by' => $user['user_id']
             ]);
 
@@ -230,15 +231,17 @@ class PembelianControllerV2 extends ResourceController
     }
 
     // LIST & DETAIL (Similar to previous, simplified)
-    public function index() {
+    public function index()
+    {
         // ... (Similar logic to existing listPembelian)
-         $id_toko = $this->request->getGet('id_toko');
-         // ... simplified for brevity, assume similar implementation or use existing
-         return $this->jsonResponse->error("Use List endpoint", 501);
+        $id_toko = $this->request->getGet('id_toko');
+        // ... simplified for brevity, assume similar implementation or use existing
+        return $this->jsonResponse->error("Use List endpoint", 501);
     }
-    
+
     // Helper Methods (Duplicated from TransactionControllerV2 for independence)
-    private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null) {
+    private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null)
+    {
         $this->journalModel->insert([
             'id_toko' => $tokoId,
             'reference_type' => $refType,
@@ -251,9 +254,11 @@ class PembelianControllerV2 extends ResourceController
         return $this->journalModel->getInsertID();
     }
 
-    private function addJournalItem($journalId, $accountCode, $debit, $credit) {
+    private function addJournalItem($journalId, $accountCode, $debit, $credit)
+    {
         $account = $this->accountModel->where('code', $accountCode)->first();
-        if (!$account) return; 
+        if (!$account)
+            return;
         $this->journalItemModel->insert([
             'journal_id' => $journalId,
             'account_id' => $account['id'],

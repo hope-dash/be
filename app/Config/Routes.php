@@ -82,6 +82,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //Pembelian
     $routes->post('transaction/belanja', 'PembelianController::createPembelian');
     $routes->put('transaction/belanja/cancel/(:num)', 'PembelianController::cancelPembelian/$1');
+    $routes->put('transaction/belanja/review/(:num)', 'PembelianController::reviewPembelian/$1');
     $routes->post('transaction/belanja/execute/(:num)', 'PembelianController::executePembelian/$1');
     $routes->get('transaction/belanja', 'PembelianController::listPembelian');
     $routes->get('transaction/belanja/(:num)', 'PembelianController::getPembelianById/$1');

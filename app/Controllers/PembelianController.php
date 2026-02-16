@@ -98,7 +98,7 @@ class PembelianController extends ResourceController
                 'id_toko' => $request['id_toko'],
                 'total_belanja' => $totalBelanjaKeseluruhan,
                 'catatan' => $request['catatan'] ?? null,
-                'status' => 'REVIEW', // Status default
+                'status' => 'NEED_REVIEW', // Status default
                 'created_at' => date('Y-m-d H:i:s'),
                 'created_by' => $token['user_id'] ?? null,
             ];
@@ -178,7 +178,7 @@ class PembelianController extends ResourceController
         }
 
 
-        if ($pembelian['status'] !== 'REVIEW') {
+        if ($pembelian['status'] == 'SUCCESS') {
             return $this->jsonResponse->error('Pembelian ini tidak dapat dibatalkan (status saat ini: ' . $pembelian['status'] . ').', 400);
         }
 
@@ -220,6 +220,57 @@ class PembelianController extends ResourceController
             return $this->jsonResponse->error('Terjadi kesalahan internal saat membatalkan pembelian: ' . $e->getMessage(), 400);
         }
     }
+    public function reviewPembelian($pembelianId = null)
+    {
+        if ($pembelianId === null) {
+            return $this->jsonResponse->error('ID Pembelian wajib diisi.', 400);
+        }
+
+        $pembelian = $this->pembelianModel->find($pembelianId);
+        if (!$pembelian) {
+            return $this->jsonResponse->error('Data pembelian tidak ditemukan.', 400);
+        }
+
+        if ($pembelian['status'] !== 'NEED_REVIEW') {
+            return $this->jsonResponse->error('Pembelian ini tidak dapat di-review (status saat ini: ' . $pembelian['status'] . ').', 400);
+        }
+
+        $db = \Config\Database::connect();
+        $db->transBegin();
+
+        try {
+            $updateData = [
+                'status' => 'APPROVED',
+                'updated_at' => date('Y-m-d H:i:s'),
+                'updated_by' => $this->request->user['user_id'] ?? null,
+            ];
+
+            if (!$this->pembelianModel->update($pembelianId, $updateData)) {
+                $errors = $this->pembelianModel->errors();
+                throw new \Exception('Gagal mengubah status pembelian menjadi APPROVED: ' . implode(', ', $errors ?: []));
+            }
+
+            if ($db->transStatus() === false) {
+                $db->transRollback();
+                return $this->jsonResponse->error('Gagal update status pembelian karena transaksi database.', 400);
+            }
+
+            $db->transCommit();
+
+            return $this->jsonResponse->oneResp(
+                'Pembelian berhasil di-approve',
+                [
+                    'pembelian_id' => $pembelianId,
+                ],
+                200
+            );
+
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            log_message('error', '[ERROR REVIEW PEMBELIAN] ' . $e->getMessage() . ' - Trace: ' . $e->getTraceAsString());
+            return $this->jsonResponse->error('Terjadi kesalahan internal saat review pembelian: ' . $e->getMessage(), 400);
+        }
+    }
     public function executePembelian($pembelianId = null)
     {
         if ($pembelianId === null) {
@@ -236,8 +287,10 @@ class PembelianController extends ResourceController
                 throw new \Exception('Data pembelian tidak ditemukan.');
             }
 
-            if ($pembelian['status'] !== 'REVIEW') {
-                throw new \Exception('Hanya pembelian dengan status REVIEW yang dapat dieksekusi. Status saat ini: ' . $pembelian['status']);
+            // Allow execution only for APPROVED status (or legacy REVIEW if mapped)
+            // Since migration mapped REVIEW -> NEED_REVIEW, only APPROVED is valid for execution
+            if ($pembelian['status'] !== 'APPROVED') {
+                throw new \Exception('Hanya pembelian dengan status APPROVED yang dapat dieksekusi. Status saat ini: ' . $pembelian['status']);
             }
 
             $idToko = $pembelian['id_toko'];
