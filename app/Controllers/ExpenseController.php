@@ -35,6 +35,75 @@ class ExpenseController extends ResourceController
         return $this->jsonResponse->oneResp('Expense Accounts', $accounts, 200);
     }
 
+    // GET LIST EXPENSES with Filters, Search, and Pagination
+    public function getList()
+    {
+        $page = $this->request->getGet('page') ?? 1;
+        $perPage = $this->request->getGet('per_page') ?? 20;
+        $search = $this->request->getGet('search') ?? '';
+        $startDate = $this->request->getGet('start_date') ?? null;
+        $endDate = $this->request->getGet('end_date') ?? null;
+        $idToko = $this->request->getGet('id_toko') ?? null;
+        $paymentMethod = $this->request->getGet('payment_method') ?? null;
+        $sortBy = $this->request->getGet('sort_by') ?? 'date';
+        $sortOrder = $this->request->getGet('sort_order') ?? 'DESC';
+
+        // Build query
+        $builder = $this->db->table('expenses e');
+        $builder->select('e.*, a.code as account_code, a.name as account_name, a.type as account_type');
+        $builder->join('accounts a', 'e.account_id = a.id', 'left');
+        $builder->where('e.deleted_at', null);
+
+        // Apply filters
+        if ($idToko) {
+            $builder->where('e.id_toko', $idToko);
+        }
+
+        if ($paymentMethod) {
+            $builder->where('e.payment_method', $paymentMethod);
+        }
+
+        if ($startDate) {
+            $builder->where('e.date >=', $startDate);
+        }
+
+        if ($endDate) {
+            $builder->where('e.date <=', $endDate);
+        }
+
+        // Search
+        if ($search) {
+            $builder->groupStart();
+            $builder->like('e.description', $search);
+            $builder->orLike('a.name', $search);
+            $builder->orLike('a.code', $search);
+            $builder->groupEnd();
+        }
+
+        // Count total before pagination
+        $total = $builder->countAllResults(false);
+
+        // Apply sorting and pagination
+        $builder->orderBy("e.{$sortBy}", $sortOrder);
+        $builder->limit($perPage, ($page - 1) * $perPage);
+
+        $expenses = $builder->get()->getResultArray();
+
+        // Calculate pagination metadata
+        $totalPages = ceil($total / $perPage);
+
+        return $this->jsonResponse->oneResp('Expenses retrieved successfully', [
+            'data' => $expenses,
+            'pagination' => [
+                'current_page' => (int) $page,
+                'per_page' => (int) $perPage,
+                'total' => $total,
+                'total_pages' => $totalPages,
+                'has_more' => $page < $totalPages
+            ]
+        ], 200);
+    }
+
     // CREATE EXPENSE
     public function create()
     {
@@ -50,7 +119,7 @@ class ExpenseController extends ResourceController
         if (!$expenseAccount || $expenseAccount['type'] !== 'EXPENSE') {
             return $this->jsonResponse->error('Invalid Expense Account', 400);
         }
-        
+
         $cashAccountCode = ($data->payment_method === 'BANK') ? '1002' : '1001';
         $cashAccount = $this->accountModel->where('code', $cashAccountCode)->first();
 
@@ -65,8 +134,9 @@ class ExpenseController extends ResourceController
                 'payment_method' => $data->payment_method,
                 'date' => $data->date ?? date('Y-m-d'),
                 'description' => $data->description ?? "Expense {$expenseAccount['name']}",
+                'attachment' => $data->attachment ?? null, // Link to uploaded file
             ];
-            
+
             $this->expenseModel->insert($expenseData);
             $expenseId = $this->expenseModel->getInsertID();
 
@@ -74,7 +144,7 @@ class ExpenseController extends ResourceController
             $journalData = [
                 'id_toko' => $data->id_toko ?? null,
                 'reference_type' => 'EXPENSE',
-                'reference_id' => (string)$expenseId,
+                'reference_id' => (string) $expenseId,
                 'reference_no' => "EXP-" . date('ymd') . "-" . str_pad($expenseId, 4, '0', STR_PAD_LEFT),
                 'date' => $data->date ?? date('Y-m-d'),
                 'description' => $data->description ?? "Expense {$expenseAccount['name']}",
@@ -108,7 +178,7 @@ class ExpenseController extends ResourceController
             $this->db->transComplete();
 
             if ($this->db->transStatus() === false) {
-                 return $this->jsonResponse->error('Failed to record expense', 500);
+                return $this->jsonResponse->error('Failed to record expense', 500);
             }
 
             return $this->jsonResponse->oneResp('Expense recorded successfully', [

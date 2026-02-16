@@ -141,6 +141,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
 
         // Expense Routes
         $routes->get('expense/accounts', 'ExpenseController::accounts');
+        $routes->get('expense', 'ExpenseController::getList');
         $routes->post('expense', 'ExpenseController::create');
 
         // Purchase V2 (Overriding/Alternative to old Pembelian)
