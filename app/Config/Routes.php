@@ -129,7 +129,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->resource('suplier', ['controller' => 'SuplierController']);
 
     // V2 Transaction Routes
-    $routes->group('v2', function($routes) {
+    $routes->group('v2', function ($routes) {
         $routes->post('transaction', 'TransactionControllerV2::create');
         $routes->get('transaction/(:num)', 'TransactionControllerV2::getDetail/$1');
         $routes->post('transaction/count', 'TransactionControllerV2::calculate');
@@ -138,7 +138,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
         $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
         $routes->post('transaction/(:num)/delivery-status', 'TransactionControllerV2::updateDeliveryStatus/$1');
-        
+
         // Expense Routes
         $routes->get('expense/accounts', 'ExpenseController::accounts');
         $routes->post('expense', 'ExpenseController::create');
@@ -154,26 +154,26 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->get('report/ledger/detail', 'AccountingReportController::ledgerDetail');
         $routes->get('report/income-statement', 'AccountingReportController::incomeStatement');
         $routes->get('report/balance-sheet', 'AccountingReportController::balanceSheet');
-        
+
         // Closing
         $routes->get('closing/preview', 'ClosingControllerV2::preview');
         $routes->post('closing/process', 'ClosingControllerV2::process');
-        
+
         // Finance (Transfer & Profit)
         $routes->post('finance/transfer', 'FinanceController::transfer');
         $routes->post('finance/distribute-profit', 'FinanceController::distributeProfit');
-        
+
         // Inventory (Stock Transfer)
         $routes->post('inventory/transfer', 'InventoryController::transfer');
 
         // Product V2
         $routes->post('product', 'ProductController::createProductV2');
         $routes->put('product/(:num)', 'ProductController::updateProductV2/$1');
-        
+
         // Transaction List & Meta
         $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');
         $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
-        
+
         // Voucher Management (Admin)
         $routes->post('voucher', 'VoucherController::create');
         $routes->get('voucher', 'VoucherController::index');
@@ -186,7 +186,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
 });
 
 // Customer V2 Public Routes (No Auth Required) - OUTSIDE jwtAuth group
-$routes->group('api/v2/customer', function($routes) {
+$routes->group('api/v2/customer', function ($routes) {
     $routes->post('register', 'CustomerControllerV2::register');
     $routes->post('verify-email', 'CustomerControllerV2::verifyEmail');
     $routes->post('login', 'CustomerControllerV2::login');
@@ -200,15 +200,23 @@ $routes->group('api/v2/customer', function($routes) {
 $routes->get('api/customer/verify', 'CustomerControllerV2::verifyEmailPage');
 
 // Customer V2 Protected Routes (Requires Customer Auth)
-$routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function($routes) {
+$routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function ($routes) {
     $routes->get('profile', 'CustomerControllerV2::getProfile');
     $routes->put('profile', 'CustomerControllerV2::updateProfile');
     $routes->post('pricelist', 'ProductController::getProductStockForPricelistV2');
     $routes->post('voucher/(:num)/apply', 'CustomerControllerV2::applyVoucher/$1');
 });
 
+// Invoice & Receipt (Public - No Auth Required)
+// Download routes must come BEFORE view routes to avoid conflicts
+$routes->get('invoice/download/(:num)', 'InvoiceController::downloadPdf/$1');
+$routes->get('invoice/download-mpdf/(:num)', 'InvoiceController::downloadPdfMpdf/$1');
+$routes->get('receipt/download/(:num)', 'InvoiceController::downloadReceiptPdf/$1');
+$routes->get('invoice/(:num)', 'InvoiceController::view/$1');
+$routes->get('receipt/(:num)', 'InvoiceController::receipt/$1');
+
 // Wilayah Indonesia API (Public - No Auth Required)
-$routes->group('api/wilayah', function($routes) {
+$routes->group('api/wilayah', function ($routes) {
     $routes->get('provinces', 'WilayahController::getProvinces');
     $routes->get('provinces/search', 'WilayahController::searchProvinces');
     $routes->get('cities/(:segment)', 'WilayahController::getCitiesByProvince/$1');

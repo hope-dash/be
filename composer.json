@@ -13,8 +13,10 @@
         "php": "^8.1",
         "ext-intl": "*",
         "ext-mbstring": "*",
+        "dompdf/dompdf": "*",
         "firebase/php-jwt": "^6.11",
         "laminas/laminas-escaper": "^2.14",
+        "mpdf/mpdf": "*",
         "phpoffice/phpspreadsheet": "^4.1",
         "psr/log": "^3.0"
     },
