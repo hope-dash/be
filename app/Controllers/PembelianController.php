@@ -349,8 +349,10 @@ class PembelianController extends ResourceController
             // CREATE JOURNAL ENTRIES
             // ==========================================
             try {
-                $toko = $db->table('toko')->where('id', $idToko)->get()->getRowArray();
-                $cashAccountId = $toko['cash_account_id']; // Default to Cash for Purchases
+                // User Request: Use Bank Utama (1002) for Purchases
+                // Instead of store-specific account, we specifically use the Main Bank
+                $bankAccount = $this->accountModel->where('code', '1002')->first();
+                $creditAccountId = $bankAccount ? $bankAccount['id'] : null;
 
                 // Find Purchase Account (Expense/Asset) - Default 'Pembelian'
                 $purchaseAccount = $this->accountModel->like('name', 'Pembelian', 'both')->first();
@@ -358,7 +360,7 @@ class PembelianController extends ResourceController
                     $purchaseAccount = $this->accountModel->where('type', 'EXPENSE')->first();
                 }
 
-                if ($cashAccountId && $purchaseAccount) {
+                if ($creditAccountId && $purchaseAccount) {
                     $dateTime = date('Y-m-d H:i:s');
                     // 1. Journal Header
                     $journalData = [
@@ -385,10 +387,10 @@ class PembelianController extends ResourceController
                         'created_at' => $dateTime
                     ]);
 
-                    // 3. Cr. Cash (Asset) - Money Out
+                    // 3. Cr. Bank Utama (Asset) - Money Out
                     $this->journalItemModel->insert([
                         'journal_id' => $journalId,
-                        'account_id' => $cashAccountId,
+                        'account_id' => $creditAccountId,
                         'debit' => 0,
                         'credit' => $pembelian['total_belanja'],
                         'created_at' => $dateTime
