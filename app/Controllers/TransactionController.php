@@ -630,7 +630,7 @@ class TransactionController extends BaseController
                 // 1. Get Transaction Meta (Customer Info & Jatuh Tempo)
                 $metas = $db->table('transaction_meta')
                     ->whereIn('transaction_id', $transactionIds)
-                    ->whereIn('key', ['customer_id', 'customer_name', 'jatuh_tempo'])
+                    ->whereIn('key', ['customer_id', 'customer_name', 'jatuh_tempo', 'pengiriman', 'resi'])
                     ->get()
                     ->getResultArray();
 
@@ -679,6 +679,10 @@ class TransactionController extends BaseController
                     if ($jatuhTempoVal && $jatuhTempoVal != '' && $jatuhTempoVal <= date('Y-m-d')) {
                         $row['jatuh_tempo'] = true;
                     }
+
+                    // Add Pengiriman and Resi
+                    $row['pengiriman'] = $tMeta['pengiriman'] ?? null;
+                    $row['resi'] = $tMeta['resi'] ?? null;
                 }
                 unset($row);
             }
@@ -707,12 +711,16 @@ class TransactionController extends BaseController
                 CASE 
                     WHEN tm_jatuh_tempo.value IS NOT NULL AND tm_jatuh_tempo.value != '' AND tm_jatuh_tempo.value <= CURDATE() THEN TRUE
                     ELSE FALSE
-                END AS jatuh_tempo
+                END AS jatuh_tempo,
+                tm_pengiriman.value AS pengiriman,
+                tm_resi.value AS resi
             ")
                 ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
                 ->join('customer c', 'tm_cust.value = c.id', 'left')
                 ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
                 ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
+                ->join('transaction_meta tm_pengiriman', 't.id = tm_pengiriman.transaction_id AND tm_pengiriman.key = "pengiriman"', 'left')
+                ->join('transaction_meta tm_resi', 't.id = tm_resi.transaction_id AND tm_resi.key = "resi"', 'left')
                 ->join('toko', 't.id_toko = toko.id', 'left');
 
             // Apply Filters

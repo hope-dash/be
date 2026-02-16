@@ -14,6 +14,7 @@ class PembelianDetailModel extends Model
         'kode_barang',
         'jumlah',
         'harga_satuan',
+        'harga_jual',
         'ongkir',
         'total_harga'
     ];

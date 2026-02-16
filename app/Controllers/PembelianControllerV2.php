@@ -80,7 +80,7 @@ class PembelianControllerV2 extends ResourceController
                 'id_toko' => $request['id_toko'],
                 'total_belanja' => $grandTotal,
                 'catatan' => $request['catatan'] ?? null,
-                'status' => 'REVIEW',
+                'status' => 'NEED_REVIEW',
                 'created_by' => $user['user_id'] ?? null,
                 'bukti_foto' => $request['bukti_foto'] ?? null
             ]);
@@ -92,6 +92,7 @@ class PembelianControllerV2 extends ResourceController
                     'kode_barang' => $item['kode_barang'],
                     'jumlah' => $item['jumlah'],
                     'harga_satuan' => $item['harga_satuan'],
+                    'harga_jual' => $item['harga_jual'] ?? 0,
                     'ongkir' => $item['ongkir'] ?? 0,
                     'total_harga' => (($item['harga_satuan'] + ($item['ongkir'] ?? 0)) * $item['jumlah'])
                 ]);
@@ -189,8 +190,12 @@ class PembelianControllerV2 extends ResourceController
 
                 $newAvgCost = (($oldQty * $oldCost) + ($qty * $costPerUnit)) / ($totalNewQty > 0 ? $totalNewQty : 1);
 
-                // Update Product Master Cost
-                $this->productModel->update($product['id'], ['harga_modal' => $newAvgCost]);
+                // Update Product Master Cost & Sell Price
+                $productUpdateData = ['harga_modal' => $newAvgCost];
+                if (!empty($item['harga_jual']) && $item['harga_jual'] > 0) {
+                    $productUpdateData['harga_jual'] = $item['harga_jual'];
+                }
+                $this->productModel->update($product['id'], $productUpdateData);
 
                 // Update Stock Quantity
                 if ($stockEntry) {

@@ -63,7 +63,8 @@ class TransactionControllerV2 extends ResourceController
 
         try {
             $items = $data->items ?? $data->item ?? []; // Support both keys
-            if (empty($items)) throw new \Exception("Items cannot be empty");
+            if (empty($items))
+                throw new \Exception("Items cannot be empty");
 
             // -- 0. Customer Handling --
             $customerId = $data->customer_id ?? null;
@@ -98,14 +99,16 @@ class TransactionControllerV2 extends ResourceController
             foreach ($items as $item) {
                 // Compatible with both 'id_barang' and 'kode_barang'
                 $idBarang = $item->id_barang ?? $item->kode_barang ?? null;
-                if (!$idBarang) throw new \Exception("Item code/id missing");
-                
+                if (!$idBarang)
+                    throw new \Exception("Item code/id missing");
+
                 // Compatible with 'price' or 'harga_jual'
                 $price = $item->price ?? $item->harga_jual ?? 0;
                 $qty = $item->qty ?? $item->jumlah ?? 0;
 
                 $product = $this->productModel->where('id_barang', $idBarang)->first();
-                if (!$product) throw new \Exception("Product {$idBarang} not found");
+                if (!$product)
+                    throw new \Exception("Product {$idBarang} not found");
 
                 // Item Level Discount
                 $itemDiscountType = $item->discount_type ?? 'FIXED';
@@ -130,10 +133,10 @@ class TransactionControllerV2 extends ResourceController
 
                 $grossAmount += $itemTotal;
                 $totalItemDiscount += $itemDiscountValue;
-                
+
                 $modal = $product['harga_modal'] * $qty;
                 $totalModal += $modal;
-                
+
                 $itemsProcessed[] = [
                     'product' => $product,
                     'qty' => $qty,
@@ -165,20 +168,21 @@ class TransactionControllerV2 extends ResourceController
             // PPN Calculation
             $ppnPercent = $data->ppn ?? 0;
             $ppnValue = ($afterDiscountSubtotal * $ppnPercent) / 100;
-            
+
             // Shipping Cost Logic
             $shippingCost = $data->biaya_pengiriman ?? 0;
             $isFreeOngkir = $data->free_ongkir ?? false;
-            
+
             // Grand Total Calculation
             // actual_total = total dari amount stlh discount dan ada ppn atau ongkir lain lain
             $grandTotal = $afterDiscountSubtotal + $ppnValue;
-            
+
             if (!$isFreeOngkir) {
                 $grandTotal += $shippingCost;
             }
-            
-            if ($grandTotal < 0) $grandTotal = 0;
+
+            if ($grandTotal < 0)
+                $grandTotal = 0;
 
             // -- Insert Transaction --
             $trxData = [
@@ -196,7 +200,7 @@ class TransactionControllerV2 extends ResourceController
                 'created_by' => $userId,
                 'date_time' => date('Y-m-d H:i:s'),
             ];
-            
+
             $this->transactionModel->insert($trxData);
             $trxId = $this->transactionModel->getInsertID();
 
@@ -224,13 +228,13 @@ class TransactionControllerV2 extends ResourceController
                 'item_discount_total' => $totalItemDiscount,
                 'tx_discount_value' => $txDiscountValue
             ];
-            
+
             foreach ($metaData as $key => $val) {
                 if ($val !== null) {
                     $this->transactionMetaModel->insert([
                         'transaction_id' => $trxId,
                         'key' => $key,
-                        'value' => (string)$val
+                        'value' => (string) $val
                     ]);
                 }
             }
@@ -238,18 +242,18 @@ class TransactionControllerV2 extends ResourceController
 
             // -- Accounting: Sales Journal --
             $journalId = $this->createJournal('SALES', $trxId, $trxData['invoice'], date('Y-m-d'), "Invoice #{$trxData['invoice']}", $data->id_toko);
-            
+
             // 1. Dr AR (Total Receivables)
-            $this->addJournalItem($journalId, '1003', $grandTotal, 0); 
-            
+            $this->addJournalItem($journalId, '1003', $grandTotal, 0);
+
             // 2. Dr Discount (if any)
             if ($totalDiscount > 0) {
-                 $this->addJournalItem($journalId, '4002', $totalDiscount, 0); 
+                $this->addJournalItem($journalId, '4002', $totalDiscount, 0);
             }
-            
+
             // 3. Cr Sales Revenue (Gross Sales from Items)
-            $this->addJournalItem($journalId, '4001', 0, $grossAmount); 
-            
+            $this->addJournalItem($journalId, '4001', 0, $grossAmount);
+
             // 4. Cr PPN Payable (using 2001 or 2005 if exists)
             if ($ppnValue > 0) {
                 $this->addJournalItem($journalId, '2001', 0, $ppnValue);
@@ -257,9 +261,9 @@ class TransactionControllerV2 extends ResourceController
 
             // 5. Shipping Logic
             if (!$isFreeOngkir && $shippingCost > 0) {
-                  $this->addJournalItem($journalId, '4001', 0, $shippingCost);
+                $this->addJournalItem($journalId, '4001', 0, $shippingCost);
             }
-            
+
             if ($isFreeOngkir && $shippingCost > 0) {
                 $this->addJournalItem($journalId, '6005', $shippingCost, 0); // Dr Expense
                 $this->addJournalItem($journalId, '2001', 0, $shippingCost); // Cr Payable
@@ -304,9 +308,9 @@ class TransactionControllerV2 extends ResourceController
 
             // -- Accounting: COGS Journal --
             if ($cogsTotal > 0) {
-                 $cogsJournalId = $this->createJournal('COGS', $trxId, $trxData['invoice'], date('Y-m-d'), "COGS Invoice {$trxData['invoice']}", $data->id_toko);
-                 $this->addJournalItem($cogsJournalId, '5001', $cogsTotal, 0); // Dr COGS
-                 $this->addJournalItem($cogsJournalId, '1004', 0, $cogsTotal); // Cr Inventory
+                $cogsJournalId = $this->createJournal('COGS', $trxId, $trxData['invoice'], date('Y-m-d'), "COGS Invoice {$trxData['invoice']}", $data->id_toko);
+                $this->addJournalItem($cogsJournalId, '5001', $cogsTotal, 0); // Dr COGS
+                $this->addJournalItem($cogsJournalId, '1004', 0, $cogsTotal); // Cr Inventory
             }
 
             $this->db->transComplete();
@@ -314,7 +318,7 @@ class TransactionControllerV2 extends ResourceController
             if ($this->db->transStatus() === false) {
                 return $this->jsonResponse->error('Transaction failed to save', 500);
             }
-            
+
             log_aktivitas([
                 'user_id' => $userId,
                 'action_type' => 'CREATE',
@@ -337,7 +341,8 @@ class TransactionControllerV2 extends ResourceController
         try {
             $data = $this->request->getJSON();
             $items = $data->items ?? $data->item ?? [];
-            if (empty($items)) throw new \Exception("Items cannot be empty");
+            if (empty($items))
+                throw new \Exception("Items cannot be empty");
 
             $grossAmount = 0;
             $totalItemDiscount = 0;
@@ -378,11 +383,11 @@ class TransactionControllerV2 extends ResourceController
             // PPN Calculation
             $ppnPercent = $data->ppn ?? 10;
             $ppnValue = ($afterDiscountSubtotal * $ppnPercent) / 100;
-            
+
             // Shipping Cost
             $shippingCost = $data->biaya_pengiriman ?? 0;
             $isFreeOngkir = $data->free_ongkir ?? false;
-            
+
             $chargedShipping = $isFreeOngkir ? 0 : $shippingCost;
             $grandTotal = $afterDiscountSubtotal + $ppnValue + $chargedShipping;
 
@@ -406,9 +411,10 @@ class TransactionControllerV2 extends ResourceController
     {
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
-        
+
         $trx = $this->transactionModel->find($id);
-        if (!$trx) return $this->jsonResponse->error("Transaction not found", 404);
+        if (!$trx)
+            return $this->jsonResponse->error("Transaction not found", 404);
 
         $amount = $data->amount;
         $method = $data->payment_method ?? 'CASH';
@@ -424,7 +430,7 @@ class TransactionControllerV2 extends ResourceController
                 'image_url' => $data->image ?? null
             ]);
 
-            $accountCode = ($method == 'CASH') ? '1001' : '1002'; 
+            $accountCode = ($method == 'CASH') ? '1001' : '1002';
             $journalId = $this->createJournal('PAYMENT', $id, $trx['invoice'], date('Y-m-d'), "Payment for {$trx['invoice']}", $trx['id_toko']);
             $this->addJournalItem($journalId, $accountCode, $amount, 0); // Dr Cash
             $this->addJournalItem($journalId, '1003', 0, $amount); // Cr AR
@@ -439,7 +445,7 @@ class TransactionControllerV2 extends ResourceController
             ]);
 
             $this->db->transComplete();
-            
+
             log_aktivitas([
                 'user_id' => $userId,
                 'action_type' => 'PAYMENT',
@@ -461,16 +467,17 @@ class TransactionControllerV2 extends ResourceController
     {
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
-        
+
         $trx = $this->transactionModel->find($id);
-        if (!$trx) return $this->jsonResponse->error("Transaction not found", 404);
+        if (!$trx)
+            return $this->jsonResponse->error("Transaction not found", 404);
 
         $this->db->transStart();
         try {
             // Restore Stock
             $items = $this->salesProductModel->where('id_transaction', $id)->findAll();
             $cogsReversal = 0;
-            
+
             foreach ($items as $item) {
                 $this->addStock($item['kode_barang'], $trx['id_toko'], $item['jumlah'], $id, "Cancel Transaction {$trx['invoice']}");
                 $cogsReversal += $item['total_modal'];
@@ -479,36 +486,38 @@ class TransactionControllerV2 extends ResourceController
             // Reverse COGS
             if ($cogsReversal > 0) {
                 $jId = $this->createJournal('CANCEL_COGS', $id, $trx['invoice'], date('Y-m-d'), "Reversal COGS {$trx['invoice']}", $trx['id_toko']);
-                $this->addJournalItem($jId, '1004', $cogsReversal, 0); 
-                $this->addJournalItem($jId, '5001', 0, $cogsReversal); 
+                $this->addJournalItem($jId, '1004', $cogsReversal, 0);
+                $this->addJournalItem($jId, '5001', 0, $cogsReversal);
             }
 
             // Reverse Sales
             $jIdSales = $this->createJournal('CANCEL_SALES', $id, $trx['invoice'], date('Y-m-d'), "Cancellation {$trx['invoice']}", $trx['id_toko']);
-            
+
             // Get meta for accurate reversal
             $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
             $metaMap = [];
-            foreach ($metas as $m) { $metaMap[$m['key']] = $m['value']; }
-            
-            $ppnValue = (float)($metaMap['ppn_value'] ?? 0);
-            $itemDiscountTotal = (float)($metaMap['item_discount_total'] ?? 0);
-            $txDiscountValue = (float)($metaMap['tx_discount_value'] ?? 0);
+            foreach ($metas as $m) {
+                $metaMap[$m['key']] = $m['value'];
+            }
+
+            $ppnValue = (float) ($metaMap['ppn_value'] ?? 0);
+            $itemDiscountTotal = (float) ($metaMap['item_discount_total'] ?? 0);
+            $txDiscountValue = (float) ($metaMap['tx_discount_value'] ?? 0);
             $totalDiscount = $itemDiscountTotal + $txDiscountValue;
-            $shippingCost = (float)($metaMap['biaya_pengiriman'] ?? 0);
+            $shippingCost = (float) ($metaMap['biaya_pengiriman'] ?? 0);
             $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
 
             // Reverse AR
             $this->addJournalItem($jIdSales, '1003', 0, $trx['actual_total']);
-            
+
             // Reverse Discount (Contra-Revenue)
             if ($totalDiscount > 0) {
-                 $this->addJournalItem($jIdSales, '4002', 0, $totalDiscount);
+                $this->addJournalItem($jIdSales, '4002', 0, $totalDiscount);
             }
 
             // Reverse Gross Sales
             $this->addJournalItem($jIdSales, '4001', $trx['amount'], 0);
-            
+
             // Reverse PPN
             if ($ppnValue > 0) {
                 $this->addJournalItem($jIdSales, '2001', $ppnValue, 0);
@@ -531,7 +540,7 @@ class TransactionControllerV2 extends ResourceController
 
             $newStatus = 'CANCEL';
             $refundNeeded = 0;
-            
+
             // Store cancel reason if provided
             if (isset($data->cancel_reason) && !empty($data->cancel_reason)) {
                 $this->transactionMetaModel->insert([
@@ -540,17 +549,18 @@ class TransactionControllerV2 extends ResourceController
                     'value' => $data->cancel_reason
                 ]);
             }
-            
+
             if ($trx['total_payment'] > 0) {
                 $newStatus = 'NEED_REFUND';
-                $refundNeeded = (float)$trx['total_payment'];
-                
+                $refundNeeded = (float) $trx['total_payment'];
+
                 // Logic: Ongkir tidak dikembalikan jika status pengiriman DELIVERED (dan bukan free ongkir)
                 if (strtoupper($trx['delivery_status'] ?? '') === 'DELIVERED' && !$isFreeOngkir && $shippingCost > 0) {
                     $refundNeeded -= $shippingCost;
-                    if ($refundNeeded < 0) $refundNeeded = 0;
+                    if ($refundNeeded < 0)
+                        $refundNeeded = 0;
                 }
-                
+
                 // Store refund needed amount in meta
                 $this->transactionMetaModel->insert([
                     'transaction_id' => $id,
@@ -562,7 +572,7 @@ class TransactionControllerV2 extends ResourceController
             $this->transactionModel->update($id, ['status' => $newStatus]);
 
             $this->db->transComplete();
-            
+
             log_aktivitas([
                 'user_id' => $userId,
                 'action_type' => 'CANCEL',
@@ -583,14 +593,15 @@ class TransactionControllerV2 extends ResourceController
     {
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
-        
+
         $trx = $this->transactionModel->find($id);
-        if (!$trx) return $this->jsonResponse->error("Transaction not found", 404);
+        if (!$trx)
+            return $this->jsonResponse->error("Transaction not found", 404);
 
         $this->db->transStart();
         try {
             $cogsReversal = 0;
-            $revenueReduction = 0; 
+            $revenueReduction = 0;
             $returnDetails = [];
             $returnSummary = [];
 
@@ -599,11 +610,12 @@ class TransactionControllerV2 extends ResourceController
                     ->where('id_transaction', $id)
                     ->where('kode_barang', $item->kode_barang)
                     ->first();
-                
-                if (!$saleItem) continue;
+
+                if (!$saleItem)
+                    continue;
 
                 $qty = $item->qty;
-                $isDamaged = ($item->condition === 'bad'); 
+                $isDamaged = ($item->condition === 'bad');
                 $conditionText = $isDamaged ? 'CACAT' : 'BAIK';
 
                 // Get product name for logging
@@ -614,7 +626,7 @@ class TransactionControllerV2 extends ResourceController
 
                 $modalOne = $saleItem['total_modal'] / $saleItem['jumlah'];
                 $cogsReversal += ($modalOne * $qty);
-                
+
                 $priceOne = $saleItem['total'] / $saleItem['jumlah'];
                 $revenueReduction += ($priceOne * $qty);
 
@@ -659,19 +671,19 @@ class TransactionControllerV2 extends ResourceController
             ]);
 
             if ($cogsReversal > 0) {
-                 $jid = $this->createJournal('RETUR_COGS', $id, $trx['invoice'], date('Y-m-d'), "Retur COGS Reversal", $trx['id_toko']);
-                 $this->addJournalItem($jid, '1004', $cogsReversal, 0); 
-                 $this->addJournalItem($jid, '5001', 0, $cogsReversal); 
+                $jid = $this->createJournal('RETUR_COGS', $id, $trx['invoice'], date('Y-m-d'), "Retur COGS Reversal", $trx['id_toko']);
+                $this->addJournalItem($jid, '1004', $cogsReversal, 0);
+                $this->addJournalItem($jid, '5001', 0, $cogsReversal);
             }
 
             if ($revenueReduction > 0) {
                 $jid = $this->createJournal('RETUR_SALES', $id, $trx['invoice'], date('Y-m-d'), "Retur Sales Reduction", $trx['id_toko']);
-                $this->addJournalItem($jid, '4003', $revenueReduction, 0); 
-                $this->addJournalItem($jid, '1003', 0, $revenueReduction); 
+                $this->addJournalItem($jid, '4003', $revenueReduction, 0);
+                $this->addJournalItem($jid, '1003', 0, $revenueReduction);
             }
 
             $this->db->transComplete();
-            
+
             // Transaction-level summary log
             $summaryText = "Retur Transaksi {$trx['invoice']} - " . count($returnDetails) . " item(s): " . implode(", ", $returnSummary);
             log_aktivitas([
@@ -688,13 +700,13 @@ class TransactionControllerV2 extends ResourceController
                     'refund_money' => $data->refund_money ?? false
                 ]
             ]);
-            
+
             // If return involves refund (money back), set status NEED_REFUND
             $refundMoney = $data->refund_money ?? false;
-            
+
             if ($refundMoney) {
-                 $this->transactionModel->update($id, ['status' => 'NEED_REFUND']);
-                 $this->transactionMetaModel->insert([
+                $this->transactionModel->update($id, ['status' => 'NEED_REFUND']);
+                $this->transactionMetaModel->insert([
                     'transaction_id' => $id,
                     'key' => 'refund_needed',
                     'value' => $revenueReduction
@@ -715,12 +727,13 @@ class TransactionControllerV2 extends ResourceController
     {
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
-        
+
         $amount = $data->amount;
         $reason = $data->reason ?? 'Refund';
 
         $trx = $this->transactionModel->find($id);
-        if (!$trx) return $this->jsonResponse->error("Transaction not found", 404);
+        if (!$trx)
+            return $this->jsonResponse->error("Transaction not found", 404);
 
         $this->db->transStart();
         try {
@@ -735,36 +748,37 @@ class TransactionControllerV2 extends ResourceController
             ]);
 
             $jid = $this->createJournal('REFUND', $id, $trx['invoice'], date('Y-m-d'), "Refund: $reason", $trx['id_toko']);
-            $this->addJournalItem($jid, '1003', $amount, 0); 
-            $this->addJournalItem($jid, '1001', 0, $amount); 
+            $this->addJournalItem($jid, '1003', $amount, 0);
+            $this->addJournalItem($jid, '1001', 0, $amount);
 
             $refundMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'refund_needed')->first();
             $newStatus = 'PARTIALLY_REFUNDED';
 
             if ($refundMeta) {
                 // User Request: newTotalPaid derived from meta (refund_needed) - amount
-                $remaining = (float)$refundMeta['value'] - $amount;
-                
-                if ($remaining <= 100) { 
+                $remaining = (float) $refundMeta['value'] - $amount;
+
+                if ($remaining <= 100) {
                     $remaining = 0;
                     $newStatus = 'REFUNDED';
                 }
-                
+
                 $this->transactionMetaModel->update($refundMeta['id'], ['value' => $remaining]);
-                $newTotalPaid = $remaining; 
+                $newTotalPaid = $remaining;
             } else {
                 // Fallback
                 $newTotalPaid = $trx['total_payment'] - $amount;
-                if ($newTotalPaid <= 0) $newStatus = 'REFUNDED';
+                if ($newTotalPaid <= 0)
+                    $newStatus = 'REFUNDED';
             }
-            
+
             $this->transactionModel->update($id, [
                 'total_payment' => $newTotalPaid,
                 'status' => $newStatus
             ]);
 
             $this->db->transComplete();
-            
+
             log_aktivitas([
                 'user_id' => $userId,
                 'action_type' => 'REFUND',
@@ -777,7 +791,7 @@ class TransactionControllerV2 extends ResourceController
             return $this->jsonResponse->oneResp('Refund processed successfully', [], 200);
 
         } catch (\Exception $e) {
-             return $this->jsonResponse->error($e->getMessage(), 500);
+            return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
 
@@ -785,14 +799,15 @@ class TransactionControllerV2 extends ResourceController
     public function updateDeliveryStatus($id = null)
     {
         $data = $this->request->getJSON();
-        
+
         $trx = $this->transactionModel->find($id);
-        if (!$trx) return $this->jsonResponse->error("Transaction not found", 404);
+        if (!$trx)
+            return $this->jsonResponse->error("Transaction not found", 404);
 
         $status = $data->status ?? null;
         $resi = $data->resi ?? null;
         $courier = $data->courier ?? null;
-        
+
         if (!$status && !$resi && !$courier) {
             return $this->jsonResponse->error("At least one field (status, resi, courier) is required", 400);
         }
@@ -802,19 +817,43 @@ class TransactionControllerV2 extends ResourceController
             // Update Delivery Status locally in transaction table (if using that column)
             // or just in Meta. Documentation says Meta.
             // But we also added `delivery_status` column in migration calling it "Shipping Status"
-            
+
             if ($status) {
-                 $this->transactionModel->update($id, ['delivery_status' => $status]);
-                 
-                 // Also sync to meta for consistency if needed, or stick to one source of truth.
-                 // Let's update meta 'shipping_status' as well for backward compat or flexible query
-                 $this->updateMeta($id, 'shipping_status', $status);
+                $this->transactionModel->update($id, ['delivery_status' => $status]);
+
+                // Also sync to meta for consistency
+                $this->updateMeta($id, 'shipping_status', $status);
+
+                // Create journal for shipping expenditure when status is updated to SHIPPED
+                if (strtoupper($status) === 'SHIPPED' && strtoupper($trx['delivery_status'] ?? '') !== 'SHIPPED') {
+                    $biayaMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'biaya_pengiriman')->first();
+                    $freeMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'free_ongkir')->first();
+
+                    $shippingCost = (float) ($biayaMeta['value'] ?? 0);
+                    $isFreeOngkir = ($freeMeta['value'] ?? '0') === '1';
+
+                    if ($shippingCost > 0) {
+                        // Check if shipping journal already exists for this transaction to avoid duplicates
+                        $existingJournal = $this->journalModel->where('reference_type', 'SHIPPING_OUT')->where('reference_id', $id)->first();
+
+                        if (!$existingJournal) {
+                            $journalId = $this->createJournal('SHIPPING_OUT', $id, $trx['invoice'], date('Y-m-d'), "Shipping fee paid for {$trx['invoice']}", $trx['id_toko']);
+
+                            // If free shipping, we settle the payable (2001) that was created during invoice creation.
+                            // Otherwise, record it as a direct shipping expense (6005).
+                            $debitCode = $isFreeOngkir ? '2001' : '6005';
+
+                            $this->addJournalItem($journalId, $debitCode, $shippingCost, 0); // Dr Expense/Payable
+                            $this->addJournalItem($journalId, '1002', 0, $shippingCost); // Cr Cash
+                        }
+                    }
+                }
             }
-            
+
             if ($resi) {
                 $this->updateMeta($id, 'resi', $resi);
             }
-            
+
             if ($courier) {
                 $this->updateMeta($id, 'courier', $courier);
             }
@@ -822,18 +861,19 @@ class TransactionControllerV2 extends ResourceController
             $this->db->transComplete();
 
             return $this->jsonResponse->oneResp('Delivery status updated', [], 200);
-            
+
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
-    
-    private function updateMeta($trxId, $key, $value) {
+
+    private function updateMeta($trxId, $key, $value)
+    {
         $existing = $this->transactionMetaModel->where('transaction_id', $trxId)->where('key', $key)->first();
         if ($existing) {
             $this->transactionMetaModel->update($existing['id'], ['value' => $value]);
         } else {
-             $this->transactionMetaModel->insert([
+            $this->transactionMetaModel->insert([
                 'transaction_id' => $trxId,
                 'key' => $key,
                 'value' => $value
@@ -843,7 +883,8 @@ class TransactionControllerV2 extends ResourceController
 
     // --- Helpers ---
 
-    private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null) {
+    private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null)
+    {
         $data = [
             'id_toko' => $tokoId,
             'reference_type' => $refType,
@@ -857,20 +898,23 @@ class TransactionControllerV2 extends ResourceController
         return $this->journalModel->getInsertID();
     }
 
-    private function addJournalItem($journalId, $accountCode, $debit, $credit) {
+    private function addJournalItem($journalId, $accountCode, $debit, $credit)
+    {
         $account = $this->accountModel->where('code', $accountCode)->first();
-        if (!$account) return; 
+        if (!$account)
+            return;
 
         $this->journalItemModel->insert([
             'journal_id' => $journalId,
             'account_id' => $account['id'],
             'debit' => $debit,
             'credit' => $credit,
-             'created_at' => date('Y-m-d H:i:s')
+            'created_at' => date('Y-m-d H:i:s')
         ]);
     }
 
-    private function deductStock($productCode, $tokoId, $qty, $trxId, $reason) {
+    private function deductStock($productCode, $tokoId, $qty, $trxId, $reason)
+    {
         $stockEntry = $this->stockModel->where('id_barang', $productCode)->where('id_toko', $tokoId)->first();
         if (!$stockEntry) {
             $this->stockModel->insert([
@@ -881,7 +925,7 @@ class TransactionControllerV2 extends ResourceController
             ]);
             $stockEntry = $this->stockModel->where('id_barang', $productCode)->where('id_toko', $tokoId)->first();
         }
-        
+
         $currentStock = $stockEntry['stock'];
         $newStock = $currentStock - $qty;
 
@@ -898,15 +942,17 @@ class TransactionControllerV2 extends ResourceController
         ]);
     }
 
-    private function addStock($productCode, $tokoId, $qty, $trxId, $reason, $isDamaged = false) {
+    private function addStock($productCode, $tokoId, $qty, $trxId, $reason, $isDamaged = false)
+    {
         $stockEntry = $this->stockModel->where('id_barang', $productCode)->where('id_toko', $tokoId)->first();
-        if (!$stockEntry) return; 
+        if (!$stockEntry)
+            return;
 
         if ($isDamaged) {
             $newCacat = $stockEntry['barang_cacat'] + $qty;
             $this->stockModel->update($stockEntry['id'], ['barang_cacat' => $newCacat]);
             // Log damage but usually not in normal stock ledger unless separate logic exist
-            return; 
+            return;
         }
 
         $newStock = $stockEntry['stock'] + $qty;
@@ -927,17 +973,19 @@ class TransactionControllerV2 extends ResourceController
     public function getDetail($id = null)
     {
         try {
-            if (!$id) return $this->jsonResponse->error("ID is required", 400);
+            if (!$id)
+                return $this->jsonResponse->error("ID is required", 400);
 
             $db = \Config\Database::connect();
-            
+
             // 1. Get Transaction with Toko info
             $transaction = $this->transactionModel
                 ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo')
                 ->join('toko', 'transaction.id_toko = toko.id', 'left')
                 ->find($id);
 
-            if (!$transaction) return $this->jsonResponse->error("Transaction not found", 404);
+            if (!$transaction)
+                return $this->jsonResponse->error("Transaction not found", 404);
 
             // 2. Get All Metadata
             $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
@@ -962,7 +1010,7 @@ class TransactionControllerV2 extends ResourceController
                 ->where('sp.id_transaction', $id)
                 ->get()
                 ->getResultArray();
-            
+
             $transaction['items'] = $items;
 
             // 4. Get Payments
@@ -970,7 +1018,7 @@ class TransactionControllerV2 extends ResourceController
                 ->where('transaction_id', $id)
                 ->orderBy('paid_at', 'DESC')
                 ->findAll();
-            
+
             $transaction['payments'] = $payments;
 
             return $this->jsonResponse->oneResp('Success', $transaction, 200);
@@ -1013,7 +1061,7 @@ class TransactionControllerV2 extends ResourceController
                 $meta = $this->transactionMetaModel
                     ->where('transaction_id', $trx['id'])
                     ->findAll();
-                
+
                 $trx['meta'] = [];
                 foreach ($meta as $m) {
                     $trx['meta'][$m['key']] = $m['value'];
