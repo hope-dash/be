@@ -122,7 +122,7 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
     }
-    
+
     // V2: Create Product with 0 Stock (Inventory Managed via Purchase)
     public function createProductV2()
     {
@@ -183,7 +183,7 @@ class ProductController extends ResourceController
                 'new' => $data
             ],
         ]);
-        
+
         return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
     }
     public function uploadImages()
@@ -476,7 +476,7 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id], 200);
     }
-    
+
     // V2: Update Product (No Stock Update, Only Dropship/Store Relation)
     public function updateProductV2($id = null)
     {
@@ -556,7 +556,7 @@ class ProductController extends ResourceController
                         $this->stockModel->insert([
                             'id_barang' => $data->id_barang ?? $oldProductData['kode_barang'],
                             'id_toko' => $toko->id_toko,
-                            'stock' => 0, 
+                            'stock' => 0,
                             'barang_cacat' => 0,
                         ]);
                     }
@@ -821,9 +821,39 @@ class ProductController extends ResourceController
                 ->get()
                 ->getResultArray();
 
-            // === Batch Query ===
-            $productIds = array_unique(array_column($products, 'id'));
-            $productCodes = array_unique(array_column($products, 'id_barang'));
+            // === Batch Query Preparation ===
+            $productIds = [];
+            $productCodes = [];
+            $allSuplierIds = [];
+
+            foreach ($products as $p) {
+                $productIds[] = $p['id'];
+                $productCodes[] = $p['id_barang'];
+                if (!empty($p['suplier'])) {
+                    $ids = explode(',', $p['suplier']);
+                    foreach ($ids as $id) {
+                        if (is_numeric(trim($id))) {
+                            $allSuplierIds[] = trim($id);
+                        }
+                    }
+                }
+            }
+            $productIds = array_unique($productIds);
+            $productCodes = array_unique($productCodes);
+            $allSuplierIds = array_unique($allSuplierIds);
+
+            // --- Suplier Map ---
+            $suplierNameMap = [];
+            if (!empty($allSuplierIds)) {
+                $supList = $this->db->table('suplier')
+                    ->select('id, suplier_name')
+                    ->whereIn('id', $allSuplierIds)
+                    ->get()
+                    ->getResultArray();
+                foreach ($supList as $sup) {
+                    $suplierNameMap[$sup['id']] = $sup['suplier_name'];
+                }
+            }
 
             // --- Stock + Toko ---
             $stockByProduct = [];
@@ -845,33 +875,55 @@ class ProductController extends ResourceController
                 }
             }
 
-            // --- Terjual ---
+            // --- Sales + Hold Optimized (One query for both) ---
             $terjualMap = [];
-            if (!empty($productCodes)) {
-                $rows = $this->db->table('sales_product sp')
-                    ->select('sp.kode_barang, SUM(sp.jumlah) as total')
-                    ->join('transaction t', 't.id = sp.id_transaction')
-                    ->whereIn('sp.kode_barang', $productCodes)
-                    ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID'])
-                    ->groupBy('sp.kode_barang')
-                    ->get()->getResultArray();
-                $terjualMap = array_column($rows, 'total', 'kode_barang');
-            }
-
-            // --- Hold ---
             $holdMap = [];
+            $holdTotalMap = [];
             if (!empty($productCodes)) {
                 $rows = $this->db->table('sales_product sp')
-                    ->select('sp.kode_barang, SUM(sp.jumlah) as total')
+                    ->select('
+                        sp.kode_barang, 
+                        t.id_toko, 
+                        SUM(CASE WHEN t.status IN ("SUCCESS", "PAID", "PACKING", "IN_DELIVERY", "PARTIALLY_PAID") THEN sp.jumlah ELSE 0 END) as terjual,
+                        SUM(CASE WHEN t.status = "WAITING_PAYMENT" THEN sp.jumlah ELSE 0 END) as hold
+                    ')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $productCodes)
-                    ->where('t.status', 'WAITING_PAYMENT')
-                    ->groupBy('sp.kode_barang')
+                    ->groupBy('sp.kode_barang, t.id_toko')
                     ->get()->getResultArray();
-                $holdMap = array_column($rows, 'total', 'kode_barang');
+
+                foreach ($rows as $row) {
+                    $kode = $row['kode_barang'];
+                    $tId = $row['id_toko'];
+
+                    if ($row['terjual'] > 0) {
+                        $terjualMap[$kode] = ($terjualMap[$kode] ?? 0) + (int) $row['terjual'];
+                    }
+                    if ($row['hold'] > 0) {
+                        $holdMap[$kode][$tId] = (int) $row['hold'];
+                        $holdTotalMap[$kode] = ($holdTotalMap[$kode] ?? 0) + (int) $row['hold'];
+                    }
+                }
             }
 
-            // --- Images (pastikan tabel = 'image') ---
+            // --- Coming Soon ---
+            $comingSoonMap = [];
+            $comingSoonTotalMap = [];
+            if (!empty($productCodes)) {
+                $rows = $this->db->table('pembelian_detail pd')
+                    ->select('pd.kode_barang, p.id_toko, SUM(pd.jumlah) as total')
+                    ->join('pembelian p', 'p.id = pd.pembelian_id')
+                    ->whereIn('pd.kode_barang', $productCodes)
+                    ->where('p.status', 'APPROVED')
+                    ->groupBy('pd.kode_barang, p.id_toko')
+                    ->get()->getResultArray();
+                foreach ($rows as $row) {
+                    $comingSoonMap[$row['kode_barang']][$row['id_toko']] = (int) $row['total'];
+                    $comingSoonTotalMap[$row['kode_barang']] = ($comingSoonTotalMap[$row['kode_barang']] ?? 0) + (int) $row['total'];
+                }
+            }
+
+            // --- Images ---
             $imageMap = [];
             if (!empty($productIds)) {
                 $images = $this->imageModel
@@ -887,49 +939,58 @@ class ProductController extends ResourceController
             // === Format Hasil ===
             $formattedProducts = [];
             foreach ($products as $p) {
+                $kodeBarang = $p['id_barang'];
                 $namaLengkap = trim(implode(' ', array_filter([
                     $p['nama_barang'],
                     $p['nama_model'] ?? '',
                     $p['seri'] ?? ''
                 ])));
 
-                // Stock
-                $stocks = $stockByProduct[$p['id_barang']] ?? [];
+                // Stock Logic
+                $stocks = $stockByProduct[$kodeBarang] ?? [];
                 $stockList = [];
-                $stockStrings = [];
+                $totalStockReady = 0;
+                $totalCacat = 0;
+
                 foreach ($stocks as $s) {
-                    $tokoName = $tokoMap[$s['id_toko']] ?? 'Tidak diketahui';
+                    $tokoId = $s['id_toko'];
+                    $tokoName = $tokoMap[$tokoId] ?? 'Tidak diketahui';
                     $dropship = in_array($s['dropship'], ['1', 1, true], true);
-                    $stockVal = (int) ($s['stock'] ?? 0);
+                    $stockReady = (int) ($s['stock'] ?? 0);
                     $cacatVal = (int) ($s['barang_cacat'] ?? 0);
+                    $holdVal = (int) ($holdMap[$kodeBarang][$tId] ?? 0);
+                    $comingSoonVal = (int) ($comingSoonMap[$kodeBarang][$tId] ?? 0);
 
                     $stockList[] = [
-                        'stock' => $stockVal,
+                        'stock_ready' => $stockReady,
+                        'stock' => $stockReady + $holdVal, // Stock aja = ready + hold
                         'barang_cacat' => $cacatVal,
+                        'hold_stock' => $holdVal,
+                        'stock_coming_soon' => $comingSoonVal,
                         'toko_name' => $tokoName,
+                        'id_toko' => $tokoId,
                         'dropship' => $dropship
                     ];
-                    $stockStrings[] = "{$tokoName}=" . ($dropship ? 'dropship' : $stockVal);
+                    $totalStockReady += $stockReady;
+                    $totalCacat += $cacatVal;
                 }
 
-                // Suplier names
+                // Suplier names from map
                 $suplierNames = [];
                 if (!empty($p['suplier'])) {
-                    $ids = array_filter(explode(',', $p['suplier']));
-                    if (!empty($ids)) {
-                        $supList = $this->db->table('suplier')
-                            ->select('suplier_name')
-                            ->whereIn('id', $ids)
-                            ->get()
-                            ->getResultArray();
-                        $suplierNames = array_column($supList, 'suplier_name');
+                    $ids = explode(',', $p['suplier']);
+                    foreach ($ids as $id) {
+                        $id = trim($id);
+                        if (isset($suplierNameMap[$id])) {
+                            $suplierNames[] = $suplierNameMap[$id];
+                        }
                     }
                 }
 
-                $totalStock = array_sum(array_column($stockList, 'stock'));
+                $totalHold = (int) ($holdTotalMap[$kodeBarang] ?? 0);
                 $formattedProducts[] = [
                     'id' => $p['id'],
-                    'kode_barang' => $p['id_barang'],
+                    'kode_barang' => $kodeBarang,
                     'notes' => $p['notes'],
                     'suplier' => $suplierNames,
                     'nama_barang' => $p['nama_barang'],
@@ -941,11 +1002,12 @@ class ProductController extends ResourceController
                     'seri' => $p['seri'] ?? null,
                     'dropship' => $p['dropship'] ?? null,
                     'stock' => $stockList,
-                    'total_stock' => $totalStock,
-                    'total_cacat' => array_sum(array_column($stockList, 'barang_cacat')),
-                    'total_terjual' => (int) ($terjualMap[$p['id_barang']] ?? 0),
-                    'total_hold' => (int) ($holdMap[$p['id_barang']] ?? 0),
-                    'stock_string' => implode("\n", $stockStrings),
+                    'total_stock_ready' => $totalStockReady,
+                    'total_stock' => $totalStockReady + $totalHold, // total ready + hold
+                    'total_cacat' => $totalCacat,
+                    'total_terjual' => (int) ($terjualMap[$kodeBarang] ?? 0),
+                    'total_hold' => $totalHold,
+                    'total_coming_soon' => (int) ($comingSoonTotalMap[$kodeBarang] ?? 0),
                     'images' => $imageMap[$p['id']] ?? []
                 ];
             }
@@ -953,7 +1015,7 @@ class ProductController extends ResourceController
             // === Filter berdasarkan stok ===
             if (!empty($stockFilter)) {
                 $formattedProducts = array_filter($formattedProducts, function ($prod) use ($stockFilter) {
-                    $total = (int) $prod['total_stock'];
+                    $total = (int) $prod['total_stock_ready'];
                     switch ($stockFilter) {
                         case 'available':
                             return $total > 6;
@@ -965,22 +1027,12 @@ class ProductController extends ResourceController
                             return true;
                     }
                 });
-
-                // Re-index array
                 $formattedProducts = array_values($formattedProducts);
                 $total_data = count($formattedProducts);
                 $total_page = $limit > 0 ? ceil($total_data / $limit) : 0;
             }
 
-            return $this->jsonResponse->multiResp(
-                '',
-                $formattedProducts,
-                $total_data,
-                $total_page,
-                $page,
-                $limit,
-                200
-            );
+            return $this->jsonResponse->multiResp('', $formattedProducts, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
             log_message('error', '[getAllProduct] Error: ' . $e->getMessage());
             return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data produk.', 500);
