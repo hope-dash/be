@@ -200,7 +200,7 @@ class TokoController extends BaseController
             $tokoParam = $this->request->getGet('role');
             $tokoIds = array_filter(array_map('trim', explode(',', $tokoParam)));
 
-            $query = $this->modelToko->select('id, toko_name, phone_number, bank, nama_pemilik, nomer_rekening');
+            $query = $this->modelToko->select('id, toko_name, phone_number, bank, nama_pemilik, nomer_rekening')->where('deleted_at', NULL);
             if (!empty($tokoIds)) {
                 $query->whereIn('id', $tokoIds);
             }
