@@ -35,7 +35,10 @@ class LogAktivitasController extends ResourceController
         $endDate = $this->request->getGet('end_date');
 
         if ($targetTable) {
-            $builder->where('log_aktivitas.target_table', $targetTable);
+            $targetTables = array_filter(array_map('trim', explode(',', $targetTable)));
+            if (!empty($targetTables)) {
+                $builder->whereIn('log_aktivitas.target_table', $targetTables);
+            }
         }
         if ($targetId) {
             $builder->where('log_aktivitas.target_id', $targetId);

@@ -104,6 +104,10 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     $routes->post('transaction/notes/', 'TransactionController::createUpdateNotesTransaction');
 
 
+    //dashboard
+    $routes->get('dashboard/summary', 'DashboardController::getSummary');
+    $routes->get('dashboard/branch-performance', 'DashboardController::getBranchPerformance');
+
     //reporting
     $routes->get('reporting/revenue-profit', 'TransactionController::calculateRevenueAndProfit');
     $routes->get('reporting/debit-credit', 'CashflowController::calculateDebitAndCredit');
@@ -140,6 +144,11 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
         $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
         $routes->post('transaction/(:num)/delivery-status', 'TransactionControllerV2::updateDeliveryStatus/$1');
+
+        // Journal Routes
+        $routes->get('journal', 'JournalController::index');
+        $routes->get('journal/(:num)', 'JournalController::show/$1');
+        $routes->post('journal/manual', 'JournalController::createManualJournal');
 
         // Expense Routes
         $routes->get('expense/accounts', 'ExpenseController::accounts');

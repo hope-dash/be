@@ -200,7 +200,7 @@ class TokoController extends BaseController
             $tokoParam = $this->request->getGet('role');
             $tokoIds = array_filter(array_map('trim', explode(',', $tokoParam)));
 
-            $query = $this->modelToko->select('id, toko_name, phone_number, bank, nama_pemilik, nomer_rekening, bank_account_id, cash_account_id');
+            $query = $this->modelToko->select('id, toko_name, phone_number, bank, nama_pemilik, nomer_rekening');
             if (!empty($tokoIds)) {
                 $query->whereIn('id', $tokoIds);
             }
@@ -214,9 +214,7 @@ class TokoController extends BaseController
                     'phone_number' => $row->phone_number,
                     'bank' => $row->bank,
                     'nama_pemilik' => $row->nama_pemilik,
-                    'nomer_rekening' => $row->nomer_rekening,
-                    'bank_account_id' => $row->bank_account_id,
-                    'cash_account_id' => $row->cash_account_id,
+                    'nomer_rekening' => $row->nomer_rekening
                 ];
             }, $result);
 
