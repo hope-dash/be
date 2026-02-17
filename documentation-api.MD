@@ -1317,3 +1317,156 @@ Upload gambar (Product, Bukti Bayar, dll) dengan konversi otomatis ke format Web
 ```
 
 ---
+
+## 14. DASHBOARD & ANALYTICS
+
+### A. Branch Performance Summary
+
+Mendapatkan performa setiap toko (Cabang) berdasarkan total terjual, revenue, profit, dan rincian per kategori status transaksi.
+
+- **URL**: `GET /api/dashboard/branch-performance`
+- **Method**: `GET`
+- **Query Params**:
+  - `start_date` (optional): Format `YYYY-MM-DD`
+  - `end_date` (optional): Format `YYYY-MM-DD`
+
+**Response**:
+
+```json
+{
+  "status": 200,
+  "data": [
+    {
+      "id_toko": "1",
+      "toko_name": "Toko Pusat",
+      "total_terjual_barang": 150,
+      "total_revenue": 15000000,
+      "total_profit": 3000000,
+      "transaction_status_count": {
+        "SUCCESS": 45,
+        "PAID": 80,
+        "PACKING": 12,
+        "IN_DELIVERY": 13
+      }
+    }
+  ]
+}
+```
+
+---
+
+## 15. PRODUCT STOCK OPTIMIZATION
+
+Beberapa perubahan pada endpoint `GET /api/product` untuk reporting stok yang lebih akurat.
+
+### A. New Stock Fields (Response)
+
+Response produk sekarang memisahkan antara stok fisik yang tersedia dan stok yang sedang tertahan (Hold) di transaksi pending.
+
+- **`total_stock_ready`**: Stok fisik yang siap dijual saat ini.
+- **`total_hold`**: Stok yang sudah di-checkout customer tapi belum bayar (`WAITING_PAYMENT`).
+- **`total_stock`**: Total stok fisik keseluruhan (`ready + hold`).
+- **`total_coming_soon`**: Stok dalam perjalanan (Purchase yang sudah `APPROVED` tapi belum `EXECUTE`).
+
+**Response Structure (Per Store Stock)**:
+
+```json
+"stock": [
+  {
+    "stock_ready": 8, // Stok siap jual
+    "stock": 10,      // Total stok (ready + hold)
+    "hold_stock": 2,  // Stok tertahan
+    "stock_coming_soon": 5, // Stok akan datang
+    "toko_name": "Toko Pusat",
+    "id_toko": 1
+  }
+]
+```
+
+### B. Stock Filter
+
+Filter stok di endpoint `/api/product` kini bekerja berdasarkan `total_stock_ready` (Stok yang benar-benar siap dijual).
+
+- `stock_filter=available`: Menampilkan produk dengan `ready_stock > 6`.
+- `stock_filter=low_stock`: Menampilkan produk dengan `ready_stock 1 - 5`.
+- `stock_filter=out_stock`: Menampilkan produk dengan `ready_stock = 0`.
+
+---
+
+## 16. ACTIVITY LOGS
+
+### A. Multi-Table Filtering
+
+Filter `target_table` di endpoint reporting log sekarang mendukung multiple values.
+
+- **URL**: `GET /api/reporting/log?target_table=product,transaction,toko`
+- **Behavior**: Akan menampilkan log yang berkaitan dengan tabel `product`, `transaction`, ATAU `toko`. Pisahkan dengan koma tanpa spasi.
+
+---
+
+## 17. CUSTOMER SHOPPING (CART & CHECKOUT)
+
+Endpoint khusus untuk aplikasi/portal customer untuk mengelola keranjang belanja dan membuat pesanan.
+
+### A. GET Cart
+
+Mendapatkan daftar item di keranjang belanja customer.
+
+- **URL**: `GET /api/v2/customer/cart`
+- **Auth**: Customer JWT Token Required
+
+### B. SAVE Cart Item
+
+Menambah atau meng-update quantity item di keranjang.
+
+- **URL**: `POST /api/v2/customer/cart`
+- **Headers**: `Authorization: Bearer {customer_token}`
+- **Body**:
+
+```json
+{
+  "id_barang": "PROD-001",
+  "jumlah": 2,
+  "id_toko": 1 // Optional
+}
+```
+
+### C. Checkout
+
+Mengubah isi keranjang menjadi Invoice.
+
+- **URL**: `POST /api/v2/customer/checkout`
+- **Auth**: Customer JWT Token Required
+- **Logic**:
+  - Otomatis membuat invoice status `WAITING_PAYMENT`.
+  - Mengosongkan keranjang belanja.
+  - Harga barang otomatis menggunakan **Customer Price** (setelah diskon level customer).
+- **Body**:
+
+```json
+{
+  "items": [{ "id_barang": "PROD-001", "jumlah": 2 }],
+  "id_toko": 1,
+  "alamat": "Jl. Kemenangan No. 8",
+  "biaya_pengiriman": 15000
+}
+```
+
+### D. Upload Payment Proof
+
+Mengirim bukti transfer pembayaran dari sisi customer.
+
+- **URL**: `POST /api/v2/customer/payment/upload`
+- **Auth**: Customer JWT Token Required
+- **Behavior**:
+  - Status transaksi berubah menjadi **`WAITING_VERIFICATION`**.
+  - Bukti gambar disimpan di tabel pembayaran dengan status `PENDING`.
+- **Body**:
+
+```json
+{
+  "transaction_id": 123,
+  "image_url": "https://...",
+  "note": "Sudah lunas ya kak"
+}
+```

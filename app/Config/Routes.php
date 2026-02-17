@@ -217,6 +217,15 @@ $routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function ($ro
     $routes->put('profile', 'CustomerControllerV2::updateProfile');
     $routes->post('pricelist', 'ProductController::getProductStockForPricelistV2');
     $routes->post('voucher/(:num)/apply', 'CustomerControllerV2::applyVoucher/$1');
+
+    // Cart Routes
+    $routes->get('cart', 'CustomerTransactionControllerV2::getCart');
+    $routes->post('cart', 'CustomerTransactionControllerV2::saveCart');
+    $routes->delete('cart/(:num)', 'CustomerTransactionControllerV2::deleteCartItem/$1');
+
+    // Transaction Routes
+    $routes->post('checkout', 'CustomerTransactionControllerV2::checkout');
+    $routes->post('payment/upload', 'CustomerTransactionControllerV2::uploadPaymentProof');
 });
 
 // Invoice & Receipt (Public - No Auth Required)
