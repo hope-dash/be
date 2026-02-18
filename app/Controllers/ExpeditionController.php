@@ -15,63 +15,75 @@ class ExpeditionController extends ResourceController
     }
 
     /**
-     * Get shipping cost from API with caching
+     * Get shipping cost from API with caching (Always 1kg base)
      */
     public function getShippingCost()
     {
         try {
             $origin = $this->request->getGet('origin_village_code');
             $destination = $this->request->getGet('destination_village_code');
-            $weight = $this->request->getGet('weight');
+            $requestedWeight = (float) $this->request->getGet('weight');
 
             // Validations
-            if (!$origin || !$destination || !$weight) {
+            if (!$origin || !$destination || !$requestedWeight) {
                 return $this->jsonResponse->error('Origin, destination, and weight are required', 400);
             }
 
-            if ($weight <= 0) {
+            if ($requestedWeight <= 0) {
                 return $this->jsonResponse->error('Weight must be greater than 0', 400);
             }
 
-            // Define cache key
-            $cacheKey = "shipping_cost_{$origin}_{$destination}_{$weight}";
+            // Cache key based on Origin & Destination only (Base 1kg)
+            $cacheKey = "shipping_cost_base_{$origin}_{$destination}";
 
-            // Check Cache first
-            if ($cachedData = cache($cacheKey)) {
-                return $this->jsonResponse->success('Success (from cache)', json_decode($cachedData, true), 200);
+            // Check Cache
+            $baseData = cache($cacheKey);
+
+            if (!$baseData) {
+                // If not in cache, hit API always with weight = 1
+                $client = \Config\Services::curlrequest();
+                $apiKey = 'h3RMOohkHvQUgargFCih4MEkRs2DGYLVuaqv8NsuRJqxO4I7mI';
+                $apiUrl = 'https://use.api.co.id/expedition/shipping-cost';
+
+                $response = $client->get($apiUrl, [
+                    'headers' => [
+                        'x-api-co-id' => $apiKey,
+                        'Accept' => 'application/json',
+                    ],
+                    'query' => [
+                        'origin_village_code' => $origin,
+                        'destination_village_code' => $destination,
+                        'weight' => 1, // Always 1kg
+                    ],
+                    'http_errors' => false,
+                ]);
+
+                $statusCode = $response->getStatusCode();
+                $body = $response->getBody();
+                $result = json_decode($body, true);
+
+                if ($statusCode === 200 && isset($result['is_success']) && $result['is_success']) {
+                    // Save base data (1kg) to cache for 2 weeks (1,209,600 seconds)
+                    $baseData = $result['data'] ?? $result;
+                    cache()->save($cacheKey, json_encode($baseData), 1209600);
+                } else {
+                    return $this->jsonResponse->error($result['message'] ?? 'Failed to fetch shipping cost', $statusCode);
+                }
+            } else {
+                $baseData = json_decode($baseData, true);
             }
 
-            // If not in cache, hit API
-            $client = \Config\Services::curlrequest();
-            $apiKey = 'h3RMOohkHvQUgargFCih4MEkRs2DGYLVuaqv8NsuRJqxO4I7mI';
-            $baseUrl = 'https://use.api.co.id/expedition/shipping-cost';
-
-            $response = $client->get($baseUrl, [
-                'headers' => [
-                    'x-api-co-id' => $apiKey,
-                    'Accept' => 'application/json',
-                ],
-                'query' => [
-                    'origin_village_code' => $origin,
-                    'destination_village_code' => $destination,
-                    'weight' => $weight,
-                ],
-                'http_errors' => false,
-            ]);
-
-            $statusCode = $response->getStatusCode();
-            $body = $response->getBody();
-            $result = json_decode($body, true);
-
-            if ($statusCode === 200 && isset($result['is_success']) && $result['is_success']) {
-                // Save to cache for 24 hours (86400 seconds)
-                cache()->save($cacheKey, $body, 86400);
-                return $this->jsonResponse->success('Success', $result['data'] ?? $result, 200);
+            // Calculate final price based on requested weight
+            if (isset($baseData['couriers'])) {
+                foreach ($baseData['couriers'] as &$courier) {
+                    $courier['price'] = $courier['price'] * $requestedWeight;
+                    $courier['weight'] = $requestedWeight;
+                }
             }
 
-            return $statusCode === 200
-                ? $this->response->setJSON($result)
-                : $this->jsonResponse->error($result['message'] ?? 'Failed to fetch shipping cost', $statusCode);
+            $baseData['weight'] = $requestedWeight;
+
+            return $this->jsonResponse->oneResp('Success', $baseData, 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
