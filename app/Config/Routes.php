@@ -242,6 +242,15 @@ $routes->group('api/wilayah', function ($routes) {
     $routes->get('provinces/search', 'WilayahController::searchProvinces');
     $routes->get('cities/(:segment)', 'WilayahController::getCitiesByProvince/$1');
     $routes->get('cities/search', 'WilayahController::searchCities');
+    $routes->get('districts/(:segment)', 'WilayahController::getDistrictsByCity/$1');
+    $routes->get('districts/search', 'WilayahController::searchDistricts');
+    $routes->get('villages/(:segment)', 'WilayahController::getVillagesByDistrict/$1');
+    $routes->get('villages/search', 'WilayahController::searchVillages');
+});
+
+// Expedition API
+$routes->group('api/expedition', function ($routes) {
+    $routes->get('shipping-cost', 'ExpeditionController::getShippingCost');
 });
 
 
