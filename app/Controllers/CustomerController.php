@@ -30,6 +30,8 @@ class CustomerController extends BaseController
                 'email' => 'permit_empty|valid_email|is_unique[customer.email]',
                 'provinsi' => 'permit_empty',
                 'kota_kabupaten' => 'permit_empty',
+                'kecamatan' => 'permit_empty',
+                'kelurahan' => 'permit_empty',
                 'kode_pos' => 'permit_empty',
                 'discount_type' => 'permit_empty|in_list[percentage,fixed]',
                 'discount_value' => 'permit_empty|numeric',
@@ -49,6 +51,8 @@ class CustomerController extends BaseController
                 'email' => $data->email ?? NULL,
                 'provinsi' => $data->provinsi ?? NULL,
                 'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? NULL,
+                'kecamatan' => $data->kecamatan ?? NULL,
+                'kelurahan' => $data->kelurahan ?? NULL,
                 'kode_pos' => $data->kode_pos ?? NULL,
                 'discount_type' => $data->discount_type ?? NULL,
                 'discount_value' => $data->discount_value ?? 0,
@@ -82,6 +86,8 @@ class CustomerController extends BaseController
                 'email' => "permit_empty|valid_email|is_unique[customer.email,id,{$id}]",
                 'provinsi' => 'permit_empty',
                 'kota_kabupaten' => 'permit_empty',
+                'kecamatan' => 'permit_empty',
+                'kelurahan' => 'permit_empty',
                 'kode_pos' => 'permit_empty',
                 'discount_type' => 'permit_empty|in_list[percentage,fixed]',
                 'discount_value' => 'permit_empty|numeric',
@@ -101,6 +107,8 @@ class CustomerController extends BaseController
                 'email' => $data->email ?? NULL,
                 'provinsi' => $data->provinsi ?? NULL,
                 'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? NULL,
+                'kecamatan' => $data->kecamatan ?? NULL,
+                'kelurahan' => $data->kelurahan ?? NULL,
                 'kode_pos' => $data->kode_pos ?? NULL,
                 'discount_type' => $data->discount_type ?? NULL,
                 'discount_value' => $data->discount_value ?? 0,
@@ -140,12 +148,20 @@ class CustomerController extends BaseController
     public function getByIdCustomer($id = null)
     {
         try {
-            $user = $this->customer->where("id", $id);
-            if ($user) {
-                $query = $this->customer->first();
+            $query = $this->customer->builder()
+                ->select('customer.*, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->join('provincy', 'customer.provinsi = provincy.code', 'left')
+                ->join('kota_kabupaten', 'customer.kota_kabupaten = kota_kabupaten.code', 'left')
+                ->join('kecamatan', 'customer.kecamatan = kecamatan.code', 'left')
+                ->join('kelurahan', 'customer.kelurahan = kelurahan.code', 'left')
+                ->where('customer.id', $id)
+                ->get()
+                ->getRowArray();
+
+            if ($query) {
                 return $this->jsonResponse->oneResp("", $query, 200);
             } else {
-                return $this->jsonResponse->error("User Not Found", 401);
+                return $this->jsonResponse->error("User Not Found", 404);
             }
 
         } catch (\Exception $e) {
@@ -170,10 +186,16 @@ class CustomerController extends BaseController
             $sortMethod = in_array($sortMethod, $allowedSortMethod) ? $sortMethod : 'asc';
 
             // Base query for filtering
-            $builder = $this->customer;
+            $builder = $this->customer->builder()
+                ->select('customer.*, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->join('provincy', 'customer.provinsi = provincy.code', 'left')
+                ->join('kota_kabupaten', 'customer.kota_kabupaten = kota_kabupaten.code', 'left')
+                ->join('kecamatan', 'customer.kecamatan = kecamatan.code', 'left')
+                ->join('kelurahan', 'customer.kelurahan = kelurahan.code', 'left')
+                ->where('customer.deleted_at', null);
 
             if (!empty($namaUser)) {
-                $builder->like('nama_customer', $namaUser, 'both');
+                $builder->like('customer.nama_customer', $namaUser, 'both');
             }
 
             // Count total data before applying limit
@@ -182,7 +204,7 @@ class CustomerController extends BaseController
 
             // Fetch paginated data
             $result = $builder
-                ->orderBy($sortBy, $sortMethod)
+                ->orderBy('customer.' . $sortBy, $sortMethod)
                 ->limit($limit, $offset)
                 ->get()
                 ->getResult();
@@ -212,12 +234,18 @@ class CustomerController extends BaseController
             $username = $data->username;
             $phone_number = $data->phone_number;
 
-            $customer = $this->customer
-                ->where('username', $username)
-                ->where('no_hp_customer', $phone_number)
-                ->where('type', 'special')
-                ->where('deleted_at', null)
-                ->first();
+            $customer = $this->customer->builder()
+                ->select('customer.*, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->join('provincy', 'customer.provinsi = provincy.code', 'left')
+                ->join('kota_kabupaten', 'customer.kota_kabupaten = kota_kabupaten.code', 'left')
+                ->join('kecamatan', 'customer.kecamatan = kecamatan.code', 'left')
+                ->join('kelurahan', 'customer.kelurahan = kelurahan.code', 'left')
+                ->where('customer.username', $username)
+                ->where('customer.no_hp_customer', $phone_number)
+                ->where('customer.type', 'special')
+                ->where('customer.deleted_at', null)
+                ->get()
+                ->getRowArray();
 
             if (!$customer) {
                 return $this->jsonResponse->error("Customer not found or not special", 404);

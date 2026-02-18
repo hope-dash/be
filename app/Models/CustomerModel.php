@@ -18,6 +18,8 @@ class CustomerModel extends Model
         'alamat',
         'provinsi',
         'kota_kabupaten',
+        'kecamatan',
+        'kelurahan',
         'kode_pos',
         'type',
         'username',

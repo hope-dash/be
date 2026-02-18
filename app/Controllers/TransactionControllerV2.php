@@ -81,6 +81,8 @@ class TransactionControllerV2 extends ResourceController
                         'alamat' => $data->alamat ?? '',
                         'provinsi' => $data->provinsi ?? null,
                         'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? null,
+                        'kecamatan' => $data->kecamatan ?? null,
+                        'kelurahan' => $data->kelurahan ?? null,
                         'kode_pos' => $data->kode_pos ?? null,
                         'created_at' => date('Y-m-d H:i:s')
                     ];
@@ -217,6 +219,8 @@ class TransactionControllerV2 extends ResourceController
                 'alamat' => $data->alamat ?? '',
                 'provinsi' => $data->provinsi ?? '',
                 'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? '',
+                'kecamatan' => $data->kecamatan ?? '',
+                'kelurahan' => $data->kelurahan ?? '',
                 'kode_pos' => $data->kode_pos ?? '',
                 'source' => $data->source ?? '',
                 'jatuh_tempo' => $data->jatuh_tempo ?? '',

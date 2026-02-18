@@ -63,6 +63,8 @@ class CustomerControllerV2 extends ResourceController
                 'alamat' => $data->alamat ?? '',
                 'provinsi' => $data->provinsi ?? '',
                 'kota_kabupaten' => $data->kota_kabupaten ?? '',
+                'kecamatan' => $data->kecamatan ?? '',
+                'kelurahan' => $data->kelurahan ?? '',
                 'kode_pos' => $data->kode_pos ?? '',
                 'type' => 'regular',
                 'email_verification_token' => $verificationToken,
@@ -244,8 +246,8 @@ class CustomerControllerV2 extends ResourceController
                         ->find($decoded->customer_id);
                 }
             }
-            
-           
+
+
 
             $idToko = $this->request->getGet('id_toko');
             $search = trim($this->request->getGet('search') ?? ''); // Search query
@@ -262,8 +264,8 @@ class CustomerControllerV2 extends ResourceController
                 'model_barang.nama_model',
                 'seri.seri'
             ])
-            ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-            ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
             // Apply search filter
             if (!empty($search)) {
@@ -282,13 +284,13 @@ class CustomerControllerV2 extends ResourceController
                 ->findAll();
 
             if (empty($products)) {
-                 return $this->jsonResponse->multiResp('', [], $totalData, $totalPage, $page, $limit, 200);
+                return $this->jsonResponse->multiResp('', [], $totalData, $totalPage, $page, $limit, 200);
             }
 
             // === OPTIMIZED STOCK FETCHING ===
             $productIds = array_unique(array_column($products, 'id_barang'));
             $stockMap = [];
-            
+
             // Load toko details if needed map
             $tokoMap = [];
             if (!$idToko) {
@@ -301,18 +303,18 @@ class CustomerControllerV2 extends ResourceController
 
             if (!empty($productIds)) {
                 $stockBuilder = $this->db->table('stock')->whereIn('id_barang', $productIds);
-                
+
                 if ($idToko) {
                     $stockBuilder->where('id_toko', $idToko);
-                } 
+                }
                 // Remove stock > 0 filter to show ALL stock records including 0
-                
+
                 $stocks = $stockBuilder->get()->getResultArray();
 
                 foreach ($stocks as $s) {
                     if ($idToko) {
                         // Single store mode
-                        $stockMap[$s['id_barang']] = (int)$s['stock'];
+                        $stockMap[$s['id_barang']] = (int) $s['stock'];
                     } else {
                         // Multi store mode
                         if (!isset($stockMap[$s['id_barang']])) {
@@ -321,12 +323,12 @@ class CustomerControllerV2 extends ResourceController
                                 'details' => []
                             ];
                         }
-                        
-                        $stockMap[$s['id_barang']]['total'] += (int)$s['stock'];
+
+                        $stockMap[$s['id_barang']]['total'] += (int) $s['stock'];
                         $stockMap[$s['id_barang']]['details'][] = [
                             'id_toko' => $s['id_toko'],
                             'toko_name' => $tokoMap[$s['id_toko']] ?? 'Unknown Store',
-                            'stock' => (int)$s['stock']
+                            'stock' => (int) $s['stock']
                         ];
                     }
                 }
@@ -338,14 +340,14 @@ class CustomerControllerV2 extends ResourceController
             if (!empty($productTableIds)) {
                 // Remove duplicates just in case
                 $productTableIds = array_unique($productTableIds);
-                
+
                 $images = $this->db->table('image')
                     ->select('kode, url')
                     ->where('type', 'product')
                     ->whereIn('kode', $productTableIds)
                     ->get()
                     ->getResultArray();
-                
+
                 foreach ($images as $img) {
                     $imageMap[$img['kode']][] = $img['url'];
                 }
@@ -486,7 +488,7 @@ class CustomerControllerV2 extends ResourceController
                 ->where('kode', $product['id'])
                 ->get()
                 ->getResultArray();
-            
+
             $imageUrls = array_column($images, 'url');
 
             // Fetch Stock Breakdown
@@ -504,9 +506,9 @@ class CustomerControllerV2 extends ResourceController
                 $formattedStock[] = [
                     'id_toko' => $s['id_toko'],
                     'toko_name' => $s['toko_name'] ?? 'Unknown Store',
-                    'stock' => (int)$s['stock']
+                    'stock' => (int) $s['stock']
                 ];
-                $totalStock += (int)$s['stock'];
+                $totalStock += (int) $s['stock'];
             }
 
             // Construct Response
@@ -620,18 +622,15 @@ class CustomerControllerV2 extends ResourceController
         try {
             $customer = $this->request->customer;
 
-            $profile = [
-                'id' => $customer['id'],
-                'nama_customer' => $customer['nama_customer'],
-                'email' => $customer['email'],
-                'no_hp_customer' => $customer['no_hp_customer'],
-                'alamat' => $customer['alamat'] ?? '',
-                'provinsi' => $customer['provinsi'] ?? '',
-                'kota_kabupaten' => $customer['kota_kabupaten'] ?? '',
-                'kode_pos' => $customer['kode_pos'] ?? '',
-                'discount_type' => $customer['discount_type'],
-                'discount_value' => $customer['discount_value'],
-            ];
+            $profile = $this->customerModel->builder()
+                ->select('customer.id, customer.nama_customer, customer.email, customer.no_hp_customer, customer.alamat, customer.provinsi, customer.kota_kabupaten, customer.kecamatan, customer.kelurahan, customer.kode_pos, customer.discount_type, customer.discount_value, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->join('provincy', 'customer.provinsi = provincy.code', 'left')
+                ->join('kota_kabupaten', 'customer.kota_kabupaten = kota_kabupaten.code', 'left')
+                ->join('kecamatan', 'customer.kecamatan = kecamatan.code', 'left')
+                ->join('kelurahan', 'customer.kelurahan = kelurahan.code', 'left')
+                ->where('customer.id', $customer['id'])
+                ->get()
+                ->getRowArray();
 
             return $this->jsonResponse->oneResp('', $profile, 200);
         } catch (\Exception $e) {
@@ -649,12 +648,22 @@ class CustomerControllerV2 extends ResourceController
             $updateData = [];
 
             // Allow updating these fields
-            if (isset($data->nama_customer)) $updateData['nama_customer'] = $data->nama_customer;
-            if (isset($data->no_hp_customer)) $updateData['no_hp_customer'] = $data->no_hp_customer;
-            if (isset($data->alamat)) $updateData['alamat'] = $data->alamat;
-            if (isset($data->provinsi)) $updateData['provinsi'] = $data->provinsi;
-            if (isset($data->kota_kabupaten)) $updateData['kota_kabupaten'] = $data->kota_kabupaten;
-            if (isset($data->kode_pos)) $updateData['kode_pos'] = $data->kode_pos;
+            if (isset($data->nama_customer))
+                $updateData['nama_customer'] = $data->nama_customer;
+            if (isset($data->no_hp_customer))
+                $updateData['no_hp_customer'] = $data->no_hp_customer;
+            if (isset($data->alamat))
+                $updateData['alamat'] = $data->alamat;
+            if (isset($data->provinsi))
+                $updateData['provinsi'] = $data->provinsi;
+            if (isset($data->kota_kabupaten))
+                $updateData['kota_kabupaten'] = $data->kota_kabupaten;
+            if (isset($data->kecamatan))
+                $updateData['kecamatan'] = $data->kecamatan;
+            if (isset($data->kelurahan))
+                $updateData['kelurahan'] = $data->kelurahan;
+            if (isset($data->kode_pos))
+                $updateData['kode_pos'] = $data->kode_pos;
 
             // Handle password change
             if (isset($data->password) && !empty($data->password)) {
