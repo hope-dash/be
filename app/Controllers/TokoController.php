@@ -8,6 +8,9 @@ use App\Models\TokoModel;
 use App\Models\AccountModel;
 use CodeIgniter\HTTP\ResponseInterface;
 
+/**
+ * @property \CodeIgniter\HTTP\IncomingRequest $request
+ */
 class TokoController extends BaseController
 {
     protected $modelToko;

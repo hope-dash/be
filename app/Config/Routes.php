@@ -6,9 +6,9 @@ use CodeIgniter\Router\RouteCollection;
  * @var RouteCollection $routes
  * $routes->get('/', 'Home::index');
  */
-$routes->options('api/(:any)', function () {
-    return service('response')->setStatusCode(200);
-});
+// $routes->options('api/(:any)', function () {
+//     return service('response')->setStatusCode(200);
+// });
 
 $routes->post('api/login', 'UserController::login');
 $routes->post('api/register-be', 'UserController::create_be');
@@ -230,11 +230,11 @@ $routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function ($ro
 
 // Invoice & Receipt (Public - No Auth Required)
 // Download routes must come BEFORE view routes to avoid conflicts
-$routes->get('invoice/download/(:num)', 'InvoiceController::downloadPdf/$1');
-$routes->get('invoice/download-mpdf/(:num)', 'InvoiceController::downloadPdfMpdf/$1');
-$routes->get('receipt/download/(:num)', 'InvoiceController::downloadReceiptPdf/$1');
-$routes->get('invoice/(:num)', 'InvoiceController::view/$1');
-$routes->get('receipt/(:num)', 'InvoiceController::receipt/$1');
+$routes->get('api/invoice/download/(:num)', 'InvoiceController::downloadPdf/$1');
+$routes->get('api/invoice/download-mpdf/(:num)', 'InvoiceController::downloadPdfMpdf/$1');
+$routes->get('api/receipt/download/(:num)', 'InvoiceController::downloadReceiptPdf/$1');
+$routes->get('api/invoice/(:num)', 'InvoiceController::view/$1');
+$routes->get('api/receipt/(:num)', 'InvoiceController::receipt/$1');
 
 // Wilayah Indonesia API (Public - No Auth Required)
 $routes->group('api/wilayah', function ($routes) {
