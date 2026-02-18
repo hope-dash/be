@@ -42,7 +42,7 @@ class ExpeditionController extends ResourceController
             if (!$baseData) {
                 // If not in cache, hit API always with weight = 1
                 $client = \Config\Services::curlrequest();
-                $apiKey = 'h3RMOohkHvQUgargFCih4MEkRs2DGYLVuaqv8NsuRJqxO4I7mI';
+                $apiKey = env('API_CO_ID_KEY');
                 $apiUrl = 'https://use.api.co.id/expedition/shipping-cost';
 
                 $response = $client->get($apiUrl, [

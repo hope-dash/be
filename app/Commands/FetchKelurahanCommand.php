@@ -60,7 +60,7 @@ class FetchKelurahanCommand extends BaseCommand
         $db = \Config\Database::connect();
         $table = $db->table('kelurahan');
 
-        $apiKey = 'h3RMOohkHvQUgargFCih4MEkRs2DGYLVuaqv8NsuRJqxO4I7mI';
+        $apiKey = env('API_CO_ID_KEY');
         $baseUrl = 'https://use.api.co.id/regional/indonesia/villages';
 
         $totalPage = 896;

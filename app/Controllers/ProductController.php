@@ -1057,14 +1057,10 @@ class ProductController extends ResourceController
             $requestBody = $this->request->getJSON(true);
             $kode_exclude = !empty($requestBody['kode_exclude']) ? $requestBody['kode_exclude'] : [];
 
-            $customer = $this->customer
-                ->where('id', $customer_id)
-                ->where('type', 'special')
-                ->where('deleted_at', null)
-                ->first();
 
             $selectFields = [
                 'product.id',
+                'product.berat',
                 'product.id_barang as kode_barang',
                 'model_barang.nama_model',
                 'product.nama_barang as nama_barang',
@@ -1075,13 +1071,8 @@ class ProductController extends ResourceController
                 'stock.dropship',
                 'stock.barang_cacat',
                 'toko.toko_name',
+                'product.harga_jual',
             ];
-
-            if ($customer) {
-                $selectFields[] = "product.harga_jual_toko as harga_jual";
-            } else {
-                $selectFields[] = "product.harga_jual";
-            }
 
             $builder = $this->productModel
                 ->join('stock', 'stock.id_barang = product.id_barang', 'left')
@@ -1190,7 +1181,7 @@ class ProductController extends ResourceController
                     'product.harga_jual_toko',
                     'product.id_model_barang',
                     'product.id_seri_barang',
-
+                    'product.berat',
                     'model_barang.nama_model as nama_model',
                     'seri.seri as seri',
                 ])
@@ -1313,6 +1304,7 @@ class ProductController extends ResourceController
                     'nama_model' => $p['nama_model'] ?? null,
                     'seri' => $p['seri'] ?? null,
                     'harga_jual' => $hargaJual,
+                    'berat' => $p['berat'] ?? null,
                     'stock' => $stockByProduct[$p['id_barang']] ?? [],
                     'images' => $imageMap[$p['id']] ?? [],
                 ];

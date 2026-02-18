@@ -60,7 +60,7 @@ class FetchKecamatanCommand extends BaseCommand
         $db = \Config\Database::connect();
         $table = $db->table('kecamatan');
 
-        $apiKey = 'h3RMOohkHvQUgargFCih4MEkRs2DGYLVuaqv8NsuRJqxO4I7mI';
+        $apiKey = env('API_CO_ID_KEY');
         $baseUrl = 'https://use.api.co.id/regional/indonesia/districts';
 
         $totalPage = 73;

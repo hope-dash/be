@@ -78,8 +78,11 @@ class InvoiceController extends Controller
         // Generate filename
         $filename = 'Invoice-' . ($transaction['invoice_number'] ?? 'INV-' . str_pad($id, 6, '0', STR_PAD_LEFT)) . '.pdf';
 
-        // Output PDF for download
-        return $dompdf->stream($filename, ['Attachment' => true]);
+        // Output PDF for download using CI response to ensure filters (CORS) are applied
+        return $this->response
+            ->setHeader('Content-Type', 'application/pdf')
+            ->setHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
+            ->setBody($dompdf->output());
     }
 
     public function downloadPdfMpdf($id = null)
@@ -185,8 +188,11 @@ class InvoiceController extends Controller
         // Generate filename
         $filename = 'Receipt-' . ($transaction['invoice_number'] ?? 'RCP-' . str_pad($id, 6, '0', STR_PAD_LEFT)) . '.pdf';
 
-        // Output PDF for download
-        return $dompdf->stream($filename, ['Attachment' => true]);
+        // Output PDF for download using CI response to ensure filters (CORS) are applied
+        return $this->response
+            ->setHeader('Content-Type', 'application/pdf')
+            ->setHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
+            ->setBody($dompdf->output());
     }
 
     private function getTransactionData($id)
