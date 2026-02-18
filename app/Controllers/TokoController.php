@@ -40,6 +40,11 @@ class TokoController extends BaseController
                 'bank' => 'required|string',
                 'nama_pemilik' => 'required|string',
                 'nomer_rekening' => 'required|numeric',
+                'provinsi' => 'permit_empty',
+                'kota_kabupaten' => 'permit_empty',
+                'kecamatan' => 'permit_empty',
+                'kelurahan' => 'permit_empty',
+                'kode_pos' => 'permit_empty',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -59,6 +64,11 @@ class TokoController extends BaseController
                 "bank" => $data->bank,
                 "nama_pemilik" => $data->nama_pemilik,
                 "nomer_rekening" => $data->nomer_rekening,
+                "provinsi" => $data->provinsi ?? null,
+                "kota_kabupaten" => $data->kota_kabupaten ?? null,
+                "kecamatan" => $data->kecamatan ?? null,
+                "kelurahan" => $data->kelurahan ?? null,
+                "kode_pos" => $data->kode_pos ?? null,
             ];
 
             $this->modelToko->insert($tokoData);
@@ -95,6 +105,11 @@ class TokoController extends BaseController
                 'bank' => 'required|string',
                 'nama_pemilik' => 'required|string',
                 'nomer_rekening' => 'required|numeric',
+                'provinsi' => 'permit_empty',
+                'kota_kabupaten' => 'permit_empty',
+                'kecamatan' => 'permit_empty',
+                'kelurahan' => 'permit_empty',
+                'kode_pos' => 'permit_empty',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -111,6 +126,11 @@ class TokoController extends BaseController
                 "bank" => $data->bank,
                 "nama_pemilik" => $data->nama_pemilik,
                 "nomer_rekening" => $data->nomer_rekening,
+                "provinsi" => $data->provinsi ?? null,
+                "kota_kabupaten" => $data->kota_kabupaten ?? null,
+                "kecamatan" => $data->kecamatan ?? null,
+                "kelurahan" => $data->kelurahan ?? null,
+                "kode_pos" => $data->kode_pos ?? null,
             ];
 
             $this->modelToko->update($id, $tokoData);
@@ -125,12 +145,20 @@ class TokoController extends BaseController
     public function getDetailById($id = null)
     {
         try {
+            $toko = $this->modelToko->builder()
+                ->select('toko.*, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->join('provincy', 'toko.provinsi = provincy.code', 'left')
+                ->join('kota_kabupaten', 'toko.kota_kabupaten = kota_kabupaten.code', 'left')
+                ->join('kecamatan', 'toko.kecamatan = kecamatan.code', 'left')
+                ->join('kelurahan', 'toko.kelurahan = kelurahan.code', 'left')
+                ->where('toko.id', $id)
+                ->get()
+                ->getRowArray();
 
-            $toko = $this->modelToko->where("id", $id)->first();
             if ($toko) {
                 return $this->jsonResponse->oneResp("", $toko, 200);
             } else {
-                return $this->jsonResponse->error("Toko Not Found", 401);
+                return $this->jsonResponse->error("Toko Not Found", 404);
             }
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
@@ -172,17 +200,22 @@ class TokoController extends BaseController
 
             $offset = ($page - 1) * $limit;
 
-            $builder = $this->modelToko;
+            $builder = $this->modelToko->builder()
+                ->select('toko.*, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->join('provincy', 'toko.provinsi = provincy.code', 'left')
+                ->join('kota_kabupaten', 'toko.kota_kabupaten = kota_kabupaten.code', 'left')
+                ->join('kecamatan', 'toko.kecamatan = kecamatan.code', 'left')
+                ->join('kelurahan', 'toko.kelurahan = kelurahan.code', 'left');
 
             if (!empty($namaToko)) {
-                $builder = $builder->like('toko_name', $namaToko, 'both');
+                $builder->like('toko.toko_name', $namaToko, 'both');
             }
 
             $total_data = $builder->countAllResults(false);
             $total_page = ceil($total_data / $limit);
 
             // Get paginated results
-            $result = $builder->orderBy($sortBy, $sortMethod)
+            $result = $builder->orderBy('toko.' . $sortBy, $sortMethod)
                 ->limit($limit, $offset)
                 ->get()
                 ->getResult();

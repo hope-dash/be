@@ -225,6 +225,7 @@ class TransactionControllerV2 extends ResourceController
                 'source' => $data->source ?? '',
                 'jatuh_tempo' => $data->jatuh_tempo ?? '',
                 'pengiriman' => $data->pengiriman ?? '',
+                'berat' => $data->berat ?? '',
                 'biaya_pengiriman' => $shippingCost,
                 'free_ongkir' => $isFreeOngkir ? '1' : '0',
                 'ppn' => $ppnPercent,

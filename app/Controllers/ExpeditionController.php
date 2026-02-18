@@ -20,18 +20,32 @@ class ExpeditionController extends ResourceController
     public function getShippingCost()
     {
         try {
-            $origin = $this->request->getGet('origin_village_code');
+            $idToko = $this->request->getGet('id_toko');
             $destination = $this->request->getGet('destination_village_code');
             $requestedWeight = (float) $this->request->getGet('weight');
 
             // Validations
-            if (!$origin || !$destination || !$requestedWeight) {
-                return $this->jsonResponse->error('Origin, destination, and weight are required', 400);
+            if (!$idToko || !$destination || !$requestedWeight) {
+                return $this->jsonResponse->error('id_toko, destination_village_code, and weight are required', 400);
             }
 
             if ($requestedWeight <= 0) {
                 return $this->jsonResponse->error('Weight must be greater than 0', 400);
             }
+
+            // Fetch Origin from Toko
+            $tokoModel = new \App\Models\TokoModel();
+            $toko = $tokoModel->find($idToko);
+
+            if (!$toko) {
+                return $this->jsonResponse->error('Toko not found', 404);
+            }
+
+            if (empty($toko['kelurahan'])) {
+                return $this->jsonResponse->error('Toko does not have a village code (kelurahan) configured', 400);
+            }
+
+            $origin = $toko['kelurahan'];
 
             // Cache key based on Origin & Destination only (Base 1kg)
             $cacheKey = "shipping_cost_base_{$origin}_{$destination}";

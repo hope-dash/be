@@ -19,7 +19,12 @@ class TokoModel extends Model
         "nama_pemilik",
         "nomer_rekening",
         "bank_account_id",
-        "cash_account_id"
+        "cash_account_id",
+        "provinsi",
+        "kota_kabupaten",
+        "kecamatan",
+        "kelurahan",
+        "kode_pos"
     ];
     protected $useSoftDeletes = true;
     protected $protectFields = true;
