@@ -333,6 +333,36 @@ class TransactionControllerV2 extends ResourceController
                 'detail' => $trxData
             ]);
 
+            // -- 0. Async Notifications --
+            if ($customerId) {
+                try {
+                    helper('email');
+
+                    // Fetch full customer data for email
+                    $customer = $this->customerModel->find($customerId);
+
+                    // Fetch toko bank info
+                    $tokoModel = new \App\Models\TokoModel();
+                    $toko = $tokoModel->find($data->id_toko);
+
+                    if ($customer && !empty($customer['email'])) {
+                        $emailData = array_merge($trxData, [
+                            'id' => $trxId,
+                            'customer' => $customer,
+                            'bank' => $toko['bank'] ?? '',
+                            'nomer_rekening' => $toko['nomer_rekening'] ?? '',
+                            'nama_pemilik' => $toko['nama_pemilik'] ?? '',
+                            'actual_total' => $grandTotal
+                        ]);
+
+                        send_invoice_email($emailData);
+                    }
+                } catch (\Exception $e) {
+                    // Log error but don't fail the transaction
+                    log_message('error', 'Failed to enqueue invoice email: ' . $e->getMessage());
+                }
+            }
+
             return $this->jsonResponse->oneResp('Transaction created successfully', ['id' => $trxId], 201);
 
         } catch (\Exception $e) {
@@ -985,7 +1015,7 @@ class TransactionControllerV2 extends ResourceController
 
             // 1. Get Transaction with Toko info
             $transaction = $this->transactionModel
-                ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo')
+                ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo, toko.bank, toko.nomer_rekening, toko.nama_pemilik')
                 ->join('toko', 'transaction.id_toko = toko.id', 'left')
                 ->find($id);
 

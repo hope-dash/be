@@ -172,7 +172,7 @@ if (!function_exists('send_registration_email')) {
         ';
 
         $html = get_email_template('Selamat Datang di Hope Sparepart', $content);
-        
+
         return send_email($email, 'Selamat Datang di Hope Sparepart - Verifikasi Email Anda', $html);
     }
 }
@@ -208,7 +208,79 @@ if (!function_exists('send_verification_email')) {
         ';
 
         $html = get_email_template('Verifikasi Email Anda', $content);
-        
+
         return send_email($email, 'Verifikasi Email Anda - Hope Sparepart', $html);
+    }
+}
+
+if (!function_exists('enqueue_email')) {
+    /**
+     * Add an email to the queue for asynchronous sending
+     * 
+     * @param string $to Recipient email
+     * @param string $subject Email subject
+     * @param string $message Email body (HTML)
+     * @return bool Success status
+     */
+    function enqueue_email($to, $subject, $message)
+    {
+        $emailQueueModel = new \App\Models\EmailQueueModel();
+        return $emailQueueModel->insert([
+            'recipient' => $to,
+            'subject' => $subject,
+            'message' => $message,
+            'status' => 'PENDING'
+        ]);
+    }
+}
+
+if (!function_exists('send_invoice_email')) {
+    /**
+     * Enqueue invoice and payment instructions email
+     * 
+     * @param array $transaction Transaction data including customer and items
+     * @return bool Success status
+     */
+    function send_invoice_email($transaction)
+    {
+        if (empty($transaction['customer']['email'])) {
+            return false;
+        }
+
+        $email = $transaction['customer']['email'];
+        $name = $transaction['customer']['nama_customer'];
+        $invoiceDisplay = $transaction['invoice'];
+
+        $bankName = $transaction['bank'] ?? '-';
+        $bankAccount = $transaction['nomer_rekening'] ?? '-';
+        $bankOwner = $transaction['nama_pemilik'] ?? '-';
+        $totalAmount = number_format($transaction['actual_total'], 0, ',', '.');
+
+        $content = '
+            <h2>Halo, ' . htmlspecialchars($name) . '!</h2>
+            <p>Terima kasih telah berbelanja di Hope Sparepart. Pesanan Anda dengan nomor invoice <strong>' . htmlspecialchars($invoiceDisplay) . '</strong> telah berhasil dibuat.</p>
+            
+            <div class="info-box">
+                <h3>Detail Pembayaran:</h3>
+                <p><strong>Total Tagihan:</strong> Rp ' . $totalAmount . '</p>
+                <p><strong>Bank:</strong> ' . htmlspecialchars($bankName) . '</p>
+                <p><strong>Nomor Rekening:</strong> ' . htmlspecialchars($bankAccount) . '</p>
+                <p><strong>Atas Nama:</strong> ' . htmlspecialchars($bankOwner) . '</p>
+            </div>
+            
+            <p>Silakan lakukan pembayaran sesuai dengan detail di atas. Setelah melakukan pembayaran, Anda dapat mengunggah bukti pembayaran melalui aplikasi atau website kami.</p>
+            
+            <p>Anda dapat melihat detail pesanan Anda melalui link di bawah ini:</p>
+            
+            <center>
+                <a href="' . env('app.frontendURL', 'http://localhost:3000') . '/invoice/' . $transaction['id'] . '" class="button">Lihat Invoice</a>
+            </center>
+            
+            <p>Terima kasih atas kepercayaan Anda.</p>
+        ';
+
+        $html = get_email_template('Invoice ' . $invoiceDisplay, $content);
+
+        return enqueue_email($email, 'Tagihan Pesanan #' . $invoiceDisplay . ' - Hope Sparepart', $html);
     }
 }
