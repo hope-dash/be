@@ -162,7 +162,7 @@ if (!function_exists('send_registration_email')) {
             <p>Untuk mengaktifkan akun Anda, silakan verifikasi email Anda dengan mengklik tombol di bawah ini:</p>
             
             <center>
-                <a href="' . $verificationUrl . '" class="button">Verifikasi Email Saya</a>
+                <a href="' . $verificationUrl . '" class="button" style="color: #ffffff;">Verifikasi Email Saya</a>
             </center>
             
             <p style="margin-top: 20px; font-size: 12px; color: #666;">
@@ -196,7 +196,7 @@ if (!function_exists('send_verification_email')) {
             <p>Silakan verifikasi alamat email Anda dengan mengklik tombol di bawah ini:</p>
             
             <center>
-                <a href="' . $verificationUrl . '" class="button">Verifikasi Email Saya</a>
+                <a href="' . $verificationUrl . '" class="button" style="color: #ffffff;">Verifikasi Email Saya</a>
             </center>
             
             <p style="margin-top: 20px; font-size: 12px; color: #666;">
@@ -273,7 +273,7 @@ if (!function_exists('send_invoice_email')) {
             <p>Anda dapat melihat detail pesanan Anda melalui link di bawah ini:</p>
             
             <center>
-                <a href="' . env('app.frontendURL', 'http://localhost:3000') . '/invoice/' . $transaction['id'] . '" class="button">Lihat Invoice</a>
+                <a href="' . env('app.baseURL', 'http://localhost:3000') . '/api/invoice/download/' . $transaction['id'] . '" class="button" style="color: #ffffff;">Lihat Invoice</a>
             </center>
             
             <p>Terima kasih atas kepercayaan Anda.</p>

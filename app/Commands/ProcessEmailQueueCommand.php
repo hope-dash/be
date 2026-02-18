@@ -60,7 +60,7 @@ class ProcessEmailQueueCommand extends BaseCommand
     public function run(array $params)
     {
         helper('email');
-        $limit = $params[0] ?? 10;
+        $limit = (int) ($params[0] ?? 10);
         $queueModel = new EmailQueueModel();
 
         $emails = $queueModel->where('status', 'PENDING')
