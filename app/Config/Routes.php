@@ -6,9 +6,9 @@ use CodeIgniter\Router\RouteCollection;
  * @var RouteCollection $routes
  * $routes->get('/', 'Home::index');
  */
-// $routes->options('api/(:any)', function () {
-//     return service('response')->setStatusCode(200);
-// });
+$routes->options('api/(:any)', function () {
+    return service('response')->setStatusCode(200);
+});
 
 $routes->post('api/login', 'UserController::login');
 $routes->post('api/register-be', 'UserController::create_be');
