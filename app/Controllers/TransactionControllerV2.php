@@ -270,7 +270,7 @@ class TransactionControllerV2 extends ResourceController
             }
 
             if ($isFreeOngkir && $shippingCost > 0) {
-                $this->addJournalItem($journalId, '6005', $shippingCost, 0); // Dr Expense
+                $this->addJournalItem($journalId, '5006', $shippingCost, 0); // Dr Expense
                 $this->addJournalItem($journalId, '2001', 0, $shippingCost); // Cr Payable
             }
 
@@ -569,7 +569,7 @@ class TransactionControllerV2 extends ResourceController
                 }
                 if ($isFreeOngkir && $shippingCost > 0) {
                     $this->addJournalItem($jIdSales, '2001', $shippingCost, 0); // Reverse AP
-                    $this->addJournalItem($jIdSales, '6005', 0, $shippingCost); // Reverse Expense
+                    $this->addJournalItem($jIdSales, '5006', 0, $shippingCost); // Reverse Expense
                 }
             }
 
@@ -875,8 +875,8 @@ class TransactionControllerV2 extends ResourceController
                             $journalId = $this->createJournal('SHIPPING_OUT', $id, $trx['invoice'], date('Y-m-d'), "Shipping fee paid for {$trx['invoice']}", $trx['id_toko']);
 
                             // If free shipping, we settle the payable (2001) that was created during invoice creation.
-                            // Otherwise, record it as a direct shipping expense (6005).
-                            $debitCode = $isFreeOngkir ? '2001' : '6005';
+                            // Otherwise, record it as a direct shipping expense (5006).
+                            $debitCode = $isFreeOngkir ? '2001' : '5006';
 
                             $this->addJournalItem($journalId, $debitCode, $shippingCost, 0); // Dr Expense/Payable
                             $this->addJournalItem($journalId, '1002', 0, $shippingCost); // Cr Cash

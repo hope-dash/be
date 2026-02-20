@@ -790,7 +790,7 @@ class ProductController extends ResourceController
             // === Filter ===
             if (!empty($namaProduct)) {
                 $builder->groupStart()
-                    ->like("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, ''))", $namaProduct)
+                    ->where("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, '')) LIKE ?", ["%$namaProduct%"])
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
@@ -803,7 +803,7 @@ class ProductController extends ResourceController
             }
 
             if (!empty($suplier) && is_numeric($suplier)) {
-                $builder->where("FIND_IN_SET({$this->db->escape($suplier)}, product.suplier) >", 0);
+                $builder->where("FIND_IN_SET(?, product.suplier) >", [$suplier], 0);
             }
 
             // Hitung total
@@ -958,8 +958,8 @@ class ProductController extends ResourceController
                     $dropship = in_array($s['dropship'], ['1', 1, true], true);
                     $stockReady = (int) ($s['stock'] ?? 0);
                     $cacatVal = (int) ($s['barang_cacat'] ?? 0);
-                    $holdVal = (int) ($holdMap[$kodeBarang][$tId] ?? 0);
-                    $comingSoonVal = (int) ($comingSoonMap[$kodeBarang][$tId] ?? 0);
+                    $holdVal = (int) ($holdMap[$kodeBarang][$tokoId] ?? 0);
+                    $comingSoonVal = (int) ($comingSoonMap[$kodeBarang][$tokoId] ?? 0);
 
                     $stockList[] = [
                         'stock_ready' => $stockReady,
@@ -1034,7 +1034,7 @@ class ProductController extends ResourceController
 
             return $this->jsonResponse->multiResp('', $formattedProducts, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
-            log_message('error', '[getAllProduct] Error: ' . $e->getMessage());
+            log_message('error', '[getAllProduct] Error at ' . $e->getFile() . ':' . $e->getLine() . ' - ' . $e->getMessage());
             return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data produk.', 500);
         }
     }

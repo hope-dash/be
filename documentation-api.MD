@@ -699,11 +699,11 @@ Daftar akun standar yang digunakan dalam sistem (bisa bertambah sesuai input use
 | 4003            | Sales Returns                    | REVENUE   | Debit (Contra) |
 | **EXPENSES**    |                                  |           |                |
 | 5001            | Cost of Goods Sold (HPP)         | EXPENSE   | Debit          |
-| 6001            | Salaries Expense                 | EXPENSE   | Debit          |
-| 6002            | Rent Expense                     | EXPENSE   | Debit          |
-| 6003            | Electricity Expense              | EXPENSE   | Debit          |
-| 6004            | Marketing & Admin Expense        | EXPENSE   | Debit          |
-| 6005            | Operational Expense              | EXPENSE   | Debit          |
+| 5002            | Salaries Expense                 | EXPENSE   | Debit          |
+| 5003            | Rent Expense                     | EXPENSE   | Debit          |
+| 5004            | Electricity Expense              | EXPENSE   | Debit          |
+| 5005            | Marketing & Admin Expense        | EXPENSE   | Debit          |
+| 5006            | Operational Expense              | EXPENSE   | Debit          |
 
 ---
 
