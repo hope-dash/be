@@ -137,19 +137,25 @@ class JournalController extends ResourceController
             // Generate Reference No
             $refNo = $data['reference_no'] ?? 'MJ-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(2)));
 
+            // Sanitize optional fields
+            $idToko = !empty($data['id_toko']) ? $data['id_toko'] : null;
+            $journalDate = !empty($data['date']) ? $data['date'] : date('Y-m-d');
+            $referenceId = !empty($data['reference_id']) ? $data['reference_id'] : null;
+
             $journalData = [
-                'id_toko' => $data['id_toko'] ?? null,
+                'id_toko' => $idToko,
                 'reference_type' => 'MANUAL',
-                'reference_id' => null,
+                'reference_id' => $referenceId,
                 'reference_no' => $refNo,
-                'date' => $data['date'] ?? date('Y-m-d'),
+                'date' => $journalDate,
                 'description' => $data['description'] ?? 'Manual Adjustment',
                 'total_debit' => $totalDebit,
                 'total_credit' => $totalCredit
             ];
 
             if (!$this->journalModel->insert($journalData)) {
-                throw new \Exception('Failed to create journal header');
+                $errors = $this->journalModel->errors();
+                throw new \Exception('Failed to create journal header' . (!empty($errors) ? ': ' . json_encode($errors) : ''));
             }
 
             $journalId = $this->journalModel->getInsertID();
@@ -163,7 +169,8 @@ class JournalController extends ResourceController
                     'created_at' => date('Y-m-d H:i:s')
                 ];
                 if (!$this->journalItemModel->insert($itemData)) {
-                    throw new \Exception('Failed to create journal item for account ID: ' . $item['account_id']);
+                    $itemErrors = $this->journalItemModel->errors();
+                    throw new \Exception('Failed to create journal item for account ID: ' . $item['account_id'] . (!empty($itemErrors) ? ': ' . json_encode($itemErrors) : ''));
                 }
             }
 
