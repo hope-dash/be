@@ -123,24 +123,24 @@ class InventoryController extends ResourceController
 
             // Create Journal Out (Source)
             $j1 = $this->createJournal('TRANSFER_OUT', $refId, "Inventory Move Out -> $toToko", $date, $fromToko);
-            $this->addJournalItem($j1, '1006', $totalValue, 0, $fromToko); // Dr Transit
-            $this->addJournalItem($j1, '1004', 0, $totalValue, $fromToko); // Cr Inventory
+            $this->addJournalItem($j1, '10' . $toToko . '4', $totalValue, 0, $fromToko); // Dr Transit
+            $this->addJournalItem($j1, '10' . $fromToko . '4', 0, $totalValue, $fromToko); // Cr Inventory
 
             // Create Journal In (Target)
             $j2 = $this->createJournal('TRANSFER_IN', $refId, "Inventory Move In <- $fromToko", $date, $toToko);
-            $this->addJournalItem($j2, '1004', $totalValue, 0, $toToko); // Dr Inventory
-            $this->addJournalItem($j2, '1006', 0, $totalValue, $toToko); // Cr Transit
+            $this->addJournalItem($j2, '10' . $toToko . '4', $totalValue, 0, $toToko); // Dr Inventory
+            $this->addJournalItem($j2, '30' . $fromToko . '1', 0, $totalValue, $toToko); // Cr Transit
 
             // 3. Handle Shipping Cost (Ongkos Kirim)
             if (isset($data->ongkos_kirim) && $data->ongkos_kirim > 0) {
                 $ongkir = $data->ongkos_kirim;
                 $paymentMethod = $data->payment_method ?? 'CASH';
-                $creditAccount = ($paymentMethod === 'BANK') ? '1002' : '1001'; // Default CASH
+                $creditAccount = ($paymentMethod === 'BANK') ? '10' . $toToko . '2' : '10' . $toToko . '1'; // Default CASH
 
                 // Expense Journal for Source Store
-                $j3 = $this->createJournal('EXPENSE', $refId, "Biaya Kirim Transfer Stock ($paymentMethod)", $date, $fromToko);
-                $this->addJournalItem($j3, '5006', $ongkir, 0, $fromToko); // Dr Expense (Biaya Kirim/Operasional)
-                $this->addJournalItem($j3, $creditAccount, 0, $ongkir, $fromToko); // Cr Cash/Bank
+                $j3 = $this->createJournal('EXPENSE', $refId, "Biaya Kirim Transfer Stock ($paymentMethod)", $date, $toToko);
+                $this->addJournalItem($j3, '50' . $toToko . '6', $ongkir, 0, $toToko); // Dr Expense (Biaya Kirim/Operasional)
+                $this->addJournalItem($j3, $creditAccount, 0, $ongkir, $toToko); // Cr Cash/Bank
             }
 
             $this->db->transComplete();

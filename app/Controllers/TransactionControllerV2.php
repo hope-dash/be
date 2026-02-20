@@ -876,10 +876,10 @@ class TransactionControllerV2 extends ResourceController
 
                             // If free shipping, we settle the payable (2001) that was created during invoice creation.
                             // Otherwise, record it as a direct shipping expense (5006).
-                            $debitCode = $isFreeOngkir ? '2001' : '5006';
+                            $debitCode = $isFreeOngkir ? '20'.$trx['id_toko'].'1' : '50'.$trx['id_toko'].'6';
 
                             $this->addJournalItem($journalId, $debitCode, $shippingCost, 0); // Dr Expense/Payable
-                            $this->addJournalItem($journalId, '1002', 0, $shippingCost); // Cr Cash
+                            $this->addJournalItem($journalId, '10'.$trx['id_toko'].'2', 0, $shippingCost); // Cr Cash
                         }
                     }
                 }

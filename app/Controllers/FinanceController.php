@@ -51,42 +51,27 @@ class FinanceController extends ResourceController
 
         try {
 
-            // 1. Credit Source (Money Leaving Source Toko)
-            // Use '1005' or similar as Clearing Account if needed, or direct transfer logic if simpler.
-            // Let's use '1001' (Cash) or '1002' (Bank) based on input.
-            // Assumption: User provides account codes.
-            // If Source is Toko A, we create journal in Toko A.
+            if ($fromToko == $toToko) {
+                // Case: Same Store (Internal Transfer e.g. Cash to Bank)
+                $j1 = $this->createJournal('TRANSFER', "TRF-" . date('ymdHis'), $data->description ?? "Internal Transfer", $data->date ?? date('Y-m-d'), $fromToko);
 
-            $j1 = $this->createJournal('TRANSFER_OUT', "TRF-" . date('ymdHis'), "Transfer Out to Toko #$toToko", $data->date ?? date('Y-m-d'), $fromToko);
-            // Cr Cash (Source)
-            // Dr Clearing/Transfer Account? Or directly Dr Equity?
-            // "Disetor ke bank utama".
-            // If Bank Utama is Central (Toko 0 or NULL), then it is transfer.
-            // Let's use a "Suspense/Clearing" account '1005' for checks.
-            // Or if we treat it as internal transfer:
+                // Credit Source Account
+                $this->addJournalItem($j1, $data->source_account_code, 0, $amount, $fromToko);
+                // Debit Target Account
+                $this->addJournalItem($j1, $data->target_account_code, $amount, 0, $fromToko);
 
-            // Simpler approach for single database:
-            // Side A (Source): Cr Bank A, Dr Internal Transfer (Equity/Liability or Asset)
-            // Side B (Dest): Dr Bank B, Cr Internal Transfer
+                $j2 = null;
+            } else {
+                // 1. Source Journal: Cr SourceAccount, Dr TargetAccount (Transit)
+                $j1 = $this->createJournal('TRANSFER_OUT', "TRF-" . date('ymdHis'), "Transfer Out to Toko #$toToko" . ($data->description ? ": " . $data->description : ""), $data->date ?? date('Y-m-d'), $fromToko);
+                $this->addJournalItem($j1, $data->source_account_code, 0, $amount, $fromToko); // Credit
+                $this->addJournalItem($j1, $data->target_account_code, $amount, 0, $fromToko); // Debit
 
-            // We need an "Internal Transfer" account. Let's assume '1005' is Funds in Transit (Asset).
-
-            // Side A: Decrease Asset (Bank), Increase Asset (Transit) -> Net Asset same? No.
-            // If Money leaves A, A's Asset decreases.
-            // If we want to track it on A's books, Dr Owner Withdraw? Or Dr Funds Transfer Out.
-
-            // User requirement: "setor ke bank utama".
-            // Let's implement as:
-            // 1. Source Journal: Cr SourceAccount, Dr '1005' (Funds in Transit).
-            $this->addJournalItem($j1, $data->source_account_code, 0, $amount, $fromToko); // Credit
-            $this->addJournalItem($j1, '1005', $amount, 0, $fromToko); // Debit Clearing
-
-            // 2. Dest Journal: Dr DestAccount, Cr '1005' (Funds in Transit).
-            $j2 = $this->createJournal('TRANSFER_IN', "TRF-" . date('ymdHis'), "Transfer In from Toko #$fromToko", $data->date ?? date('Y-m-d'), $toToko);
-            $this->addJournalItem($j2, $data->target_account_code, $amount, 0, $toToko); // Debit
-            $this->addJournalItem($j2, '1005', 0, $amount, $toToko); // Credit Clearing
-
-            // If account 1005 doesn't exist, we should seed it.
+                // 2. Dest Journal: Dr DestAccount, Cr inter-store clearing
+                $j2 = $this->createJournal('TRANSFER_IN', "TRF-" . date('ymdHis'), "Transfer In from Toko #$fromToko" . ($data->description ? ": " . $data->description : ""), $data->date ?? date('Y-m-d'), $toToko);
+                $this->addJournalItem($j2, $data->target_account_code, $amount, 0, $toToko); // Debit
+                $this->addJournalItem($j2, '30' . $fromToko . '1', 0, $amount, $toToko); // Credit
+            }
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp('Transfer successful', ['journal_out' => $j1, 'journal_in' => $j2], 200);

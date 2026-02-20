@@ -52,7 +52,7 @@ class AccountingReportController extends ResourceController
         } else if ($idToko) {
             $builder->where('id_toko', $idToko);
         } else {
-            $builder->where('id_toko', null);
+            $builder->where('id_toko !=', null);
         }
 
         $accounts = $builder->orderBy('code', 'ASC')->findAll();

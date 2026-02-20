@@ -140,9 +140,16 @@ class ExpenseController extends ResourceController
             return $this->jsonResponse->error('Toko not found', 404);
         }
 
-        // Revert to using default accounts: 1002 (Bank) or 1001 (Cash)
+        // Use base codes: 1002 (Bank) or 1001 (Cash) to find store-specific accounts
         $cashAccountBaseCode = ($data->payment_method === 'BANK') ? '1002' : '1001';
         $cashAccount = $this->accountModel->getByBaseCode($cashAccountBaseCode, $data->id_toko);
+
+        if (!$cashAccount) {
+            // Fallback: check if the store-specific code exists directly
+            $absoluteCode = ($data->payment_method === 'BANK') ? '10' . $data->id_toko . '2' : '10' . $data->id_toko . '1';
+            $cashAccount = $this->accountModel->where('code', $absoluteCode)->first();
+        }
+
         $cashAccountId = $cashAccount ? $cashAccount['id'] : null;
 
         if (!$cashAccountId) {
