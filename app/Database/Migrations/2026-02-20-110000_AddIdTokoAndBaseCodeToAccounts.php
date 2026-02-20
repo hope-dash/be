@@ -49,9 +49,8 @@ class AddIdTokoAndBaseCodeToAccounts extends Migration
         foreach ($tokoList as $toko) {
             foreach ($baseAccounts as $acc) {
                 $baseCode = $acc['base_code'];
-                // Pattern: 10X1 where X is id_toko
-                // substr($baseCode, 0, 2) . $toko['id'] . substr($baseCode, 3)
                 $newCode = substr($baseCode, 0, 2) . $toko['id'] . substr($baseCode, 3);
+                $newName = $acc['name'] . ' ' . $toko['toko_name'];
 
                 // Check if already exists
                 $exists = $this->db->table('accounts')
@@ -63,12 +62,17 @@ class AddIdTokoAndBaseCodeToAccounts extends Migration
                         'id_toko' => $toko['id'],
                         'base_code' => $baseCode,
                         'code' => $newCode,
-                        'name' => $acc['name'],
+                        'name' => $newName,
                         'type' => $acc['type'],
                         'normal_balance' => $acc['normal_balance'],
                         'created_at' => date('Y-m-d H:i:s'),
                         'updated_at' => date('Y-m-d H:i:s')
                     ]);
+                } else {
+                    // Update name for existing store accounts if they don't have the store name yet
+                    $this->db->table('accounts')
+                        ->where('code', $newCode)
+                        ->update(['name' => $newName]);
                 }
             }
         }

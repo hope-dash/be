@@ -38,7 +38,18 @@ class AccountingReportController extends ResourceController
             $builder->where('type', $type);
         }
 
+        $isUtama = false;
         if ($idToko) {
+            $toko = $this->db->table('toko')->where('id', $idToko)->get()->getRow();
+            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
+                $isUtama = true;
+            }
+        }
+
+        if ($isUtama) {
+            // Show all accounts for UTAMA
+            $builder->where('id_toko !=', null);
+        } else if ($idToko) {
             $builder->where('id_toko', $idToko);
         } else {
             $builder->where('id_toko', null);
@@ -61,7 +72,15 @@ class AccountingReportController extends ResourceController
             ->where('j.date >=', $startDate)
             ->where('j.date <=', $endDate);
 
+        $isUtama = false;
         if ($tokoId) {
+            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
+            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
+                $isUtama = true;
+            }
+        }
+
+        if ($tokoId && !$isUtama) {
             $builder->where('j.id_toko', $tokoId);
         }
 
@@ -108,8 +127,18 @@ class AccountingReportController extends ResourceController
         $endDate = $this->request->getGet('end_date') ?? date('Y-m-t');
         $tokoId = $this->request->getGet('id_toko');
 
-        $accountsBuilder = $this->accountModel;
+        $isUtama = false;
         if ($tokoId) {
+            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
+            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
+                $isUtama = true;
+            }
+        }
+
+        $accountsBuilder = $this->accountModel;
+        if ($isUtama) {
+            $accountsBuilder->where('id_toko !=', null);
+        } else if ($tokoId) {
             $accountsBuilder->where('id_toko', $tokoId);
         } else {
             // Consolidation: use templates or all? 
@@ -127,7 +156,7 @@ class AccountingReportController extends ResourceController
                 ->join('journals', 'journals.id = journal_items.journal_id')
                 ->where('journal_items.account_id', $acc['id'])
                 ->where('journals.date <', $startDate);
-            if ($tokoId)
+            if ($tokoId && !$isUtama)
                 $openingDebitBuilder->where('journals.id_toko', $tokoId);
             $openingDebit = $openingDebitBuilder->selectSum('debit')->get()->getRow()->debit ?? 0;
 
@@ -135,7 +164,7 @@ class AccountingReportController extends ResourceController
                 ->join('journals', 'journals.id = journal_items.journal_id')
                 ->where('journal_items.account_id', $acc['id'])
                 ->where('journals.date <', $startDate);
-            if ($tokoId)
+            if ($tokoId && !$isUtama)
                 $openingCreditBuilder->where('journals.id_toko', $tokoId);
             $openingCredit = $openingCreditBuilder->selectSum('credit')->get()->getRow()->credit ?? 0;
 
@@ -147,7 +176,7 @@ class AccountingReportController extends ResourceController
                 ->where('journal_items.account_id', $acc['id'])
                 ->where('journals.date >=', $startDate)
                 ->where('journals.date <=', $endDate);
-            if ($tokoId)
+            if ($tokoId && !$isUtama)
                 $periodDebitBuilder->where('journals.id_toko', $tokoId);
             $periodDebit = $periodDebitBuilder->selectSum('debit')->get()->getRow()->debit ?? 0;
 
@@ -156,7 +185,7 @@ class AccountingReportController extends ResourceController
                 ->where('journal_items.account_id', $acc['id'])
                 ->where('journals.date >=', $startDate)
                 ->where('journals.date <=', $endDate);
-            if ($tokoId)
+            if ($tokoId && !$isUtama)
                 $periodCreditBuilder->where('journals.id_toko', $tokoId);
             $periodCredit = $periodCreditBuilder->selectSum('credit')->get()->getRow()->credit ?? 0;
 
@@ -199,7 +228,15 @@ class AccountingReportController extends ResourceController
             ->where('ji.account_id', $accountId)
             ->where('j.date <', $startDate);
 
-        if ($tokoId)
+        $isUtama = false;
+        if ($tokoId) {
+            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
+            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
+                $isUtama = true;
+            }
+        }
+
+        if ($tokoId && !$isUtama)
             $builderOpen->where('j.id_toko', $tokoId);
 
         $openResult = $builderOpen->selectSum('ji.debit', 'total_debit')
@@ -228,7 +265,7 @@ class AccountingReportController extends ResourceController
             ->where('j.date >=', $startDate)
             ->where('j.date <=', $endDate);
 
-        if ($tokoId)
+        if ($tokoId && !$isUtama)
             $builderTrans->where('j.id_toko', $tokoId);
 
         $transactions = $builderTrans->orderBy('j.date', 'ASC')
@@ -453,8 +490,18 @@ class AccountingReportController extends ResourceController
 
     private function getAccountGroupBalance($type, $startDate, $endDate, $tokoId = null, $excludeClosing = true)
     {
-        $accountsBuilder = $this->accountModel->where('type', $type);
+        $isUtama = false;
         if ($tokoId) {
+            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
+            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
+                $isUtama = true;
+            }
+        }
+
+        $accountsBuilder = $this->accountModel->where('type', $type);
+        if ($isUtama) {
+            $accountsBuilder->where('id_toko !=', null);
+        } else if ($tokoId) {
             $accountsBuilder->where('id_toko', $tokoId);
         } else {
             // Show all for consolidation if no tokoId
@@ -471,7 +518,7 @@ class AccountingReportController extends ResourceController
                 ->where('journals.date >=', $startDate)
                 ->where('journals.date <=', $endDate);
 
-            if ($tokoId)
+            if ($tokoId && !$isUtama)
                 $builderDeb->where('journals.id_toko', $tokoId);
             if ($excludeClosing)
                 $builderDeb->where('journals.reference_type !=', 'CLOSING');
@@ -485,7 +532,7 @@ class AccountingReportController extends ResourceController
                 ->where('journals.date >=', $startDate)
                 ->where('journals.date <=', $endDate);
 
-            if ($tokoId)
+            if ($tokoId && !$isUtama)
                 $builderCred->where('journals.id_toko', $tokoId);
             if ($excludeClosing)
                 $builderCred->where('journals.reference_type !=', 'CLOSING');

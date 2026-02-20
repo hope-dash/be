@@ -24,7 +24,8 @@ class TokoModel extends Model
         "kota_kabupaten",
         "kecamatan",
         "kelurahan",
-        "kode_pos"
+        "kode_pos",
+        "type"
     ];
     protected $useSoftDeletes = true;
     protected $protectFields = true;

@@ -77,6 +77,25 @@ class TokoController extends BaseController
             $this->modelToko->insert($tokoData);
             $tokoId = $this->modelToko->insertID();
 
+            // 2. Automatically generate accounts for this new toko
+            $baseAccounts = $this->accountModel->where('id_toko', null)->findAll();
+            foreach ($baseAccounts as $acc) {
+                $baseCode = $acc['base_code'] ?? $acc['code'];
+                $newCode = substr($baseCode, 0, 2) . $tokoId . substr($baseCode, 3);
+                $newName = $acc['name'] . ' ' . $data->toko_name;
+
+                $this->accountModel->insert([
+                    'id_toko' => $tokoId,
+                    'base_code' => $baseCode,
+                    'code' => $newCode,
+                    'name' => $newName,
+                    'type' => $acc['type'],
+                    'normal_balance' => $acc['normal_balance'],
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+
             $this->db->transComplete();
 
             if ($this->db->transStatus() === false) {
@@ -136,7 +155,22 @@ class TokoController extends BaseController
                 "kode_pos" => $data->kode_pos ?? null,
             ];
 
+            $this->db->transStart();
             $this->modelToko->update($id, $tokoData);
+
+            // Update account names if toko_name changed
+            $baseAccounts = $this->accountModel->where('id_toko', null)->findAll();
+            foreach ($baseAccounts as $acc) {
+                $baseCode = $acc['base_code'] ?? $acc['code'];
+                $newName = $acc['name'] . ' ' . $data->toko_name;
+
+                $this->accountModel->builder()
+                    ->where('id_toko', $id)
+                    ->where('base_code', $baseCode)
+                    ->update(['name' => $newName, 'updated_at' => date('Y-m-d H:i:s')]);
+            }
+
+            $this->db->transComplete();
 
             return $this->jsonResponse->oneResp('Toko updated successfully', ['id' => $id], 201);
         } catch (\Exception $e) {
