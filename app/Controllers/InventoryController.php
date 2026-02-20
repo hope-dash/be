@@ -123,13 +123,13 @@ class InventoryController extends ResourceController
 
             // Create Journal Out (Source)
             $j1 = $this->createJournal('TRANSFER_OUT', $refId, "Inventory Move Out -> $toToko", $date, $fromToko);
-            $this->addJournalItem($j1, '1006', $totalValue, 0); // Dr Transit
-            $this->addJournalItem($j1, '1004', 0, $totalValue); // Cr Inventory
+            $this->addJournalItem($j1, '1006', $totalValue, 0, $fromToko); // Dr Transit
+            $this->addJournalItem($j1, '1004', 0, $totalValue, $fromToko); // Cr Inventory
 
             // Create Journal In (Target)
             $j2 = $this->createJournal('TRANSFER_IN', $refId, "Inventory Move In <- $fromToko", $date, $toToko);
-            $this->addJournalItem($j2, '1004', $totalValue, 0); // Dr Inventory
-            $this->addJournalItem($j2, '1006', 0, $totalValue); // Cr Transit
+            $this->addJournalItem($j2, '1004', $totalValue, 0, $toToko); // Dr Inventory
+            $this->addJournalItem($j2, '1006', 0, $totalValue, $toToko); // Cr Transit
 
             // 3. Handle Shipping Cost (Ongkos Kirim)
             if (isset($data->ongkos_kirim) && $data->ongkos_kirim > 0) {
@@ -139,8 +139,8 @@ class InventoryController extends ResourceController
 
                 // Expense Journal for Source Store
                 $j3 = $this->createJournal('EXPENSE', $refId, "Biaya Kirim Transfer Stock ($paymentMethod)", $date, $fromToko);
-                $this->addJournalItem($j3, '5006', $ongkir, 0); // Dr Expense (Biaya Kirim/Operasional)
-                $this->addJournalItem($j3, $creditAccount, 0, $ongkir); // Cr Cash/Bank
+                $this->addJournalItem($j3, '5006', $ongkir, 0, $fromToko); // Dr Expense (Biaya Kirim/Operasional)
+                $this->addJournalItem($j3, $creditAccount, 0, $ongkir, $fromToko); // Cr Cash/Bank
             }
 
             $this->db->transComplete();
@@ -165,17 +165,22 @@ class InventoryController extends ResourceController
         return $this->journalModel->getInsertID();
     }
 
-    private function addJournalItem($journalId, $accountCode, $debit, $credit)
+    private function addJournalItem($journalId, $accountCode, $debit, $credit, $tokoId)
     {
-        $account = $this->accountModel->where('code', $accountCode)->first();
+        $account = $this->accountModel->getByBaseCode($accountCode, $tokoId);
         if (!$account) {
-            if ($accountCode == '1005') {
+            // Fallback to base account if store-specific not found (safety)
+            $account = $this->accountModel->where('code', $accountCode)->first();
+
+            if (!$account && in_array($accountCode, ['1005', '1006'])) {
                 // Seed if missing
-                $this->accountModel->insert(['code' => '1005', 'name' => 'Funds/Goods In Transit', 'type' => 'ASSET', 'normal_balance' => 'DEBIT']);
-                $account = $this->accountModel->where('code', '1005')->first();
-            } else {
-                return;
+                $name = ($accountCode == '1005') ? 'Funds/Goods In Transit' : 'Inventory Cabangan (Transit)';
+                $this->accountModel->insert(['code' => $accountCode, 'name' => $name, 'type' => 'ASSET', 'normal_balance' => 'DEBIT']);
+                $account = $this->accountModel->where('code', $accountCode)->first();
             }
+
+            if (!$account)
+                return;
         }
         $this->journalItemModel->insert([
             'journal_id' => $journalId,

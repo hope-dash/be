@@ -146,10 +146,10 @@ class PembelianControllerV2 extends ResourceController
             $journalId = $this->createJournal('PURCHASE', $pembelianId, "PO-{$pembelianId}", $pembelian['tanggal_belanja'], "Pembelian Barang", $pembelian['id_toko']);
 
             // Debit Inventory
-            $this->addJournalItem($journalId, '1004', $pembelian['total_belanja'], 0);
+            $this->addJournalItem($journalId, '1004', $pembelian['total_belanja'], 0, $pembelian['id_toko']);
 
             // Credit Bank (Using Bank Account 1002 default)
-            $this->addJournalItem($journalId, '1002', 0, $pembelian['total_belanja']);
+            $this->addJournalItem($journalId, '1002', 0, $pembelian['total_belanja'], $pembelian['id_toko']);
 
 
             // Process Stock & Average Cost Updating
@@ -259,9 +259,13 @@ class PembelianControllerV2 extends ResourceController
         return $this->journalModel->getInsertID();
     }
 
-    private function addJournalItem($journalId, $accountCode, $debit, $credit)
+    private function addJournalItem($journalId, $accountCode, $debit, $credit, $tokoId = null)
     {
-        $account = $this->accountModel->where('code', $accountCode)->first();
+        $account = $this->accountModel->getByBaseCode($accountCode, $tokoId);
+        if (!$account) {
+            $account = $this->accountModel->where('code', $accountCode)->first();
+        }
+
         if (!$account)
             return;
         $this->journalItemModel->insert([

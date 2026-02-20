@@ -78,13 +78,13 @@ class FinanceController extends ResourceController
             // User requirement: "setor ke bank utama".
             // Let's implement as:
             // 1. Source Journal: Cr SourceAccount, Dr '1005' (Funds in Transit).
-            $this->addJournalItem($j1, $data->source_account_code, 0, $amount); // Credit
-            $this->addJournalItem($j1, '1005', $amount, 0); // Debit Clearing
+            $this->addJournalItem($j1, $data->source_account_code, 0, $amount, $fromToko); // Credit
+            $this->addJournalItem($j1, '1005', $amount, 0, $fromToko); // Debit Clearing
 
             // 2. Dest Journal: Dr DestAccount, Cr '1005' (Funds in Transit).
             $j2 = $this->createJournal('TRANSFER_IN', "TRF-" . date('ymdHis'), "Transfer In from Toko #$fromToko", $data->date ?? date('Y-m-d'), $toToko);
-            $this->addJournalItem($j2, $data->target_account_code, $amount, 0); // Debit
-            $this->addJournalItem($j2, '1005', 0, $amount); // Credit Clearing
+            $this->addJournalItem($j2, $data->target_account_code, $amount, 0, $toToko); // Debit
+            $this->addJournalItem($j2, '1005', 0, $amount, $toToko); // Credit Clearing
 
             // If account 1005 doesn't exist, we should seed it.
 
@@ -114,8 +114,8 @@ class FinanceController extends ResourceController
 
             $jid = $this->createJournal('DIVIDEND', "DIV-" . date('ymdHis'), "Profit Distribution (Withdrawal)", $data->date ?? date('Y-m-d'), $data->id_toko);
 
-            $this->addJournalItem($jid, '3001', $withdrawAmount, 0); // Dr Equity (Reduces Equity)
-            $this->addJournalItem($jid, $data->account_code, 0, $withdrawAmount); // Cr Bank
+            $this->addJournalItem($jid, '3001', $withdrawAmount, 0, $data->id_toko); // Dr Equity (Reduces Equity)
+            $this->addJournalItem($jid, $data->account_code, 0, $withdrawAmount, $data->id_toko); // Cr Bank
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp('Profit distribution recorded', ['journal_id' => $jid], 200);
@@ -138,16 +138,18 @@ class FinanceController extends ResourceController
         return $this->journalModel->getInsertID();
     }
 
-    private function addJournalItem($journalId, $accountCode, $debit, $credit)
+    private function addJournalItem($journalId, $accountCode, $debit, $credit, $tokoId)
     {
-        $account = $this->accountModel->where('code', $accountCode)->first();
+        $account = $this->accountModel->getByBaseCode($accountCode, $tokoId);
         if (!$account) {
-            // Auto create clearing account if missing?
-            if ($accountCode == '1005') {
-                $this->accountModel->insert(['code' => '1005', 'name' => 'Funds In Transit', 'type' => 'ASSET', 'normal_balance' => 'DEBIT']);
+            // Fallback for direct code
+            $account = $this->accountModel->where('code', $accountCode)->first();
+
+            if (!$account && $accountCode == '1005') {
+                $this->accountModel->insert(['code' => $accountCode, 'name' => 'Funds In Transit', 'type' => 'ASSET', 'normal_balance' => 'DEBIT']);
                 $account = $this->accountModel->where('code', '1005')->first();
-            } else {
-                throw new \Exception("Account $accountCode not found");
+            } else if (!$account) {
+                throw new \Exception("Account $accountCode not found for this store");
             }
         }
         $this->journalItemModel->insert([

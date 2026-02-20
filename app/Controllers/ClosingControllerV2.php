@@ -37,7 +37,7 @@ class ClosingControllerV2 extends ResourceController
 
         // Calculate Revenue & Expense
         $pnl = $this->calculatePnL($startDate, $endDate, $tokoId);
-        
+
         return $this->jsonResponse->oneResp("Preview Closing $month/$year" . ($tokoId ? " Toko #$tokoId" : ""), $pnl, 200);
     }
 
@@ -48,10 +48,10 @@ class ClosingControllerV2 extends ResourceController
         $month = $data->month ?? date('m');
         $year = $data->year ?? date('Y');
         $tokoId = $data->id_toko ?? null;
-        
+
         if (empty($tokoId)) {
             // Ideally we should require toko_id for precise closing
-             return $this->jsonResponse->error("Toko ID is required for closing", 400); 
+            return $this->jsonResponse->error("Toko ID is required for closing", 400);
         }
 
         $startDate = "$year-$month-01";
@@ -63,7 +63,7 @@ class ClosingControllerV2 extends ResourceController
             ->where('date', $endDate)
             ->where('id_toko', $tokoId)
             ->first();
-        
+
         if ($existing) {
             return $this->jsonResponse->error("Period $month/$year already closed for Toko #$tokoId (Journal ID: {$existing['id']})", 400);
         }
@@ -73,7 +73,7 @@ class ClosingControllerV2 extends ResourceController
         try {
             $pnl = $this->calculatePnL($startDate, $endDate, $tokoId);
             $netIncome = $pnl['net_income'];
-            
+
             // Create Closing Journal
             // Date: Last day of month
             $journalId = $this->createJournal('CLOSING', "CL-$year$month-$tokoId", "Closing Entry $month/$year Toko #$tokoId", $endDate, "Closing Period $month/$year", $tokoId);
@@ -93,9 +93,14 @@ class ClosingControllerV2 extends ResourceController
             }
 
             // 3. Post to Retained Earnings / Equity (3001)
-            $equityAccount = $this->accountModel->where('code', '3001')->first(); // Owner Equity
-            if (!$equityAccount) throw new \Exception("Equity Account 3001 not found");
-            
+            $equityAccount = $this->accountModel->getByBaseCode('3001', $tokoId); // Owner Equity
+            if (!$equityAccount) {
+                // Fallback
+                $equityAccount = $this->accountModel->where('code', '3001')->first();
+            }
+            if (!$equityAccount)
+                throw new \Exception("Equity Account 3001 not found for this store");
+
             if ($netIncome > 0) {
                 $this->addJournalItem($journalId, $equityAccount['id'], 0, $netIncome);
             } elseif ($netIncome < 0) {
@@ -103,7 +108,7 @@ class ClosingControllerV2 extends ResourceController
             }
 
             $this->db->transComplete();
-            
+
             return $this->jsonResponse->oneResp("Closing successful for Toko #$tokoId", ['journal_id' => $journalId, 'net_income' => $netIncome], 200);
 
         } catch (\Exception $e) {
@@ -132,7 +137,13 @@ class ClosingControllerV2 extends ResourceController
 
     private function getAccountBalances($type, $startDate, $endDate, $tokoId = null)
     {
-        $accounts = $this->accountModel->where('type', $type)->findAll();
+        $accountsBuilder = $this->accountModel->where('type', $type);
+        if ($tokoId) {
+            $accountsBuilder->where('id_toko', $tokoId);
+        } else {
+            $accountsBuilder->where('id_toko', null);
+        }
+        $accounts = $accountsBuilder->findAll();
         $results = [];
 
         foreach ($accounts as $acc) {
@@ -142,18 +153,18 @@ class ClosingControllerV2 extends ResourceController
                 ->where('journals.date >=', $startDate)
                 ->where('journals.date <=', $endDate)
                 ->where('journals.reference_type !=', 'CLOSING');
-            
+
             if ($tokoId) {
                 $builderDebit->where('journals.id_toko', $tokoId);
             }
             $debit = $builderDebit->selectSum('debit')->get()->getRow()->debit ?? 0;
-            
+
             $builderCredit = $this->db->table('journal_items')
-                 ->join('journals', 'journals.id = journal_items.journal_id')
-                 ->where('journal_items.account_id', $acc['id'])
-                 ->where('journals.date >=', $startDate)
-                 ->where('journals.date <=', $endDate)
-                 ->where('journals.reference_type !=', 'CLOSING');
+                ->join('journals', 'journals.id = journal_items.journal_id')
+                ->where('journal_items.account_id', $acc['id'])
+                ->where('journals.date >=', $startDate)
+                ->where('journals.date <=', $endDate)
+                ->where('journals.reference_type !=', 'CLOSING');
 
             if ($tokoId) {
                 $builderCredit->where('journals.id_toko', $tokoId);
@@ -176,7 +187,8 @@ class ClosingControllerV2 extends ResourceController
         return $results;
     }
 
-    private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null) {
+    private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null)
+    {
         $this->journalModel->insert([
             'id_toko' => $tokoId,
             'reference_type' => $refType,
@@ -188,7 +200,8 @@ class ClosingControllerV2 extends ResourceController
         return $this->journalModel->getInsertID();
     }
 
-    private function addJournalItem($journalId, $accountId, $debit, $credit) {
+    private function addJournalItem($journalId, $accountId, $debit, $credit)
+    {
         $this->journalItemModel->insert([
             'journal_id' => $journalId,
             'account_id' => $accountId,

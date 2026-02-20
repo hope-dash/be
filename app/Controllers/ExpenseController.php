@@ -115,7 +115,17 @@ class ExpenseController extends ResourceController
             return $this->jsonResponse->error('Account Code, Amount, and Payment Method Required', 400);
         }
 
-        $expenseAccount = $this->accountModel->where('code', $data->account_code)->first();
+        // Match store-specific expense account
+        $expenseAccount = $this->accountModel
+            ->where('id_toko', $data->id_toko)
+            ->where('base_code', $data->account_code)
+            ->first();
+
+        if (!$expenseAccount) {
+            // Fallback to absolute code match if not found by base_code + toko (for legacy)
+            $expenseAccount = $this->accountModel->where('code', $data->account_code)->first();
+        }
+
         if (!$expenseAccount || $expenseAccount['type'] !== 'EXPENSE') {
             return $this->jsonResponse->error('Invalid Expense Account', 400);
         }
@@ -131,12 +141,12 @@ class ExpenseController extends ResourceController
         }
 
         // Revert to using default accounts: 1002 (Bank) or 1001 (Cash)
-        $cashAccountCode = ($data->payment_method === 'BANK') ? '1002' : '1001';
-        $cashAccount = $this->accountModel->where('code', $cashAccountCode)->first();
+        $cashAccountBaseCode = ($data->payment_method === 'BANK') ? '1002' : '1001';
+        $cashAccount = $this->accountModel->getByBaseCode($cashAccountBaseCode, $data->id_toko);
         $cashAccountId = $cashAccount ? $cashAccount['id'] : null;
 
         if (!$cashAccountId) {
-            return $this->jsonResponse->error('Default ' . $data->payment_method . ' account not found', 400);
+            return $this->jsonResponse->error('Default ' . $data->payment_method . ' account not found for this store', 400);
         }
 
         $this->db->transStart();
