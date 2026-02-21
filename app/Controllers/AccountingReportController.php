@@ -72,20 +72,14 @@ class AccountingReportController extends ResourceController
             ->where('j.date >=', $startDate)
             ->where('j.date <=', $endDate);
 
-        $isUtama = false;
-        if ($tokoId) {
-            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
-            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
-                $isUtama = true;
-            }
-        }
 
-        if ($tokoId && !$isUtama) {
+
+        if ($tokoId) {
             $builder->where('j.id_toko', $tokoId);
         }
 
-        $results = $builder->orderBy('j.date', 'ASC')
-            ->orderBy('j.id', 'ASC')
+        $results = $builder->orderBy('j.date', 'DESC')
+            ->orderBy('j.id', 'DESC')
             ->get()->getResultArray();
 
         $journals = [];
@@ -128,26 +122,31 @@ class AccountingReportController extends ResourceController
         $tokoId = $this->request->getGet('id_toko');
 
         $isUtama = false;
-        if ($tokoId) {
-            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
-            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
-                $isUtama = true;
-            }
-        }
 
-        $accountsBuilder = $this->accountModel;
         if ($isUtama) {
-            $accountsBuilder->where('id_toko !=', null);
+            $accounts = $this->accountModel->where('id_toko !=', null)->orderBy('code', 'ASC')->findAll();
         } else if ($tokoId) {
-            $accountsBuilder->where('id_toko', $tokoId);
+            // Find account IDs owned by this toko OR accounts used in transactions for this toko
+            $usedAccountIdsRaw = $this->db->table('journal_items ji')
+                ->join('journals j', 'j.id = ji.journal_id')
+                ->where('j.id_toko', $tokoId)
+                ->select('ji.account_id')
+                ->distinct()
+                ->get()->getResultArray();
+            $accountIds = array_column($usedAccountIdsRaw, 'account_id');
+
+            // Add accounts owned by this toko (even if no transactions yet)
+            $ownedAccounts = $this->accountModel->where('id_toko', $tokoId)->select('id')->findAll();
+            $accountIds = array_unique(array_merge($accountIds, array_column($ownedAccounts, 'id')));
+
+            if (empty($accountIds)) {
+                $accounts = [];
+            } else {
+                $accounts = $this->accountModel->whereIn('id', $accountIds)->orderBy('code', 'ASC')->findAll();
+            }
         } else {
-            // Consolidation: use templates or all? 
-            // User said "laporany jurnal juga akan jadi semua journal x 3"
-            // So if no tokoId, maybe show ALL accounts? 
-            // But usually grand total report should group by base_code.
-            // For now, let's allow showing all if no tokoId to satisfy "journal x 3".
+            $accounts = $this->accountModel->orderBy('code', 'ASC')->findAll();
         }
-        $accounts = $accountsBuilder->orderBy('code', 'ASC')->findAll();
         $ledger = [];
 
         foreach ($accounts as $acc) {
@@ -229,14 +228,7 @@ class AccountingReportController extends ResourceController
             ->where('j.date <', $startDate);
 
         $isUtama = false;
-        if ($tokoId) {
-            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
-            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
-                $isUtama = true;
-            }
-        }
-
-        if ($tokoId && !$isUtama)
+        if ($tokoId)
             $builderOpen->where('j.id_toko', $tokoId);
 
         $openResult = $builderOpen->selectSum('ji.debit', 'total_debit')
@@ -375,7 +367,9 @@ class AccountingReportController extends ResourceController
 
     private function getIncomeStatementData($startDate, $endDate, $tokoId)
     {
-        $accrualExcludes = ['SALES', 'COGS'];
+        // Only exclude SALES journals from base balance (Revenue accounts).
+        // COGS journals will be included in base balance (immediate expense).
+        $accrualExcludes = ['SALES', 'CANCEL_SALES', 'RETUR_SALES'];
 
         // 1. Get Base Data (Excluding Sales Accruals)
         $revenuesClean = $this->getAccountGroupBalance('REVENUE', $startDate, $endDate, $tokoId, true, $accrualExcludes);
@@ -557,23 +551,30 @@ class AccountingReportController extends ResourceController
 
     private function getAccountGroupBalance($type, $startDate, $endDate, $tokoId = null, $excludeClosing = true, $excludeReferenceTypes = [])
     {
-        $isUtama = false;
         if ($tokoId) {
-            $toko = $this->db->table('toko')->where('id', $tokoId)->get()->getRow();
-            if ($toko && strtoupper($toko->type ?? '') === 'UTAMA') {
-                $isUtama = true;
-            }
-        }
+            // Find account IDs of this type used in transactions for this toko
+            $usedAccountIdsRaw = $this->db->table('journal_items ji')
+                ->join('journals j', 'j.id = ji.journal_id')
+                ->join('accounts a', 'a.id = ji.account_id')
+                ->where('j.id_toko', $tokoId)
+                ->where('a.type', $type)
+                ->select('ji.account_id')
+                ->distinct()
+                ->get()->getResultArray();
+            $accountIds = array_column($usedAccountIdsRaw, 'account_id');
 
-        $accountsBuilder = $this->accountModel->where('type', $type);
-        if ($isUtama) {
-            $accountsBuilder->where('id_toko !=', null);
-        } else if ($tokoId) {
-            $accountsBuilder->where('id_toko', $tokoId);
+            // Add accounts owned by this toko of this type
+            $ownedAccounts = $this->accountModel->where('type', $type)->where('id_toko', $tokoId)->select('id')->findAll();
+            $accountIds = array_unique(array_merge($accountIds, array_column($ownedAccounts, 'id')));
+
+            if (empty($accountIds)) {
+                $accounts = [];
+            } else {
+                $accounts = $this->accountModel->whereIn('id', $accountIds)->orderBy('code', 'ASC')->findAll();
+            }
         } else {
-            // Show all for consolidation if no tokoId
+            $accounts = $this->accountModel->where('type', $type)->orderBy('code', 'ASC')->findAll();
         }
-        $accounts = $accountsBuilder->orderBy('code', 'ASC')->findAll();
         $list = [];
         $totalGroup = 0;
 
@@ -585,7 +586,7 @@ class AccountingReportController extends ResourceController
                 ->where('j.date >=', $startDate)
                 ->where('j.date <=', $endDate);
 
-            if ($tokoId && !$isUtama)
+            if ($tokoId)
                 $builderDeb->where('j.id_toko', $tokoId);
             if ($excludeClosing)
                 $builderDeb->where('j.reference_type !=', 'CLOSING');
@@ -601,7 +602,7 @@ class AccountingReportController extends ResourceController
                 ->where('j.date >=', $startDate)
                 ->where('j.date <=', $endDate);
 
-            if ($tokoId && !$isUtama)
+            if ($tokoId)
                 $builderCred->where('j.id_toko', $tokoId);
             if ($excludeClosing)
                 $builderCred->where('j.reference_type !=', 'CLOSING');

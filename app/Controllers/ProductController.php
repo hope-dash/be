@@ -827,7 +827,7 @@ class ProductController extends ResourceController
             }
 
             if (!empty($suplier) && is_numeric($suplier)) {
-                $builder->where("FIND_IN_SET(?, product.suplier) >", [$suplier], 0);
+                $builder->where('product.suplier', $suplier);
             }
 
             // Hitung total
@@ -931,19 +931,19 @@ class ProductController extends ResourceController
             }
 
             // --- Coming Soon ---
-            $comingSoonMap = [];
             $comingSoonTotalMap = [];
             if (!empty($productCodes)) {
                 $rows = $this->db->table('pembelian_detail pd')
-                    ->select('pd.kode_barang, p.id_toko, SUM(pd.jumlah) as total')
+                    ->select('pd.kode_barang, SUM(pd.jumlah) as total')
                     ->join('pembelian p', 'p.id = pd.pembelian_id')
                     ->whereIn('pd.kode_barang', $productCodes)
-                    ->where('p.status', 'APPROVED')
-                    ->groupBy('pd.kode_barang, p.id_toko')
+                    ->whereIn('p.status', ['APPROVED', 'NEED_REVIEW', 'WAITING', 'PENDING', 'ON_PROGRESS'])
+                    ->where('p.deleted_at IS NULL')
+                    ->groupBy('pd.kode_barang')
                     ->get()->getResultArray();
                 foreach ($rows as $row) {
-                    $comingSoonMap[$row['kode_barang']][$row['id_toko']] = (int) $row['total'];
-                    $comingSoonTotalMap[$row['kode_barang']] = ($comingSoonTotalMap[$row['kode_barang']] ?? 0) + (int) $row['total'];
+                    $kode = strtoupper(trim($row['kode_barang']));
+                    $comingSoonTotalMap[$kode] = (int) $row['total'];
                 }
             }
 
@@ -983,7 +983,7 @@ class ProductController extends ResourceController
                     $stockReady = (int) ($s['stock'] ?? 0);
                     $cacatVal = (int) ($s['barang_cacat'] ?? 0);
                     $holdVal = (int) ($holdMap[$kodeBarang][$tokoId] ?? 0);
-                    $comingSoonVal = (int) ($comingSoonMap[$kodeBarang][$tokoId] ?? 0);
+                    $comingSoonVal = (int) ($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0);
 
                     $stockList[] = [
                         'stock_ready' => $stockReady,
@@ -1033,7 +1033,7 @@ class ProductController extends ResourceController
                     'total_cacat' => $totalCacat,
                     'total_terjual' => (int) ($terjualMap[$kodeBarang] ?? 0),
                     'total_hold' => $totalHold,
-                    'total_coming_soon' => (int) ($comingSoonTotalMap[$kodeBarang] ?? 0),
+                    'total_coming_soon' => (int) ($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0),
                     'images' => $imageMap[$p['id']] ?? []
                 ];
             }
