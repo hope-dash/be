@@ -49,33 +49,63 @@ class CustomerTransactionControllerV2 extends ResourceController
             $customerId = $this->request->customer['id'];
 
             $items = $this->cartModel
-                ->select('cart.*, product.nama_barang, product.harga_jual, model_barang.nama_model, seri.seri')
+                ->select('cart.*, product.id as product_table_id, product.nama_barang, product.harga_jual, model_barang.nama_model, seri.seri, toko.toko_name, toko.alamat as toko_alamat')
                 ->join('product', 'product.id_barang = cart.id_barang', 'left')
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->join('toko', 'toko.id = cart.id_toko', 'left')
                 ->where('customer_id', $customerId)
                 ->findAll();
 
-            $formattedItems = [];
+            // Batch-fetch first image for each product in one query
+            $productTableIds = array_unique(array_filter(array_column($items, 'product_table_id')));
+            $imageMap = [];
+            if (!empty($productTableIds)) {
+                $images = $this->db->table('image')
+                    ->select('kode, url')
+                    ->where('type', 'product')
+                    ->whereIn('kode', $productTableIds)
+                    ->get()->getResultArray();
+
+                foreach ($images as $img) {
+                    // Only save the first image per product
+                    if (!isset($imageMap[$img['kode']])) {
+                        $imageMap[$img['kode']] = $img['url'];
+                    }
+                }
+            }
+
+            $grouped = [];
             foreach ($items as $item) {
+                $idToko = $item['id_toko'] ?: 0;
+
+                if (!isset($grouped[$idToko])) {
+                    $grouped[$idToko] = [
+                        'id_toko' => $item['id_toko'],
+                        'toko_name' => $item['toko_name'] ?? 'Pusat / General',
+                        'toko_alamat' => $item['toko_alamat'] ?? '',
+                        'items' => []
+                    ];
+                }
+
                 $namaLengkap = trim(implode(' ', array_filter([
                     $item['nama_barang'],
                     $item['nama_model'] ?? '',
                     $item['seri'] ?? ''
                 ])));
 
-                $formattedItems[] = [
+                $grouped[$idToko]['items'][] = [
                     'id' => $item['id'],
                     'id_barang' => $item['id_barang'],
                     'nama_barang' => $item['nama_barang'],
                     'nama_lengkap_barang' => $namaLengkap,
                     'harga_jual' => (int) $item['harga_jual'],
                     'jumlah' => (int) $item['jumlah'],
-                    'id_toko' => $item['id_toko']
+                    'image' => $imageMap[$item['product_table_id']] ?? null
                 ];
             }
 
-            return $this->jsonResponse->oneResp('Cart items fetched', $formattedItems);
+            return $this->jsonResponse->oneResp('Cart items fetched', array_values($grouped));
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -91,28 +121,75 @@ class CustomerTransactionControllerV2 extends ResourceController
                 return $this->jsonResponse->error("Product ID and quantity are required", 400);
             }
 
-            $existing = $this->cartModel
-                ->where('customer_id', $customerId)
-                ->where('id_barang', $data->id_barang)
-                ->first();
+            $qty = (int) $data->jumlah;
+            $idToko = $data->id_toko ?? null;
+
+            // Check if same product and same store already in cart
+            $query = $this->cartModel->where('customer_id', $customerId)
+                ->where('id_barang', $data->id_barang);
+
+            if ($idToko) {
+                $query->where('id_toko', $idToko);
+            } else {
+                $query->where('id_toko', null);
+            }
+
+            $existing = $query->first();
 
             if ($existing) {
+                // If exists, increment quantity
                 $this->cartModel->update($existing['id'], [
-                    'jumlah' => $data->jumlah,
-                    'id_toko' => $data->id_toko ?? $existing['id_toko']
+                    'jumlah' => (int) $existing['jumlah'] + $qty
                 ]);
-                $message = "Cart item updated";
+                $message = "Cart item incremented";
             } else {
+                // If new, insert
                 $this->cartModel->insert([
                     'customer_id' => $customerId,
                     'id_barang' => $data->id_barang,
-                    'jumlah' => $data->jumlah,
-                    'id_toko' => $data->id_toko ?? null
+                    'jumlah' => $qty,
+                    'id_toko' => $idToko
                 ]);
                 $message = "Item added to cart";
             }
 
             return $this->jsonResponse->oneResp($message, [], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    public function updateCart($id = null)
+    {
+        try {
+            $customerId = $this->request->customer['id'];
+            $data = $this->request->getJSON();
+
+            if (empty($data->jumlah)) {
+                return $this->jsonResponse->error("Quantity is required", 400);
+            }
+
+            $item = $this->cartModel->find($id);
+            if (!$item || $item['customer_id'] != $customerId) {
+                return $this->jsonResponse->error("Item not found in your cart", 404);
+            }
+
+            $this->cartModel->update($id, [
+                'jumlah' => (int) $data->jumlah
+            ]);
+
+            return $this->jsonResponse->oneResp('Cart item updated', [], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    public function clearCart()
+    {
+        try {
+            $customerId = $this->request->customer['id'];
+            $this->cartModel->where('customer_id', $customerId)->delete();
+            return $this->jsonResponse->oneResp('Cart cleared', [], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -310,6 +387,52 @@ class CustomerTransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Payment proof uploaded successfully. Waiting for verification.', [], 200);
 
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+    // --- TRANSACTION HISTORY API ---
+    public function getTransactions()
+    {
+        try {
+            $customerId = $this->request->customer['id'];
+            $limit = (int) $this->request->getGet('limit') ?: 10;
+            $page = (int) $this->request->getGet('page') ?: 1;
+            $offset = ($page - 1) * $limit;
+
+            $builder = $this->transactionModel
+                ->select('transaction.*')
+                ->join('transaction_meta', 'transaction_meta.transaction_id = transaction.id')
+                ->where('transaction_meta.key', 'customer_id')
+                ->where('transaction_meta.value', (string) $customerId);
+
+            $totalData = $builder->countAllResults(false);
+            $totalPage = ceil($totalData / $limit);
+
+            $transactions = $builder
+                ->orderBy('transaction.date_time', 'DESC')
+                ->limit($limit, $offset)
+                ->findAll();
+
+            // Fetch first item name for each transaction for summary
+            foreach ($transactions as &$trx) {
+                $firstItem = $this->salesProductModel
+                    ->select('sales_product.kode_barang, product.nama_barang')
+                    ->join('product', 'product.id_barang = sales_product.kode_barang', 'left')
+                    ->where('id_transaction', $trx['id'])
+                    ->first();
+
+                $trx['summary_item'] = $firstItem['nama_barang'] ?? 'Product';
+
+                // Fetch item count
+                $itemCount = $this->salesProductModel->where('id_transaction', $trx['id'])->countAllResults();
+                $trx['item_count'] = $itemCount;
+
+                // Format status labels
+                $trx['status_label'] = $this->transactionModel->getStatuses()[$trx['status']] ?? $trx['status'];
+            }
+
+            return $this->jsonResponse->multiResp('Transactions fetched', $transactions, $totalData, $totalPage, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }

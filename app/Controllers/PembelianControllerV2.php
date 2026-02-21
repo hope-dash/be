@@ -87,14 +87,19 @@ class PembelianControllerV2 extends ResourceController
 
             // Detail
             foreach ($request['detail'] as $item) {
+                $hargaSatuan = $item['harga_satuan'] ?? 0;
+                $ongkir = $item['ongkir'] ?? 0;
+                $jumlah = $item['jumlah'] ?? 0;
+                $totalHarga = round(($hargaSatuan + $ongkir) * $jumlah);
+
                 $this->pembelianDetailModel->insert([
                     'pembelian_id' => $pembelianId,
                     'kode_barang' => $item['kode_barang'],
-                    'jumlah' => $item['jumlah'],
-                    'harga_satuan' => $item['harga_satuan'],
+                    'jumlah' => $jumlah,
+                    'harga_satuan' => $hargaSatuan,
                     'harga_jual' => $item['harga_jual'] ?? 0,
-                    'ongkir' => $item['ongkir'] ?? 0,
-                    'total_harga' => (($item['harga_satuan'] + ($item['ongkir'] ?? 0)) * $item['jumlah'])
+                    'ongkir' => $ongkir,
+                    'total_harga' => $totalHarga
                 ]);
             }
 
@@ -136,7 +141,7 @@ class PembelianControllerV2 extends ResourceController
             // Calculate extra cost per unit distribution
             $totalBiayaLain = array_sum(array_column($biayas, 'jumlah'));
             $totalQtyAll = array_sum(array_column($details, 'jumlah'));
-            $biayaPerUnit = ($totalQtyAll > 0) ? ($totalBiayaLain / $totalQtyAll) : 0;
+            $biayaPerUnit = ($totalQtyAll > 0) ? round($totalBiayaLain / $totalQtyAll) : 0;
 
             // Journal Entry Basics
             // Dr Inventory (Total Value)
@@ -155,7 +160,7 @@ class PembelianControllerV2 extends ResourceController
             // Process Stock & Average Cost Updating
             foreach ($details as $item) {
                 $qty = $item['jumlah'];
-                $costPerUnit = $item['harga_satuan'] + $item['ongkir'] + $biayaPerUnit;
+                $costPerUnit = round($item['harga_satuan'] + $item['ongkir'] + $biayaPerUnit);
                 $product = $this->productModel->where('id_barang', $item['kode_barang'])->first();
 
                 if (!$product)
@@ -188,12 +193,17 @@ class PembelianControllerV2 extends ResourceController
 
                 $totalNewQty = $oldQty + $qty;
 
-                $newAvgCost = (($oldQty * $oldCost) + ($qty * $costPerUnit)) / ($totalNewQty > 0 ? $totalNewQty : 1);
+                // Round to avoid floating-point/decimal being stored as harga_modal (IDR is integer)
+                $newAvgCost = round((($oldQty * $oldCost) + ($qty * $costPerUnit)) / ($totalNewQty > 0 ? $totalNewQty : 1));
+
+                // Log description uses raw cost before rounding
+                $oldCostDisplay = round($oldCost);
+                $newAvgCostDisplay = $newAvgCost;
 
                 // Update Product Master Cost & Sell Price
                 $productUpdateData = ['harga_modal' => $newAvgCost];
                 if (!empty($item['harga_jual']) && $item['harga_jual'] > 0) {
-                    $productUpdateData['harga_jual'] = $item['harga_jual'];
+                    $productUpdateData['harga_jual'] = round($item['harga_jual']);
                 }
                 $this->productModel->update($product['id'], $productUpdateData);
 
@@ -217,7 +227,7 @@ class PembelianControllerV2 extends ResourceController
                     'balance' => $totalNewQty,
                     'reference_type' => 'PURCHASE',
                     'reference_id' => $pembelianId,
-                    'description' => "Pembelian Barang (Avg Cost Updated: {$oldCost} -> {$newAvgCost})"
+                    'description' => "Pembelian Barang (Avg Cost Updated: {$oldCostDisplay} -> {$newAvgCostDisplay})"
                 ]);
             }
 

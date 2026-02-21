@@ -221,9 +221,12 @@ $routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function ($ro
     // Cart Routes
     $routes->get('cart', 'CustomerTransactionControllerV2::getCart');
     $routes->post('cart', 'CustomerTransactionControllerV2::saveCart');
+    $routes->put('cart/(:num)', 'CustomerTransactionControllerV2::updateCart/$1');
+    $routes->delete('cart', 'CustomerTransactionControllerV2::clearCart');
     $routes->delete('cart/(:num)', 'CustomerTransactionControllerV2::deleteCartItem/$1');
 
     // Transaction Routes
+    $routes->get('transactions', 'CustomerTransactionControllerV2::getTransactions');
     $routes->post('checkout', 'CustomerTransactionControllerV2::checkout');
     $routes->post('payment/upload', 'CustomerTransactionControllerV2::uploadPaymentProof');
 });

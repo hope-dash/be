@@ -1415,9 +1415,9 @@ Mendapatkan daftar item di keranjang belanja customer.
 - **URL**: `GET /api/v2/customer/cart`
 - **Auth**: Customer JWT Token Required
 
-### B. SAVE Cart Item
+### B. SAVE Cart Item (Add to Cart)
 
-Menambah atau meng-update quantity item di keranjang.
+Menambah item ke keranjang. Jika `id_barang` DAN `id_toko` yang sama sudah ada, maka jumlahnya akan **ditambah** (inkremental).
 
 - **URL**: `POST /api/v2/customer/cart`
 - **Headers**: `Authorization: Bearer {customer_token}`
@@ -1426,12 +1426,38 @@ Menambah atau meng-update quantity item di keranjang.
 ```json
 {
   "id_barang": "PROD-001",
-  "jumlah": 2,
+  "jumlah": 2, // Akan ditambahkan ke jumlah yang sudah ada jika item sama
   "id_toko": 1 // Optional
 }
 ```
 
-### C. Checkout
+### C. UPDATE Cart Item
+
+Mengubah jumlah item di keranjang secara spesifik (Absolute). Digunakan untuk input manual atau tombol +/- di halaman keranjang.
+
+- **URL**: `PUT /api/v2/customer/cart/{id}`
+- **Headers**: `Authorization: Bearer {customer_token}`
+- **Body**:
+
+```json
+{
+  "jumlah": 5 // Set jumlah menjadi 5
+}
+```
+
+### D. DELETE Cart Item
+
+Menghapus satu item dari keranjang berdasarkan ID baris cart.
+
+- **URL**: `DELETE /api/v2/customer/cart/{id}`
+
+### E. CLEAR Cart
+
+Menghapus **seluruh** isi keranjang belanja customer.
+
+- **URL**: `DELETE /api/v2/customer/cart`
+
+### F. Checkout
 
 Mengubah isi keranjang menjadi Invoice.
 
@@ -1468,5 +1494,42 @@ Mengirim bukti transfer pembayaran dari sisi customer.
   "transaction_id": 123,
   "image_url": "https://...",
   "note": "Sudah lunas ya kak"
+}
+```
+
+### E. GET Transactions (History)
+
+Mendapatkan daftar riwayat transaksi (invoice) milik customer yang login.
+
+- **URL**: `GET /api/v2/customer/transactions`
+- **Auth**: Customer JWT Token Required
+- **Query Parameters**:
+  - `page` (optional): Nomor halaman (default: 1)
+  - `limit` (optional): Jumlah data per halaman (default: 10)
+- **Response**:
+
+```json
+{
+  "status": 200,
+  "message": "Transactions fetched",
+  "data": [
+    {
+      "id": 1,
+      "invoice": "INV2402210001",
+      "amount": 500000,
+      "actual_total": 515000,
+      "status": "WAITING_PAYMENT",
+      "status_label": "Waiting for Payment",
+      "date_time": "2026-02-21 16:00:00",
+      "summary_item": "Nama Barang Pertama",
+      "item_count": 3
+    }
+  ],
+  "pagination": {
+    "total_data": 25,
+    "total_page": 3,
+    "current_page": 1,
+    "per_page": 10
+  }
 }
 ```
