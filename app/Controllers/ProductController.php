@@ -77,8 +77,8 @@ class ProductController extends ResourceController
 
         $productData = [
             'id_barang' => $productId,
-            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
-            'description' => isset($data->description) ? $data->description : NULL,
+            'nama_barang' => $data->nama_barang ?? "",
+            'description' => $data->description ?? NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
@@ -161,8 +161,8 @@ class ProductController extends ResourceController
 
         $productData = [
             'id_barang' => $productId,
-            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
-            'description' => isset($data->description) ? $data->description : NULL,
+            'nama_barang' => $data->nama_barang ?? "",
+            'description' => $data->description ?? NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
@@ -434,8 +434,8 @@ class ProductController extends ResourceController
         }
 
         $productData = [
-            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
-            'description' => isset($data->description) ? $data->description : NULL,
+            'nama_barang' => $data->nama_barang ?? "",
+            'description' => $data->description ?? NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
@@ -531,8 +531,8 @@ class ProductController extends ResourceController
         }
 
         $productData = [
-            'nama_barang' => isset($data->nama_barang) ? $data->nama_barang : "",
-            'description' => isset($data->description) ? $data->description : NULL,
+            'nama_barang' => $data->nama_barang ?? "",
+            'description' => $data->description ?? NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
             'harga_jual' => $data->harga_jual,
@@ -798,6 +798,7 @@ class ProductController extends ResourceController
                     'product.harga_modal',
                     'product.harga_jual',
                     'product.harga_jual_toko',
+                    'product.description',
                     'product.id_model_barang',
                     'product.id_seri_barang',
                     'product.suplier',
@@ -1016,6 +1017,7 @@ class ProductController extends ResourceController
                     'kode_barang' => $kodeBarang,
                     'notes' => $p['notes'],
                     'suplier' => $suplierNames,
+                    'description' => $p['description'] ?? null,
                     'nama_barang' => $p['nama_barang'],
                     'nama_lengkap_barang' => $namaLengkap,
                     'harga_modal' => $p['harga_modal'],
@@ -1203,6 +1205,7 @@ class ProductController extends ResourceController
                     'product.harga_modal',
                     'product.harga_jual',
                     'product.harga_jual_toko',
+                    'product.description',
                     'product.id_model_barang',
                     'product.id_seri_barang',
                     'product.berat',
@@ -1396,6 +1399,7 @@ class ProductController extends ResourceController
                     'product.nama_barang',
                     'product.harga_modal',
                     'product.harga_jual',
+                    'product.description',
                     'product.id_model_barang',
                     'product.id_seri_barang',
                     'model_barang.nama_model as nama_model',
@@ -1533,6 +1537,7 @@ class ProductController extends ResourceController
                     'nama_lengkap_barang' => $namaLengkap,
                     'nama_model' => $p['nama_model'] ?? null,
                     'seri' => $p['seri'] ?? null,
+                    'description' => $p['description'] ?? null,
                     'harga_jual' => (int) round($hargaJualFinal), // Harga setelah discount
                     'stock' => $stockByProduct[$p['id_barang']] ?? [],
                     'images' => $imageMap[$p['id']] ?? [],

@@ -1549,6 +1549,7 @@ Mendapatkan daftar riwayat transaksi (invoice) milik customer yang login.
 - **Query Parameters**:
   - `page` (optional): Nomor halaman (default: 1)
   - `limit` (optional): Jumlah data per halaman (default: 10)
+  - `status` (optional): Filter status, bisa lebih dari satu dipisahkan koma (contoh: `status=WAITING_PAYMENT,SUCCESS`)
 - **Response**:
 
 ```json

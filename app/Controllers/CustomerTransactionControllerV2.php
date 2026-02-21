@@ -67,7 +67,7 @@ class CustomerTransactionControllerV2 extends ResourceController
             $customerId = $this->request->customer['id'];
 
             $items = $this->cartModel
-                ->select('cart.*, product.id as product_table_id, product.nama_barang, product.harga_jual, model_barang.nama_model, seri.seri, toko.toko_name, toko.alamat as toko_alamat')
+                ->select('cart.*, product.id as product_table_id, product.nama_barang,product.berat, product.harga_jual, model_barang.nama_model, seri.seri, toko.toko_name, toko.alamat as toko_alamat')
                 ->join('product', 'product.id_barang = cart.id_barang', 'left')
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
@@ -116,6 +116,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                     'id' => $item['id'],
                     'id_barang' => $item['id_barang'],
                     'nama_barang' => $item['nama_barang'],
+                    'berat' => $item['berat'],
                     'nama_lengkap_barang' => $namaLengkap,
                     'harga_jual' => (int) $item['harga_jual'],
                     'jumlah' => (int) $item['jumlah'],
@@ -309,9 +310,6 @@ class CustomerTransactionControllerV2 extends ResourceController
                     // Price Logic (Customer Discount)
                     $originalPrice = (float) $item['harga_jual'];
                     $itemDiscountValue = 0;
-                    if (!empty($customer['discount_type'])) {
-                        $itemDiscountValue = $this->calculateDiscount($originalPrice, $customer['discount_type'], (float) $customer['discount_value']);
-                    }
                     $finalPrice = max(0, $originalPrice - $itemDiscountValue);
 
                     $grossAmount += ($originalPrice * $qty);
@@ -520,8 +518,11 @@ class CustomerTransactionControllerV2 extends ResourceController
     {
         try {
             $customerId = $this->request->customer['id'];
+
             $limit = (int) $this->request->getGet('limit') ?: 10;
             $page = (int) $this->request->getGet('page') ?: 1;
+            $statusParam = $this->request->getGet('status');
+            $deliveryStatusParam = $this->request->getGet('delivery_status');
             $offset = ($page - 1) * $limit;
 
             $builder = $this->transactionModel
@@ -529,6 +530,16 @@ class CustomerTransactionControllerV2 extends ResourceController
                 ->join('transaction_meta', 'transaction_meta.transaction_id = transaction.id')
                 ->where('transaction_meta.key', 'customer_id')
                 ->where('transaction_meta.value', (string) $customerId);
+
+            if (!empty($statusParam)) {
+                $statuses = explode(',', $statusParam);
+                $builder->whereIn('transaction.status', $statuses);
+            }
+
+            if (!empty($deliveryStatusParam)) {
+                $deliveryStatuses = explode(',', $deliveryStatusParam);
+                $builder->whereIn('transaction.delivery_status', $deliveryStatuses);
+            }
 
             $totalData = $builder->countAllResults(false);
             $totalPage = ceil($totalData / $limit);

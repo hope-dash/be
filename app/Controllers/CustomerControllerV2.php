@@ -532,7 +532,7 @@ class CustomerControllerV2 extends ResourceController
                 'nama_lengkap_barang' => $namaLengkap,
                 'nama_model' => $product['nama_model'] ?? null,
                 'seri' => $product['seri'] ?? null,
-                'deskripsi' => $product['deskripsi'] ?? null,
+                'description' => $product['description'] ?? null,
                 'harga_jual' => (int) $basePrice,
                 'customer_price' => (int) $customerPrice,
                 'discount_applied' => (int) $discountApplied,
