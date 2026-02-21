@@ -23,6 +23,8 @@ $routes->get('api/dropdown/seri', 'BarangController::dropdownSeri');
 $routes->get('api/dropdown/seri-by-product', 'ProductController::getListSeribySearchProduct');
 $routes->get('api/product/(:num)', 'ProductController::getDetailById/$1');
 $routes->post('api/closing/auto-monthly', 'ClosingController::autoCloseMonthly');
+$routes->post('api/v2/upload/image', 'UploadController::uploadImage', ['filter' => 'anyJwtAuth']);
+$routes->post('api/upload/image', 'UploadController::uploadImage', ['filter' => 'anyJwtAuth']);
 
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
@@ -140,6 +142,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->get('transaction/(:num)', 'TransactionControllerV2::getDetail/$1');
         $routes->post('transaction/count', 'TransactionControllerV2::calculate');
         $routes->post('transaction/(:num)/payment', 'TransactionControllerV2::addPayment/$1');
+        $routes->post('transaction/(:num)/verify-payment', 'TransactionControllerV2::verifyPayment/$1');
         $routes->post('transaction/(:num)/cancel', 'TransactionControllerV2::cancel/$1');
         $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
         $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
@@ -192,7 +195,6 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->put('voucher/(:num)', 'VoucherController::update/$1');
         $routes->delete('voucher/(:num)', 'VoucherController::delete/$1');
         // Global Upload
-        $routes->post('upload/image', 'UploadController::uploadImage');
     });
 
 });

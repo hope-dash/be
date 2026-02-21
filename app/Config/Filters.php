@@ -37,6 +37,7 @@ class Filters extends BaseFilters
         'performance' => PerformanceMetrics::class,
         'jwtAuth' => \App\Filters\JwtMiddleware::class,
         'customerJwtAuth' => \App\Filters\CustomerJwtMiddleware::class,
+        'anyJwtAuth' => \App\Filters\AnyJwtMiddleware::class,
     ];
 
     /**

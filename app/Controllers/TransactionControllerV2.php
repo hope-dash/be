@@ -465,10 +465,10 @@ class TransactionControllerV2 extends ResourceController
                 'image_url' => $data->image ?? null
             ]);
 
-            $accountCode = ($method == 'CASH') ? '1001' : '1002';
+            $accountCode = ($method == 'CASH') ? '10' . $trx['id_toko'] . '1' : '10' . $trx['id_toko'] . '2';
             $journalId = $this->createJournal('PAYMENT', $id, $trx['invoice'], date('Y-m-d'), "Payment for {$trx['invoice']}", $trx['id_toko']);
             $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Cash
-            $this->addJournalItem($journalId, '1003', 0, $amount, $trx['id_toko']); // Cr AR
+            $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
 
             $newTotalPaid = $trx['total_payment'] + $amount;
             $newStatus = ($newTotalPaid >= $trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
@@ -493,6 +493,99 @@ class TransactionControllerV2 extends ResourceController
             return $this->jsonResponse->oneResp('Payment added successfully', ['new_status' => $newStatus], 200);
 
         } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    public function verifyPayment($id = null)
+    {
+        $data = $this->request->getJSON();
+        $userId = $this->request->user['user_id'] ?? 0;
+        $action = strtoupper($data->action ?? ''); // ACCEPT or REJECT
+
+        if (!$id) {
+            return $this->jsonResponse->error("ID is required", 400);
+        }
+
+        $trx = $this->transactionModel->find($id);
+        if (!$trx) {
+            return $this->jsonResponse->error("Transaction not found", 404);
+        }
+
+        // Find the pending payment for this transaction
+        $payment = $this->paymentModel->where('transaction_id', $id)
+            ->where('status', 'PENDING')
+            ->orderBy('id', 'DESC')
+            ->first();
+
+        if (!$payment) {
+            return $this->jsonResponse->error("No pending payment found for this transaction", 404);
+        }
+
+        $this->db->transStart();
+        try {
+            if ($action === 'REJECT') {
+                // Update payment status
+                $this->paymentModel->update($payment['id'], ['status' => 'REJECTED']);
+
+                // Set transaction status back to WAITING_PAYMENT
+                $this->transactionModel->update($id, [
+                    'status' => 'WAITING_PAYMENT'
+                ]);
+
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'PAYMENT_REJECTED',
+                    'target_table' => 'transaction',
+                    'target_id' => $id,
+                    'description' => "Rejected payment of {$payment['amount']} for {$trx['invoice']}. Reason: " . ($data->reason ?? 'None'),
+                    'detail' => ['payment_id' => $payment['id'], 'reason' => $data->reason ?? null]
+                ]);
+            } else if ($action === 'ACCEPT') {
+                // Update payment status
+                $this->paymentModel->update($payment['id'], ['status' => 'VERIFIED']);
+
+                // Journal Entry (Following addPayment logic)
+                // Transfers typically go to Bank (1002)
+                $accountCode = '10' . $trx['id_toko'] . '2';
+                $amount = (float) $payment['amount'];
+
+                $journalId = $this->createJournal('PAYMENT', $id, $trx['invoice'], date('Y-m-d'), "Payment verification for {$trx['invoice']}", $trx['id_toko']);
+                $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Bank
+                $this->addJournalItem($journalId, '10'. $trx['id_toko']'3', 0, $amount, $trx['id_toko']); // Cr AR
+
+                // Update Transaction Status
+                $newTotalPaid = (float) $trx['total_payment'] + $amount;
+                // actual_total is the target. If it's reached, it's PAID.
+                $newStatus = ($newTotalPaid >= (float) $trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
+
+                $this->transactionModel->update($id, [
+                    'total_payment' => $newTotalPaid,
+                    'status' => $newStatus,
+                    'delivery_status' => 'PENDING'
+                ]);
+
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'PAYMENT_VERIFIED',
+                    'target_table' => 'transaction',
+                    'target_id' => $id,
+                    'description' => "Accepted payment of {$amount} for {$trx['invoice']}",
+                    'detail' => ['payment_id' => $payment['id'], 'amount' => $amount]
+                ]);
+            } else {
+                throw new \Exception("Invalid action: $action. Use ACCEPT or REJECT.");
+            }
+
+            $this->db->transComplete();
+            if ($this->db->transStatus() === false) {
+                throw new \Exception("Database transaction failed");
+            }
+
+            return $this->jsonResponse->oneResp("Payment " . strtolower($action) . "ed successfully", ['new_status' => $newStatus ?? null], 200);
+
+        } catch (\Exception $e) {
+            $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -876,10 +969,10 @@ class TransactionControllerV2 extends ResourceController
 
                             // If free shipping, we settle the payable (2001) that was created during invoice creation.
                             // Otherwise, record it as a direct shipping expense (5006).
-                            $debitCode = $isFreeOngkir ? '20'.$trx['id_toko'].'1' : '50'.$trx['id_toko'].'6';
+                            $debitCode = $isFreeOngkir ? '20' . $trx['id_toko'] . '1' : '50' . $trx['id_toko'] . '6';
 
                             $this->addJournalItem($journalId, $debitCode, $shippingCost, 0); // Dr Expense/Payable
-                            $this->addJournalItem($journalId, '10'.$trx['id_toko'].'2', 0, $shippingCost); // Cr Cash
+                            $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '2', 0, $shippingCost); // Cr Cash
                         }
                     }
                 }
@@ -1033,6 +1126,14 @@ class TransactionControllerV2 extends ResourceController
                 $metaMap[$m['key']] = $m['value'];
             }
             $transaction['meta'] = $metaMap;
+
+            // Security Check: If hit by Customer, verify ownership
+            if (isset($this->request->customer)) {
+                $customerId = $this->request->customer['id'];
+                if (!isset($metaMap['customer_id']) || (int) $metaMap['customer_id'] !== (int) $customerId) {
+                    return $this->jsonResponse->error("Unauthorized: You do not have permission to view this transaction.", 403);
+                }
+            }
 
             // 3. Get Items (Sales Product)
             $items = $db->table('sales_product sp')
