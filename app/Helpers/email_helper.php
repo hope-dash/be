@@ -124,7 +124,7 @@ if (!function_exists('get_email_template')) {
         </div>
         <div class="footer">
             <p>&copy; ' . date('Y') . ' Hope Sparepart. All rights reserved.</p>
-            <p>Jika Anda memiliki pertanyaan, silakan hubungi kami di admin@hopesparepart.com</p>
+            <p>Jika Anda memiliki pertanyaan, silakan hubungi support wa ke +62 889-8099-8878 atau email admin@hopesparepart.com</p>
         </div>
     </div>
 </body>

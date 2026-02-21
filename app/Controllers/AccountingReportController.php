@@ -406,7 +406,7 @@ class AccountingReportController extends ResourceController
 
             // Find all accrual journal items for this transaction
             $jidItems = $this->db->table('journal_items ji')
-                ->select('a.code, a.name, a.type, ji.debit, ji.credit')
+                ->select('a.code, a.name, a.type, ji.debit, ji.credit, j.reference_type')
                 ->join('journals j', 'j.id = ji.journal_id')
                 ->join('accounts a', 'a.id = ji.account_id')
                 ->where('j.reference_id', $p['transaction_id'])
@@ -422,11 +422,24 @@ class AccountingReportController extends ResourceController
                 $recognized = $bal * $ratio;
 
                 if ($item['type'] === 'REVENUE') {
-                    if (!isset($revenueMap[$item['code']])) {
-                        $revenueMap[$item['code']] = ['code' => $item['code'], 'name' => $item['name'], 'balance' => 0];
+                    // Logic: Original sales stay in revenue. Refunds/Cancellations move to Expenses.
+                    if ($recognized < 0 && in_array($item['reference_type'], ['CANCEL_SALES', 'RETUR_SALES'])) {
+                        $virtualCode = $item['code'];
+                        $virtualName = $item['name'] . ' (Refund)';
+                        $val = abs($recognized); // Convert negative revenue reduction to positive expense
+
+                        if (!isset($expenseMap[$virtualCode])) {
+                            $expenseMap[$virtualCode] = ['code' => $virtualCode, 'name' => $virtualName, 'balance' => 0];
+                        }
+                        $expenseMap[$virtualCode]['balance'] += $val;
+                    } else {
+                        if (!isset($revenueMap[$item['code']])) {
+                            $revenueMap[$item['code']] = ['code' => $item['code'], 'name' => $item['name'], 'balance' => 0];
+                        }
+                        $revenueMap[$item['code']]['balance'] += $recognized;
                     }
-                    $revenueMap[$item['code']]['balance'] += $recognized;
                 } else {
+                    // EXPENSE type (e.g. COGS or reversal of COGS)
                     if (!isset($expenseMap[$item['code']])) {
                         $expenseMap[$item['code']] = ['code' => $item['code'], 'name' => $item['name'], 'balance' => 0];
                     }
