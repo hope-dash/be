@@ -20,3 +20,5 @@ application/logs/*
 
 .env
 .env.local
+
+public/hope

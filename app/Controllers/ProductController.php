@@ -29,7 +29,7 @@ class ProductController extends ResourceController
 
     public function __construct()
     {
-        helper('log');
+        helper(['log', 'url']);
         $this->modelBarangModel = new ModelBarangModel();
         $this->imageModel = new ImageModel();
         $this->productModel = new ProductModel();
@@ -57,6 +57,7 @@ class ProductController extends ResourceController
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
+            'berat' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -86,6 +87,7 @@ class ProductController extends ResourceController
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             'dropship' => $data->dropship ?? 0,
+            'berat' => $data->berat ?? 0,
             "created_by" => $token['user_id'],
         ];
 
@@ -163,12 +165,13 @@ class ProductController extends ResourceController
             'description' => isset($data->description) ? $data->description : NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
-            'harga_jual' => $data->harga_jual_toko,
+            'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
             'suplier' => $data->suplier ?? null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             'berat' => $data->berat ?? 0,
+            'dropship' => $data->dropship ?? 0,
             "created_by" => $token['user_id'],
         ];
 
@@ -184,7 +187,7 @@ class ProductController extends ResourceController
             ],
         ]);
 
-        return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId], 201);
+        return $this->jsonResponse->oneResp('Add ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $nextId, 'id_barang' => $productId], 201);
     }
     public function uploadImages()
     {
@@ -198,6 +201,17 @@ class ProductController extends ResourceController
             ->findAll();
 
         $existingImageUrls = array_column($existingImages, 'url');
+
+        $uploadPath = ROOTPATH . 'public/hope/images';
+        if (!is_dir($uploadPath)) {
+            if (!mkdir($uploadPath, 0777, true)) {
+                return $this->jsonResponse->error("Gagal membuat direktori upload: " . $uploadPath, 500);
+            }
+        }
+
+        if (!is_writable($uploadPath)) {
+            return $this->jsonResponse->error("Direktori upload tidak dapat ditulis: " . $uploadPath, 500);
+        }
 
         if (!empty($images['image'])) {
             foreach ($images['image'] as $image) {
@@ -213,7 +227,7 @@ class ProductController extends ResourceController
                         $finalPath = ROOTPATH . 'public/hope/images/' . $webpName;
                         $image->move(ROOTPATH . 'public/hope/images', $webpName);
 
-                        $finalImagePath = 'hope/images/' . $webpName;
+                        $finalImagePath = base_url('hope/images/' . $webpName);
                         $uploadedImagePaths[] = $finalImagePath;
 
                         if (!in_array($finalImagePath, $existingImageUrls)) {
@@ -249,13 +263,17 @@ class ProductController extends ResourceController
                             return $this->jsonResponse->oneResp('Unsupported image format', [], 400);
                     }
 
+                    if (!$source) {
+                        return $this->jsonResponse->oneResp('Failed to process image file', [], 400);
+                    }
+
                     $webpName = bin2hex(random_bytes(10)) . '.webp';
                     $webpPath = ROOTPATH . 'public/hope/images/' . $webpName;
 
                     imagewebp($source, $webpPath, 80);
                     imagedestroy($source);
 
-                    $finalImagePath = 'hope/images/' . $webpName;
+                    $finalImagePath = base_url('hope/images/' . $webpName);
                     $uploadedImagePaths[] = $finalImagePath;
 
                     if (!in_array($finalImagePath, $existingImageUrls)) {
@@ -398,6 +416,7 @@ class ProductController extends ResourceController
             'suplier' => 'permit_empty',
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
+            'berat' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -425,6 +444,7 @@ class ProductController extends ResourceController
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             'dropship' => $data->dropship ?? 0,
+            'berat' => $data->berat ?? 0,
             "updated_by" => $token['user_id'],
         ];
 
@@ -515,12 +535,13 @@ class ProductController extends ResourceController
             'description' => isset($data->description) ? $data->description : NULL,
             'id_seri_barang' => $data->id_seri_barang ?? null,
             'harga_modal' => $data->harga_modal,
-            'harga_jual' => $data->harga_jual_toko,
+            'harga_jual' => $data->harga_jual,
             'harga_jual_toko' => $data->harga_jual_toko,
             'suplier' => $data->suplier ?? null,
             'id_model_barang' => $data->id_model,
             'notes' => $data->notes ?? null,
             'berat' => $data->berat ?? 0,
+            'dropship' => $data->dropship ?? 0,
             "updated_by" => $token['user_id'],
         ];
 
@@ -564,7 +585,7 @@ class ProductController extends ResourceController
             }
         }
 
-        return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id], 200);
+        return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id, 'id_barang' => $oldProductData['id_barang']], 200);
     }
 
     private function getProductDetailArray($id)
@@ -781,11 +802,13 @@ class ProductController extends ResourceController
                     'product.id_seri_barang',
                     'product.suplier',
                     'product.dropship',
+                    'product.berat',
                     'model_barang.nama_model',
                     'seri.seri',
                 ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.deleted_at IS NULL');
 
             // === Filter ===
             if (!empty($namaProduct)) {
@@ -1001,6 +1024,7 @@ class ProductController extends ResourceController
                     'nama_model' => $p['nama_model'] ?? null,
                     'seri' => $p['seri'] ?? null,
                     'dropship' => $p['dropship'] ?? null,
+                    'berat' => $p['berat'] ?? null,
                     'stock' => $stockList,
                     'total_stock_ready' => $totalStockReady,
                     'total_stock' => $totalStockReady + $totalHold, // total ready + hold
@@ -1912,6 +1936,7 @@ class ProductController extends ResourceController
                 'suplier' => implode(',', array_filter($suplierIds)),
                 'id_model_barang' => $categoryMap[$categoryName],
                 'dropship' => $row['E'] === "TRUE" ? 1 : 0,
+                'berat' => isset($row['I']) ? (float) $row['I'] : 0, // Assuming column I is Berat
                 'created_by' => $token['user_id'],
             ];
             $dataToInsert[] = $productMap[trim($row['A'])];
