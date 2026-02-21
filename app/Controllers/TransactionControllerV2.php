@@ -37,7 +37,7 @@ class TransactionControllerV2 extends ResourceController
 
     public function __construct()
     {
-        helper('log');
+        helper(['log', 'email_helper']);
         $this->transactionModel = new TransactionModel();
         $this->salesProductModel = new SalesProductModel();
         $this->productModel = new ProductModel();
@@ -582,6 +582,17 @@ class TransactionControllerV2 extends ResourceController
                 throw new \Exception("Database transaction failed");
             }
 
+            if ($action === 'ACCEPT' && $this->db->transStatus() !== false) {
+                // Re-fetch trx data with customer information for email
+                $trxWithCust = $this->transactionModel
+                    ->select('transaction.*, customer.email, customer.nama_customer')
+                    ->join('customer', 'customer.id = transaction.customer_id', 'left')
+                    ->find($id);
+                if ($trxWithCust) {
+                    send_payment_confirmed_email($trxWithCust);
+                }
+            }
+
             return $this->jsonResponse->oneResp("Payment " . strtolower($action) . "ed successfully", ['new_status' => $newStatus ?? null], 200);
 
         } catch (\Exception $e) {
@@ -981,14 +992,29 @@ class TransactionControllerV2 extends ResourceController
             if ($resi) {
                 $this->updateMeta($id, 'resi', $resi);
             }
-
             if ($courier) {
                 $this->updateMeta($id, 'courier', $courier);
             }
 
             $this->db->transComplete();
 
-            return $this->jsonResponse->oneResp('Delivery status updated', [], 200);
+            if ($this->db->transStatus() !== false) {
+                // Re-fetch for email context
+                $trxWithCust = $this->transactionModel
+                    ->select('transaction.*, customer.email, customer.nama_customer')
+                    ->join('customer', 'customer.id = transaction.customer_id', 'left')
+                    ->find($id);
+
+                if ($trxWithCust) {
+                    if (strtoupper($status ?? '') === 'READY') {
+                        send_order_ready_email($trxWithCust);
+                    } else if (strtoupper($status ?? '') === 'SHIPPED') {
+                        send_order_shipped_email($trxWithCust, $resi, $courier);
+                    }
+                }
+            }
+
+            return $this->jsonResponse->oneResp("Delivery status updated successfully", [], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);

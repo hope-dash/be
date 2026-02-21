@@ -284,3 +284,82 @@ if (!function_exists('send_invoice_email')) {
         return enqueue_email($email, 'Tagihan Pesanan #' . $invoiceDisplay . ' - Hope Sparepart', $html);
     }
 }
+
+if (!function_exists('send_payment_confirmed_email')) {
+    /**
+     * Email when payment is verified and packaging starts
+     */
+    function send_payment_confirmed_email($transaction)
+    {
+        if (empty($transaction['customer']['email']))
+            return false;
+
+        $email = $transaction['customer']['email'];
+        $name = $transaction['customer']['nama_customer'];
+        $invoice = $transaction['invoice'];
+
+        $content = '
+            <h2>Pembayaran Diterima!</h2>
+            <p>Halo, ' . htmlspecialchars($name) . '. Pembayaran Anda untuk pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah berhasil diverifikasi.</p>
+            <p>Saat ini tim kami sedang menyiapkan dan mengemas produk pesanan Anda dengan teliti.</p>
+            <p>Kami akan memberikan update selanjutnya segera setelah paket siap dikirim atau diambil.</p>
+            <p>Terima kasih telah bersabar!</p>
+        ';
+
+        $html = get_email_template('Pembayaran Terverifikasi - ' . $invoice, $content);
+        return enqueue_email($email, 'Pembayaran Diverifikasi & Pesanan Sedang Disiapkan #' . $invoice, $html);
+    }
+}
+
+if (!function_exists('send_order_ready_email')) {
+    /**
+     * Email when order status is READY
+     */
+    function send_order_ready_email($transaction)
+    {
+        if (empty($transaction['customer']['email']))
+            return false;
+
+        $email = $transaction['customer']['email'];
+        $name = $transaction['customer']['nama_customer'];
+        $invoice = $transaction['invoice'];
+
+        $content = '
+            <h2>Pesanan Anda Sudah Siap!</h2>
+            <p>Halo, ' . htmlspecialchars($name) . '. Kabar baik! Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah selesai kami kemas dan siap untuk tahap selanjutnya.</p>
+            <p>Jika Anda memilih pengiriman via kurir, paket akan segera diserahkan ke pihak ekspedisi. Jika Anda memilih ambil di tempat, Anda sudah bisa datang ke toko kami sesuai jam operasional.</p>
+        ';
+
+        $html = get_email_template('Pesanan Siap - ' . $invoice, $content);
+        return enqueue_email($email, 'Pesanan Anda Siap Dikirim/Diambil #' . $invoice, $html);
+    }
+}
+
+if (!function_exists('send_order_shipped_email')) {
+    /**
+     * Email when order status is SHIPPED
+     */
+    function send_order_shipped_email($transaction, $receiptNumber, $courierName)
+    {
+        if (empty($transaction['customer']['email']))
+            return false;
+
+        $email = $transaction['customer']['email'];
+        $name = $transaction['customer']['nama_customer'];
+        $invoice = $transaction['invoice'];
+
+        $content = '
+            <h2>Pesanan Dalam Perjalanan!</h2>
+            <p>Halo, ' . htmlspecialchars($name) . '. Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah kami serahkan ke kurir.</p>
+            <div class="info-box">
+                <p><strong>Kurir:</strong> ' . htmlspecialchars($courierName ?: '-') . '</p>
+                <p><strong>Nomor Resi:</strong> ' . htmlspecialchars($receiptNumber ?: '-') . '</p>
+            </div>
+            <p>Anda dapat melacak status pengiriman melalui website ekspedisi terkait menggunakan nomor resi di atas.</p>
+            <p>Terima kasih telah berbelanja di Hope Sparepart!</p>
+        ';
+
+        $html = get_email_template('Pesanan Dikirim - ' . $invoice, $content);
+        return enqueue_email($email, 'Pesanan Anda Sudah Dikirim #' . $invoice, $html);
+    }
+}
