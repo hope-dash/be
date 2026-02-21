@@ -39,11 +39,11 @@ class CustomerControllerV2 extends ResourceController
         try {
             $data = $this->request->getJSON();
 
-            // Validation
+            // Validation (Removed is_unique because we handle it manually for empty password cases)
             $validation = \Config\Services::validation();
             $validation->setRules([
                 'nama_customer' => 'required',
-                'email' => 'required|valid_email|is_unique[customer.email]',
+                'email' => 'required|valid_email',
                 'password' => 'required|min_length[6]',
                 'no_hp_customer' => 'required',
             ]);
@@ -51,6 +51,21 @@ class CustomerControllerV2 extends ResourceController
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
             }
+
+            // Check if customer already exists by email
+            $existingByEmail = $this->customerModel->where('email', $data->email)->first();
+            if ($existingByEmail && !empty($existingByEmail['password'])) {
+                return $this->jsonResponse->error("Email sudah terdaftar", 400);
+            }
+
+            // Check if customer already exists by phone number
+            $existingByPhone = $this->customerModel->where('no_hp_customer', $data->no_hp_customer)->first();
+            if ($existingByPhone && !empty($existingByPhone['password'])) {
+                return $this->jsonResponse->error("Nomor HP sudah terdaftar", 400);
+            }
+
+            // Decide which record to update (Priority: Email match, then Phone match)
+            $existingCustomer = $existingByEmail ?? $existingByPhone;
 
             // Generate email verification token
             $verificationToken = bin2hex(random_bytes(32));
@@ -68,9 +83,17 @@ class CustomerControllerV2 extends ResourceController
                 'kode_pos' => $data->kode_pos ?? '',
                 'type' => 'regular',
                 'email_verification_token' => $verificationToken,
+                'email_verified_at' => null, // Ensure it needs to be verified
             ];
 
-            $customerId = $this->customerModel->insert($customerData);
+            if ($existingCustomer) {
+                // Update existing record if password was empty (Linked via Email or Phone)
+                $this->customerModel->update($existingCustomer['id'], $customerData);
+                $customerId = $existingCustomer['id'];
+            } else {
+                // Insert new record
+                $customerId = $this->customerModel->insert($customerData);
+            }
 
             if (!$customerId) {
                 return $this->jsonResponse->error("Registration failed", 500);
@@ -291,23 +314,16 @@ class CustomerControllerV2 extends ResourceController
             $productIds = array_unique(array_column($products, 'id_barang'));
             $stockMap = [];
 
-            // Load toko details if needed map
-            $tokoMap = [];
-            if (!$idToko) {
-                $tokoModel = new \App\Models\TokoModel();
-                $allTokos = $tokoModel->findAll();
-                foreach ($allTokos as $t) {
-                    $tokoMap[$t['id']] = $t['toko_name'];
-                }
-            }
-
             if (!empty($productIds)) {
-                $stockBuilder = $this->db->table('stock')->whereIn('id_barang', $productIds);
+                $stockBuilder = $this->db->table('stock')
+                    ->select('stock.*, toko.toko_name')
+                    ->join('toko', 'toko.id = stock.id_toko')
+                    ->where('toko.type', 'CABANG')
+                    ->whereIn('id_barang', $productIds);
 
                 if ($idToko) {
                     $stockBuilder->where('id_toko', $idToko);
                 }
-                // Remove stock > 0 filter to show ALL stock records including 0
 
                 $stocks = $stockBuilder->get()->getResultArray();
 
@@ -327,7 +343,7 @@ class CustomerControllerV2 extends ResourceController
                         $stockMap[$s['id_barang']]['total'] += (int) $s['stock'];
                         $stockMap[$s['id_barang']]['details'][] = [
                             'id_toko' => $s['id_toko'],
-                            'toko_name' => $tokoMap[$s['id_toko']] ?? 'Unknown Store',
+                            'toko_name' => $s['toko_name'] ?? 'Unknown Store',
                             'stock' => (int) $s['stock']
                         ];
                     }
@@ -494,9 +510,9 @@ class CustomerControllerV2 extends ResourceController
             // Fetch Stock Breakdown
             $stockDetails = $this->db->table('stock')
                 ->select('stock.stock, stock.id_toko, toko.toko_name')
-                ->join('toko', 'toko.id = stock.id_toko', 'left')
+                ->join('toko', 'toko.id = stock.id_toko')
+                ->where('toko.type', 'CABANG')
                 ->where('stock.id_barang', $product['id_barang'])
-                // ->where('stock.stock >', 0) // Show all stores even if stock is 0
                 ->get()
                 ->getResultArray();
 
