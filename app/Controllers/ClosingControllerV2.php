@@ -93,10 +93,10 @@ class ClosingControllerV2 extends ResourceController
             }
 
             // 3. Post to Retained Earnings / Equity (3001)
-            $equityAccount = $this->accountModel->getByBaseCode('3001', $tokoId); // Owner Equity
+            $equityAccount = $this->accountModel->getByBaseCode('30' . $tokoId . '1', $tokoId); // Owner Equity
             if (!$equityAccount) {
                 // Fallback
-                $equityAccount = $this->accountModel->where('code', '3001')->first();
+                $equityAccount = $this->accountModel->where('code', '30' . $tokoId . '1')->first();
             }
             if (!$equityAccount)
                 throw new \Exception("Equity Account 3001 not found for this store");

@@ -172,9 +172,9 @@ class InventoryController extends ResourceController
             // Fallback to base account if store-specific not found (safety)
             $account = $this->accountModel->where('code', $accountCode)->first();
 
-            if (!$account && in_array($accountCode, ['1005', '1006'])) {
+            if (!$account && in_array($accountCode, ['10' . $tokoId . '5', '10' . $tokoId . '6'])) {
                 // Seed if missing
-                $name = ($accountCode == '1005') ? 'Funds/Goods In Transit' : 'Inventory Cabangan (Transit)';
+                $name = ($accountCode == '10' . $tokoId . '5') ? 'Funds/Goods In Transit' : 'Inventory Cabangan (Transit)';
                 $this->accountModel->insert(['code' => $accountCode, 'name' => $name, 'type' => 'ASSET', 'normal_balance' => 'DEBIT']);
                 $account = $this->accountModel->where('code', $accountCode)->first();
             }

@@ -151,10 +151,10 @@ class PembelianControllerV2 extends ResourceController
             $journalId = $this->createJournal('PURCHASE', $pembelianId, "PO-{$pembelianId}", $pembelian['tanggal_belanja'], "Pembelian Barang", $pembelian['id_toko']);
 
             // Debit Inventory
-            $this->addJournalItem($journalId, '1004', $pembelian['total_belanja'], 0, $pembelian['id_toko']);
+            $this->addJournalItem($journalId, '10' . $pembelian['id_toko'] . '4', $pembelian['total_belanja'], 0, $pembelian['id_toko']);
 
             // Credit Bank (Using Bank Account 1002 default)
-            $this->addJournalItem($journalId, '1002', 0, $pembelian['total_belanja'], $pembelian['id_toko']);
+            $this->addJournalItem($journalId, '10' . $pembelian['id_toko'] . '2', 0, $pembelian['total_belanja'], $pembelian['id_toko']);
 
 
             // Process Stock & Average Cost Updating

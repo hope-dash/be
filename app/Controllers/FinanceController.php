@@ -99,7 +99,7 @@ class FinanceController extends ResourceController
 
             $jid = $this->createJournal('DIVIDEND', "DIV-" . date('ymdHis'), "Profit Distribution (Withdrawal)", $data->date ?? date('Y-m-d'), $data->id_toko);
 
-            $this->addJournalItem($jid, '3001', $withdrawAmount, 0, $data->id_toko); // Dr Equity (Reduces Equity)
+            $this->addJournalItem($jid, '30' . $data->id_toko . '1', $withdrawAmount, 0, $data->id_toko); // Dr Equity (Reduces Equity)
             $this->addJournalItem($jid, $data->account_code, 0, $withdrawAmount, $data->id_toko); // Cr Bank
 
             $this->db->transComplete();
@@ -130,9 +130,9 @@ class FinanceController extends ResourceController
             // Fallback for direct code
             $account = $this->accountModel->where('code', $accountCode)->first();
 
-            if (!$account && $accountCode == '1005') {
+            if (!$account && $accountCode == '10' . $tokoId . '5') {
                 $this->accountModel->insert(['code' => $accountCode, 'name' => 'Funds In Transit', 'type' => 'ASSET', 'normal_balance' => 'DEBIT']);
-                $account = $this->accountModel->where('code', '1005')->first();
+                $account = $this->accountModel->where('code', '10' . $tokoId . '5')->first();
             } else if (!$account) {
                 throw new \Exception("Account $accountCode not found for this store");
             }

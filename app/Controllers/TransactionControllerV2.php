@@ -249,29 +249,29 @@ class TransactionControllerV2 extends ResourceController
             $journalId = $this->createJournal('SALES', $trxId, $trxData['invoice'], date('Y-m-d'), "Invoice #{$trxData['invoice']}", $data->id_toko);
 
             // 1. Dr AR (Total Receivables)
-            $this->addJournalItem($journalId, '1003', $grandTotal, 0, $data->id_toko);
+            $this->addJournalItem($journalId, '10' . $data->id_toko . '3', $grandTotal, 0, $data->id_toko);
 
             // 2. Dr Discount (if any)
             if ($totalDiscount > 0) {
-                $this->addJournalItem($journalId, '4002', $totalDiscount, 0, $data->id_toko);
+                $this->addJournalItem($journalId, '40' . $data->id_toko . '2', $totalDiscount, 0, $data->id_toko);
             }
 
             // 3. Cr Sales Revenue (Gross Sales from Items)
-            $this->addJournalItem($journalId, '4001', 0, $grossAmount, $data->id_toko);
+            $this->addJournalItem($journalId, '40' . $data->id_toko . '1', 0, $grossAmount, $data->id_toko);
 
             // 4. Cr PPN Payable (using 2001 or 2005 if exists)
             if ($ppnValue > 0) {
-                $this->addJournalItem($journalId, '2001', 0, $ppnValue, $data->id_toko);
+                $this->addJournalItem($journalId, '20' . $data->id_toko . '1', 0, $ppnValue, $data->id_toko);
             }
 
             // 5. Shipping Logic
             if (!$isFreeOngkir && $shippingCost > 0) {
-                $this->addJournalItem($journalId, '4001', 0, $shippingCost, $data->id_toko);
+                $this->addJournalItem($journalId, '40' . $data->id_toko . '1', 0, $shippingCost, $data->id_toko);
             }
 
             if ($isFreeOngkir && $shippingCost > 0) {
-                $this->addJournalItem($journalId, '5006', $shippingCost, 0, $data->id_toko); // Dr Expense
-                $this->addJournalItem($journalId, '2001', 0, $shippingCost, $data->id_toko); // Cr Payable
+                $this->addJournalItem($journalId, '50' . $data->id_toko . '6', $shippingCost, 0, $data->id_toko); // Dr Expense
+                $this->addJournalItem($journalId, '20' . $data->id_toko . '1', 0, $shippingCost, $data->id_toko); // Cr Payable
             }
 
 
@@ -314,8 +314,8 @@ class TransactionControllerV2 extends ResourceController
             // -- Accounting: COGS Journal --
             if ($cogsTotal > 0) {
                 $cogsJournalId = $this->createJournal('COGS', $trxId, $trxData['invoice'], date('Y-m-d'), "COGS Invoice {$trxData['invoice']}", $data->id_toko);
-                $this->addJournalItem($cogsJournalId, '5001', $cogsTotal, 0, $data->id_toko); // Dr COGS
-                $this->addJournalItem($cogsJournalId, '1004', 0, $cogsTotal, $data->id_toko); // Cr Inventory
+                $this->addJournalItem($cogsJournalId, '50' . $data->id_toko . '1', $cogsTotal, 0, $data->id_toko); // Dr COGS
+                $this->addJournalItem($cogsJournalId, '10' . $data->id_toko . '4', 0, $cogsTotal, $data->id_toko); // Cr Inventory
             }
 
             $this->db->transComplete();
@@ -552,7 +552,7 @@ class TransactionControllerV2 extends ResourceController
 
                 $journalId = $this->createJournal('PAYMENT', $id, $trx['invoice'], date('Y-m-d'), "Payment verification for {$trx['invoice']}", $trx['id_toko']);
                 $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Bank
-                $this->addJournalItem($journalId, '10'. $trx['id_toko']'3', 0, $amount, $trx['id_toko']); // Cr AR
+                $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
 
                 // Update Transaction Status
                 $newTotalPaid = (float) $trx['total_payment'] + $amount;
@@ -614,8 +614,8 @@ class TransactionControllerV2 extends ResourceController
             // Reverse COGS
             if ($cogsReversal > 0) {
                 $jId = $this->createJournal('CANCEL_COGS', $id, $trx['invoice'], date('Y-m-d'), "Reversal COGS {$trx['invoice']}", $trx['id_toko']);
-                $this->addJournalItem($jId, '1004', $cogsReversal, 0, $trx['id_toko']);
-                $this->addJournalItem($jId, '5001', 0, $cogsReversal, $trx['id_toko']);
+                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '4', $cogsReversal, 0, $trx['id_toko']);
+                $this->addJournalItem($jId, '50' . $trx['id_toko'] . '1', 0, $cogsReversal, $trx['id_toko']);
             }
 
             // Reverse Sales
@@ -636,19 +636,19 @@ class TransactionControllerV2 extends ResourceController
             $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
 
             // Reverse AR
-            $this->addJournalItem($jIdSales, '1003', 0, $trx['actual_total'], $trx['id_toko']);
+            $this->addJournalItem($jIdSales, '10' . $trx['id_toko'] . '3', 0, $trx['actual_total'], $trx['id_toko']);
 
             // Reverse Discount (Contra-Revenue)
             if ($totalDiscount > 0) {
-                $this->addJournalItem($jIdSales, '4002', 0, $totalDiscount, $trx['id_toko']);
+                $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '2', 0, $totalDiscount, $trx['id_toko']);
             }
 
             // Reverse Gross Sales
-            $this->addJournalItem($jIdSales, '4001', $trx['amount'], 0, $trx['id_toko']);
+            $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $trx['amount'], 0, $trx['id_toko']);
 
             // Reverse PPN
             if ($ppnValue > 0) {
-                $this->addJournalItem($jIdSales, '2001', $ppnValue, 0, $trx['id_toko']);
+                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '1', $ppnValue, 0, $trx['id_toko']);
             }
 
             // Reverse Shipping (Only if NOT delivered)
@@ -658,11 +658,11 @@ class TransactionControllerV2 extends ResourceController
 
             if (!$isDelivered) {
                 if (!$isFreeOngkir && $shippingCost > 0) {
-                    $this->addJournalItem($jIdSales, '4001', $shippingCost, 0, $trx['id_toko']);
+                    $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $shippingCost, 0, $trx['id_toko']);
                 }
                 if ($isFreeOngkir && $shippingCost > 0) {
-                    $this->addJournalItem($jIdSales, '2001', $shippingCost, 0, $trx['id_toko']); // Reverse AP
-                    $this->addJournalItem($jIdSales, '5006', 0, $shippingCost, $trx['id_toko']); // Reverse Expense
+                    $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '1', $shippingCost, 0, $trx['id_toko']); // Reverse AP
+                    $this->addJournalItem($jIdSales, '50' . $trx['id_toko'] . '6', 0, $shippingCost, $trx['id_toko']); // Reverse Expense
                 }
             }
 
@@ -800,14 +800,14 @@ class TransactionControllerV2 extends ResourceController
 
             if ($cogsReversal > 0) {
                 $jid = $this->createJournal('RETUR_COGS', $id, $trx['invoice'], date('Y-m-d'), "Retur COGS Reversal", $trx['id_toko']);
-                $this->addJournalItem($jid, '1004', $cogsReversal, 0, $trx['id_toko']);
-                $this->addJournalItem($jid, '5001', 0, $cogsReversal, $trx['id_toko']);
+                $this->addJournalItem($jid, '10' . $trx['id_toko'] . '4', $cogsReversal, 0, $trx['id_toko']);
+                $this->addJournalItem($jid, '50' . $trx['id_toko'] . '1', 0, $cogsReversal, $trx['id_toko']);
             }
 
             if ($revenueReduction > 0) {
                 $jid = $this->createJournal('RETUR_SALES', $id, $trx['invoice'], date('Y-m-d'), "Retur Sales Reduction", $trx['id_toko']);
-                $this->addJournalItem($jid, '4003', $revenueReduction, 0, $trx['id_toko']);
-                $this->addJournalItem($jid, '1003', 0, $revenueReduction, $trx['id_toko']);
+                $this->addJournalItem($jid, '40' . $trx['id_toko'] . '3', $revenueReduction, 0, $trx['id_toko']);
+                $this->addJournalItem($jid, '10' . $trx['id_toko'] . '3', 0, $revenueReduction, $trx['id_toko']);
             }
 
             $this->db->transComplete();
@@ -876,8 +876,8 @@ class TransactionControllerV2 extends ResourceController
             ]);
 
             $jid = $this->createJournal('REFUND', $id, $trx['invoice'], date('Y-m-d'), "Refund: $reason", $trx['id_toko']);
-            $this->addJournalItem($jid, '1003', $amount, 0, $trx['id_toko']);
-            $this->addJournalItem($jid, '1001', 0, $amount, $trx['id_toko']);
+            $this->addJournalItem($jid, '10' . $trx['id_toko'] . '3', $amount, 0, $trx['id_toko']);
+            $this->addJournalItem($jid, '10' . $trx['id_toko'] . '1', 0, $amount, $trx['id_toko']);
 
             $refundMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'refund_needed')->first();
             $newStatus = 'PARTIALLY_REFUNDED';
