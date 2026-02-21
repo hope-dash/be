@@ -34,7 +34,14 @@ class WilayahController extends ResourceController
     public function getProvinces()
     {
         try {
-            $provinces = $this->provinceModel->findAll();
+            $cacheKey = 'wilayah_provinces';
+            $provinces = cache()->get($cacheKey);
+
+            if ($provinces === null) {
+                $provinces = $this->provinceModel->findAll();
+                cache()->save($cacheKey, $provinces, 2592000); // 30 days
+            }
+
             return $this->jsonResponse->multiResp('', $provinces, count($provinces), 1, 1, count($provinces), 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -50,6 +57,13 @@ class WilayahController extends ResourceController
     public function getCitiesByProvince($provinceCode)
     {
         try {
+            $cacheKey = 'wilayah_cities_' . md5($provinceCode);
+            $cities = cache()->get($cacheKey);
+
+            if ($cities !== null) {
+                return $this->jsonResponse->multiResp('', $cities, count($cities), 1, 1, count($cities), 200);
+            }
+
             // Support lookup by Province Name if it doesn't look like a code
             if (!is_numeric($provinceCode)) {
                 $decodedName = urldecode($provinceCode);
@@ -68,6 +82,8 @@ class WilayahController extends ResourceController
                 return $this->jsonResponse->error('Cities not found for this province', 404);
             }
 
+            cache()->save($cacheKey, $cities, 2592000); // 30 days
+
             return $this->jsonResponse->multiResp('', $cities, count($cities), 1, 1, count($cities), 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -83,11 +99,20 @@ class WilayahController extends ResourceController
     public function getDistrictsByCity($cityCode)
     {
         try {
+            $cacheKey = 'wilayah_districts_' . md5($cityCode);
+            $districts = cache()->get($cacheKey);
+
+            if ($districts !== null) {
+                return $this->jsonResponse->multiResp('', $districts, count($districts), 1, 1, count($districts), 200);
+            }
+
             $districts = $this->districtModel->where('regency_code', $cityCode)->findAll();
 
             if (empty($districts)) {
                 return $this->jsonResponse->error('Districts not found for this city', 404);
             }
+
+            cache()->save($cacheKey, $districts, 2592000); // 30 days
 
             return $this->jsonResponse->multiResp('', $districts, count($districts), 1, 1, count($districts), 200);
         } catch (\Exception $e) {
@@ -104,11 +129,20 @@ class WilayahController extends ResourceController
     public function getVillagesByDistrict($districtCode)
     {
         try {
+            $cacheKey = 'wilayah_villages_' . md5($districtCode);
+            $villages = cache()->get($cacheKey);
+
+            if ($villages !== null) {
+                return $this->jsonResponse->multiResp('', $villages, count($villages), 1, 1, count($villages), 200);
+            }
+
             $villages = $this->villageModel->where('district_code', $districtCode)->findAll();
 
             if (empty($villages)) {
                 return $this->jsonResponse->error('Villages not found for this district', 404);
             }
+
+            cache()->save($cacheKey, $villages, 2592000); // 30 days
 
             return $this->jsonResponse->multiResp('', $villages, count($villages), 1, 1, count($villages), 200);
         } catch (\Exception $e) {
@@ -124,13 +158,21 @@ class WilayahController extends ResourceController
     public function searchProvinces()
     {
         try {
-            $search = $this->request->getGet('q');
+            $search = trim($this->request->getGet('q'));
+            $cacheKey = 'wilayah_search_provinces_' . md5($search);
+            $provinces = cache()->get($cacheKey);
+
+            if ($provinces !== null) {
+                return $this->jsonResponse->multiResp('', $provinces, count($provinces), 1, 1, count($provinces), 200);
+            }
 
             if ($search) {
                 $provinces = $this->provinceModel->like('name', $search)->findAll();
             } else {
                 $provinces = $this->provinceModel->findAll();
             }
+
+            cache()->save($cacheKey, $provinces, 2592000); // 30 days
 
             return $this->jsonResponse->multiResp('', $provinces, count($provinces), 1, 1, count($provinces), 200);
         } catch (\Exception $e) {
@@ -146,8 +188,14 @@ class WilayahController extends ResourceController
     public function searchCities()
     {
         try {
-            $search = $this->request->getGet('q');
+            $search = trim($this->request->getGet('q' ?? ''));
             $provinceCode = $this->request->getGet('province_code');
+            $cacheKey = 'wilayah_search_cities_' . md5($search . $provinceCode);
+            $cities = cache()->get($cacheKey);
+
+            if ($cities !== null) {
+                return $this->jsonResponse->multiResp('', $cities, count($cities), 1, 1, count($cities), 200);
+            }
 
             $query = $this->cityModel;
 
@@ -160,6 +208,8 @@ class WilayahController extends ResourceController
             }
 
             $cities = $query->findAll();
+
+            cache()->save($cacheKey, $cities, 2592000); // 30 days
 
             return $this->jsonResponse->multiResp('', $cities, count($cities), 1, 1, count($cities), 200);
         } catch (\Exception $e) {
@@ -175,8 +225,14 @@ class WilayahController extends ResourceController
     public function searchDistricts()
     {
         try {
-            $search = $this->request->getGet('q');
+            $search = trim($this->request->getGet('q' ?? ''));
             $regencyCode = $this->request->getGet('regency_code');
+            $cacheKey = 'wilayah_search_districts_' . md5($search . $regencyCode);
+            $districts = cache()->get($cacheKey);
+
+            if ($districts !== null) {
+                return $this->jsonResponse->multiResp('', $districts, count($districts), 1, 1, count($districts), 200);
+            }
 
             $query = $this->districtModel;
 
@@ -189,6 +245,8 @@ class WilayahController extends ResourceController
             }
 
             $districts = $query->findAll();
+
+            cache()->save($cacheKey, $districts, 2592000); // 30 days
 
             return $this->jsonResponse->multiResp('', $districts, count($districts), 1, 1, count($districts), 200);
         } catch (\Exception $e) {
@@ -204,8 +262,14 @@ class WilayahController extends ResourceController
     public function searchVillages()
     {
         try {
-            $search = $this->request->getGet('q');
+            $search = trim($this->request->getGet('q') ?? '');
             $districtCode = $this->request->getGet('district_code');
+            $cacheKey = 'wilayah_search_villages_' . md5($search . $districtCode);
+            $villages = cache()->get($cacheKey);
+
+            if ($villages !== null) {
+                return $this->jsonResponse->multiResp('', $villages, count($villages), 1, 1, count($villages), 200);
+            }
 
             $query = $this->villageModel;
 
@@ -223,6 +287,8 @@ class WilayahController extends ResourceController
             } else {
                 $villages = $query->findAll();
             }
+
+            cache()->save($cacheKey, $villages, 2592000); // 30 days
 
             return $this->jsonResponse->multiResp('', $villages, count($villages), 1, 1, count($villages), 200);
         } catch (\Exception $e) {

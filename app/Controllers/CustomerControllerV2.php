@@ -290,6 +290,15 @@ class CustomerControllerV2 extends ResourceController
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
+            // Apply store filter if id_toko is provided
+            if ($idToko) {
+                $builder->join('stock', 'stock.id_barang = product.id_barang')
+                    ->join('toko', 'toko.id = stock.id_toko')
+                    ->where('stock.id_toko', $idToko)
+                    ->where('stock.stock >', 0)
+                    ->select('stock.stock as current_stock, toko.toko_name');
+            }
+
             // Apply search filter
             if (!empty($search)) {
                 $builder->groupStart()
@@ -315,24 +324,31 @@ class CustomerControllerV2 extends ResourceController
             $stockMap = [];
 
             if (!empty($productIds)) {
-                $stockBuilder = $this->db->table('stock')
-                    ->select('stock.*, toko.toko_name')
-                    ->join('toko', 'toko.id = stock.id_toko')
-                    ->where('toko.type', 'CABANG')
-                    ->whereIn('id_barang', $productIds);
-
+                // If idToko is present, we already have the stock in the $products array
                 if ($idToko) {
-                    $stockBuilder->where('id_toko', $idToko);
-                }
+                    foreach ($products as $p) {
+                        $stockMap[$p['id_barang']] = [
+                            'total' => (int) $p['current_stock'],
+                            'details' => [
+                                [
+                                    'id_toko' => $idToko,
+                                    'toko_name' => $p['toko_name'] ?? 'Unknown Store',
+                                    'stock' => (int) $p['current_stock']
+                                ]
+                            ]
+                        ];
+                    }
+                } else {
+                    // Multi store mode: Fetch all CABANG stocks
+                    $stockBuilder = $this->db->table('stock')
+                        ->select('stock.*, toko.toko_name')
+                        ->join('toko', 'toko.id = stock.id_toko')
+                        ->where('toko.type', 'CABANG')
+                        ->whereIn('id_barang', $productIds);
 
-                $stocks = $stockBuilder->get()->getResultArray();
+                    $stocks = $stockBuilder->get()->getResultArray();
 
-                foreach ($stocks as $s) {
-                    if ($idToko) {
-                        // Single store mode
-                        $stockMap[$s['id_barang']] = (int) $s['stock'];
-                    } else {
-                        // Multi store mode
+                    foreach ($stocks as $s) {
                         if (!isset($stockMap[$s['id_barang']])) {
                             $stockMap[$s['id_barang']] = [
                                 'total' => 0,
@@ -396,6 +412,8 @@ class CustomerControllerV2 extends ResourceController
                     }
                 }
 
+                $stockInfo = $stockMap[$product['id_barang']] ?? ['total' => 0, 'details' => []];
+
                 $item = [
                     'id' => $product['id'],
                     'id_barang' => $product['id_barang'],
@@ -404,19 +422,12 @@ class CustomerControllerV2 extends ResourceController
                     'harga_jual' => (int) $basePrice,
                     'customer_price' => (int) $customerPrice,
                     'discount_applied' => (int) $discountApplied,
+                    'stock_total' => $stockInfo['total'],
+                    'stock_details' => $stockInfo['details'],
                 ];
 
                 // Map images
                 $item['images'] = $imageMap[$product['id']] ?? [];
-
-                // Map stock
-                if ($idToko) {
-                    $item['stock'] = $stockMap[$product['id_barang']] ?? 0;
-                } else {
-                    $stockInfo = $stockMap[$product['id_barang']] ?? ['total' => 0, 'details' => []];
-                    $item['stock_total'] = $stockInfo['total'];
-                    $item['stock_details'] = $stockInfo['details'];
-                }
 
                 $finalProducts[] = $item;
             }
