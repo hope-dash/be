@@ -324,34 +324,7 @@ class AccountingReportController extends ResourceController
         $endDate = $this->request->getGet('end_date') ?? date('Y-m-t');
         $tokoId = $this->request->getGet('id_toko');
 
-        // --- Current Period Data ---
-        $revenues = $this->getAccountGroupBalance('REVENUE', $startDate, $endDate, $tokoId);
-        $expenses = $this->getAccountGroupBalance('EXPENSE', $startDate, $endDate, $tokoId);
-
-        $totalRevenue = $revenues['total'];
-        $totalExpense = $expenses['total'];
-        $netIncome = $totalRevenue - $totalExpense;
-
-        // --- Calculate COGS & OPEX ---
-        // Assuming COGS accounts start with '5' and OPEX with '6'
-        $cogs = 0;
-        $opex = 0;
-
-        foreach ($expenses['details'] as $exp) {
-            if (strpos($exp['code'], '5') === 0) {
-                $cogs += $exp['balance'];
-            } else {
-                $opex += $exp['balance'];
-            }
-        }
-
-        $grossProfit = $totalRevenue - $cogs;
-
-        // --- Metrics (Summary Highlights) ---
-        $grossMargin = ($totalRevenue > 0) ? ($grossProfit / $totalRevenue) * 100 : 0;
-        $netProfitMargin = ($totalRevenue > 0) ? ($netIncome / $totalRevenue) * 100 : 0;
-        $expenseRatio = ($totalRevenue > 0) ? ($totalExpense / $totalRevenue) * 100 : 0; // Total Expense Ratio
-        // Or Opex Ratio: ($opex / $totalRevenue) * 100
+        $current = $this->getIncomeStatementData($startDate, $endDate, $tokoId);
 
         // --- Previous Period Comparison ---
         $startObj = new \DateTime($startDate);
@@ -365,16 +338,14 @@ class AccountingReportController extends ResourceController
         $prevStartDate = $prevStartObj->format('Y-m-d');
         $prevEndDate = $prevEndObj->format('Y-m-d');
 
-        $prevRevenues = $this->getAccountGroupBalance('REVENUE', $prevStartDate, $prevEndDate, $tokoId);
-        $prevExpenses = $this->getAccountGroupBalance('EXPENSE', $prevStartDate, $prevEndDate, $tokoId);
-        $prevNetIncome = $prevRevenues['total'] - $prevExpenses['total'];
+        $prev = $this->getIncomeStatementData($prevStartDate, $prevEndDate, $tokoId);
 
         // Growth Calculation
         $growth = 0;
-        if ($prevNetIncome != 0) {
-            $growth = (($netIncome - $prevNetIncome) / abs($prevNetIncome)) * 100;
-        } else if ($netIncome > 0) {
-            $growth = 100; // From 0 to Positive
+        if ($prev['net_income'] != 0) {
+            $growth = (($current['net_income'] - $prev['net_income']) / abs($prev['net_income'])) * 100;
+        } else if ($current['net_income'] > 0) {
+            $growth = 100;
         }
 
         // Performance Text
@@ -382,9 +353,7 @@ class AccountingReportController extends ResourceController
         $trend = ($growth >= 0) ? "meningkat" : "menurun";
         $absGrowth = number_format(abs($growth), 1);
 
-        // Expense Analysis Text
-        $prevTotalExpense = $prevExpenses['total'];
-        $expGrowth = ($prevTotalExpense > 0) ? (($totalExpense - $prevTotalExpense) / $prevTotalExpense) * 100 : 0;
+        $expGrowth = ($prev['total_expense'] > 0) ? (($current['total_expense'] - $prev['total_expense']) / $prev['total_expense']) * 100 : 0;
         $expText = ($expGrowth <= 5) ? "Pengeluaran operasional terkendali." : "Pengeluaran operasional meningkat " . number_format($expGrowth, 1) . "%.";
 
         $description = "Laba bersih periode ini $trend $absGrowth% dibandingkan periode sebelumnya. $expText";
@@ -392,20 +361,118 @@ class AccountingReportController extends ResourceController
         return $this->jsonResponse->oneResp('Income Statement', [
             'period' => "$startDate to $endDate",
             'prev_period' => "$prevStartDate to $prevEndDate",
-            'summary_highlights' => [
-                'gross_margin' => round($grossMargin, 1),
-                'net_profit_margin' => round($netProfitMargin, 1),
-                'expense_ratio' => round($expenseRatio, 1)
-            ],
+            'summary_highlights' => $current['highlights'],
             'performance' => [
                 'title' => $performanceTitle,
                 'description' => $description,
                 'is_positive' => ($growth >= 0)
             ],
-            'revenues' => $revenues,
-            'expenses' => $expenses,
-            'net_income' => $netIncome
+            'revenues' => $current['revenues'],
+            'expenses' => $current['expenses'],
+            'net_income' => $current['net_income']
         ], 200);
+    }
+
+    private function getIncomeStatementData($startDate, $endDate, $tokoId)
+    {
+        $accrualExcludes = ['SALES', 'COGS'];
+
+        // 1. Get Base Data (Excluding Sales Accruals)
+        $revenuesClean = $this->getAccountGroupBalance('REVENUE', $startDate, $endDate, $tokoId, true, $accrualExcludes);
+        $expensesClean = $this->getAccountGroupBalance('EXPENSE', $startDate, $endDate, $tokoId, true, $accrualExcludes);
+
+        $revenueMap = [];
+        foreach ($revenuesClean['details'] as $item) {
+            $revenueMap[$item['code']] = $item;
+        }
+
+        $expenseMap = [];
+        foreach ($expensesClean['details'] as $item) {
+            $expenseMap[$item['code']] = $item;
+        }
+
+        // 2. Add Cash-Basis portions from Payments in this period
+        $paymentsBuilder = $this->db->table('transaction_payments tp')
+            ->select('tp.amount, tp.transaction_id, t.actual_total')
+            ->join('transaction t', 't.id = tp.transaction_id')
+            ->where('tp.paid_at >=', $startDate . ' 00:00:00')
+            ->where('tp.paid_at <=', $endDate . ' 23:59:59')
+            ->where('tp.status', 'VERIFIED');
+
+        if ($tokoId) {
+            $paymentsBuilder->where('t.id_toko', $tokoId);
+        }
+
+        $paymentList = $paymentsBuilder->get()->getResultArray();
+
+        foreach ($paymentList as $p) {
+            if ($p['actual_total'] <= 0)
+                continue;
+            $ratio = (float) $p['amount'] / (float) $p['actual_total'];
+
+            // Find all accrual journal items for this transaction
+            $jidItems = $this->db->table('journal_items ji')
+                ->select('a.code, a.name, a.type, ji.debit, ji.credit')
+                ->join('journals j', 'j.id = ji.journal_id')
+                ->join('accounts a', 'a.id = ji.account_id')
+                ->where('j.reference_id', $p['transaction_id'])
+                ->whereIn('j.reference_type', $accrualExcludes)
+                ->whereIn('a.type', ['REVENUE', 'EXPENSE'])
+                ->get()->getResultArray();
+
+            foreach ($jidItems as $item) {
+                $bal = (float) $item['credit'] - (float) $item['debit'];
+                if ($item['type'] === 'EXPENSE')
+                    $bal = -$bal; // Normal debit
+
+                $recognized = $bal * $ratio;
+
+                if ($item['type'] === 'REVENUE') {
+                    if (!isset($revenueMap[$item['code']])) {
+                        $revenueMap[$item['code']] = ['code' => $item['code'], 'name' => $item['name'], 'balance' => 0];
+                    }
+                    $revenueMap[$item['code']]['balance'] += $recognized;
+                } else {
+                    if (!isset($expenseMap[$item['code']])) {
+                        $expenseMap[$item['code']] = ['code' => $item['code'], 'name' => $item['name'], 'balance' => 0];
+                    }
+                    $expenseMap[$item['code']]['balance'] += $recognized;
+                }
+            }
+        }
+
+        // 3. Final Calculations
+        $finalRevenues = array_values($revenueMap);
+        $totalRevenue = 0;
+        foreach ($finalRevenues as $r)
+            $totalRevenue += $r['balance'];
+
+        $finalExpenses = array_values($expenseMap);
+        $totalExpense = 0;
+        $cogs = 0;
+        foreach ($finalExpenses as $e) {
+            $totalExpense += $e['balance'];
+            if (strpos($e['code'], '5') === 0) {
+                $cogs += $e['balance'];
+            }
+        }
+
+        $netIncome = $totalRevenue - $totalExpense;
+        $grossProfit = $totalRevenue - $cogs;
+
+        $highlights = [
+            'gross_margin' => ($totalRevenue > 0) ? round(($grossProfit / $totalRevenue) * 100, 1) : 0,
+            'net_profit_margin' => ($totalRevenue > 0) ? round(($netIncome / $totalRevenue) * 100, 1) : 0,
+            'expense_ratio' => ($totalRevenue > 0) ? round(($totalExpense / $totalRevenue) * 100, 1) : 0
+        ];
+
+        return [
+            'revenues' => ['details' => $finalRevenues, 'total' => $totalRevenue],
+            'expenses' => ['details' => $finalExpenses, 'total' => $totalExpense],
+            'total_expense' => $totalExpense,
+            'net_income' => $netIncome,
+            'highlights' => $highlights
+        ];
     }
 
     // 4. BALANCE SHEET (Neraca)
@@ -488,7 +555,7 @@ class AccountingReportController extends ResourceController
         ], 200);
     }
 
-    private function getAccountGroupBalance($type, $startDate, $endDate, $tokoId = null, $excludeClosing = true)
+    private function getAccountGroupBalance($type, $startDate, $endDate, $tokoId = null, $excludeClosing = true, $excludeReferenceTypes = [])
     {
         $isUtama = false;
         if ($tokoId) {
@@ -512,32 +579,36 @@ class AccountingReportController extends ResourceController
 
         foreach ($accounts as $acc) {
             // Debit
-            $builderDeb = $this->db->table('journal_items')
-                ->join('journals', 'journals.id = journal_items.journal_id')
-                ->where('journal_items.account_id', $acc['id'])
-                ->where('journals.date >=', $startDate)
-                ->where('journals.date <=', $endDate);
+            $builderDeb = $this->db->table('journal_items ji')
+                ->join('journals j', 'j.id = ji.journal_id')
+                ->where('ji.account_id', $acc['id'])
+                ->where('j.date >=', $startDate)
+                ->where('j.date <=', $endDate);
 
             if ($tokoId && !$isUtama)
-                $builderDeb->where('journals.id_toko', $tokoId);
+                $builderDeb->where('j.id_toko', $tokoId);
             if ($excludeClosing)
-                $builderDeb->where('journals.reference_type !=', 'CLOSING');
+                $builderDeb->where('j.reference_type !=', 'CLOSING');
+            if (!empty($excludeReferenceTypes))
+                $builderDeb->whereNotIn('j.reference_type', $excludeReferenceTypes);
 
-            $debit = $builderDeb->selectSum('debit')->get()->getRow()->debit ?? 0;
+            $debit = $builderDeb->selectSum('ji.debit')->get()->getRow()->debit ?? 0;
 
             // Credit
-            $builderCred = $this->db->table('journal_items')
-                ->join('journals', 'journals.id = journal_items.journal_id')
-                ->where('journal_items.account_id', $acc['id'])
-                ->where('journals.date >=', $startDate)
-                ->where('journals.date <=', $endDate);
+            $builderCred = $this->db->table('journal_items ji')
+                ->join('journals j', 'j.id = ji.journal_id')
+                ->where('ji.account_id', $acc['id'])
+                ->where('j.date >=', $startDate)
+                ->where('j.date <=', $endDate);
 
             if ($tokoId && !$isUtama)
-                $builderCred->where('journals.id_toko', $tokoId);
+                $builderCred->where('j.id_toko', $tokoId);
             if ($excludeClosing)
-                $builderCred->where('journals.reference_type !=', 'CLOSING');
+                $builderCred->where('j.reference_type !=', 'CLOSING');
+            if (!empty($excludeReferenceTypes))
+                $builderCred->whereNotIn('j.reference_type', $excludeReferenceTypes);
 
-            $credit = $builderCred->selectSum('credit')->get()->getRow()->credit ?? 0;
+            $credit = $builderCred->selectSum('ji.credit')->get()->getRow()->credit ?? 0;
 
             if (in_array($type, ['REVENUE', 'EQUITY', 'LIABILITY'])) {
                 $bal = $credit - $debit;
