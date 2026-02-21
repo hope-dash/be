@@ -398,20 +398,6 @@ class CustomerControllerV2 extends ResourceController
                 $customerPrice = $basePrice;
                 $discountApplied = 0;
 
-                if ($customer && !empty($customer['discount_type'])) {
-                    $discountType = strtolower($customer['discount_type']);
-                    $discountValue = (float) $customer['discount_value'];
-
-                    if ($discountType === 'percentage') {
-                        $discount = ($basePrice * $discountValue) / 100;
-                        $customerPrice = max(0, $basePrice - $discount);
-                        $discountApplied = $discount;
-                    } elseif ($discountType === 'fixed') {
-                        $discountApplied = min($basePrice, $discountValue);
-                        $customerPrice = max(0, $basePrice - $discountValue);
-                    }
-                }
-
                 $stockInfo = $stockMap[$product['id_barang']] ?? ['total' => 0, 'details' => []];
 
                 $item = [

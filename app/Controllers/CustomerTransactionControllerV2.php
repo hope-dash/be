@@ -10,6 +10,12 @@ use App\Models\TransactionModel;
 use App\Models\SalesProductModel;
 use App\Models\TransactionMetaModel;
 use App\Models\TransactionPaymentModel;
+use App\Models\JournalModel;
+use App\Models\JournalItemModel;
+use App\Models\AccountModel;
+use App\Models\StockLedgerModel;
+use App\Models\CustomerModel;
+use App\Models\TokoModel;
 use App\Models\JsonResponse;
 use CodeIgniter\API\ResponseTrait;
 
@@ -24,6 +30,12 @@ class CustomerTransactionControllerV2 extends ResourceController
     protected $salesProductModel;
     protected $transactionMetaModel;
     protected $paymentModel;
+    protected $journalModel;
+    protected $journalItemModel;
+    protected $accountModel;
+    protected $stockLedgerModel;
+    protected $customerModel;
+    protected $tokoModel;
     protected $jsonResponse;
     protected $db;
 
@@ -37,6 +49,12 @@ class CustomerTransactionControllerV2 extends ResourceController
         $this->salesProductModel = new SalesProductModel();
         $this->transactionMetaModel = new TransactionMetaModel();
         $this->paymentModel = new TransactionPaymentModel();
+        $this->journalModel = new JournalModel();
+        $this->journalItemModel = new JournalItemModel();
+        $this->accountModel = new AccountModel();
+        $this->stockLedgerModel = new StockLedgerModel();
+        $this->customerModel = new CustomerModel();
+        $this->tokoModel = new TokoModel();
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
     }
@@ -216,125 +234,231 @@ class CustomerTransactionControllerV2 extends ResourceController
 
     public function checkout()
     {
-        $data = $this->request->getJSON();
-        $customer = $this->request->customer;
-        $customerId = $customer['id'];
+        $data = $this->request->getJSON(true);
+        $customerToken = $this->request->customer;
+        $customerId = $customerToken['id'];
+
+        // Fetch fresh customer data for discounts and address
+        $customer = $this->customerModel->find($customerId);
+        if (!$customer) {
+            return $this->jsonResponse->error("Customer not found", 404);
+        }
+
+        $cartIds = $data['cart_ids'] ?? [];
+        if (empty($cartIds)) {
+            return $this->jsonResponse->error("No cart items selected", 400);
+        }
 
         $this->db->transStart();
 
         try {
-            $items = $data->items ?? [];
-            if (empty($items)) {
-                throw new \Exception("Cart items are empty");
+            // 1. Fetch cart items with product details
+            $cartItems = $this->cartModel
+                ->select('cart.*, product.nama_barang, product.harga_jual, product.harga_modal')
+                ->join('product', 'product.id_barang = cart.id_barang')
+                ->whereIn('cart.id', $cartIds)
+                ->where('cart.customer_id', $customerId)
+                ->findAll();
+
+            if (empty($cartItems)) {
+                throw new \Exception("Selected cart items not found");
             }
 
-            $grossAmount = 0;
-            $totalModal = 0;
-            $itemsProcessed = [];
+            // 2. Group by id_toko
+            $groupedByStore = [];
+            foreach ($cartItems as $item) {
+                $idToko = $item['id_toko'] ?: 0;
+                $groupedByStore[$idToko][] = $item;
+            }
 
-            foreach ($items as $item) {
-                $idBarang = $item->id_barang;
-                $qty = $item->jumlah ?? $item->qty ?? 0;
+            $createdInvoices = [];
 
-                $product = $this->productModel->where('id_barang', $idBarang)->first();
-                if (!$product) {
-                    throw new \Exception("Product {$idBarang} not found");
-                }
-
-                $price = (float) $product['harga_jual'];
-
-                // Apply customer discount
-                if (!empty($customer['discount_type'])) {
-                    if (strtolower($customer['discount_type']) === 'percentage') {
-                        $price -= ($price * (float) $customer['discount_value']) / 100;
-                    } else {
-                        $price -= (float) $customer['discount_value'];
-                    }
-                }
-                $price = max(0, $price);
-
-                $itemTotal = $price * $qty;
-                $grossAmount += $itemTotal;
-                $totalModal += ($product['harga_modal'] * $qty);
-
-                $itemsProcessed[] = [
-                    'product' => $product,
-                    'qty' => $qty,
-                    'price' => $price,
-                    'modal' => $product['harga_modal'] * $qty
+            // Build a lookup: id_toko => { pengiriman, biaya_pengiriman, discount_type, discount_amount }
+            $shippingMap = [];
+            foreach (($data['stores'] ?? []) as $storeShipping) {
+                $storeKey = ($storeShipping['id_toko'] ?? 0) ?: 0;
+                $shippingMap[$storeKey] = [
+                    'pengiriman' => $storeShipping['pengiriman'] ?? '',
+                    'biaya_pengiriman' => (float) ($storeShipping['biaya_pengiriman'] ?? 0),
+                    'discount_type' => $storeShipping['discount_type'] ?? 'FIXED',
+                    'discount_amount' => (float) ($storeShipping['discount_amount'] ?? 0)
                 ];
             }
 
-            // Simple checkout - no PPN/Ongkir for now unless requested
-            $grandTotal = $grossAmount + ($data->biaya_pengiriman ?? 0);
+            foreach ($groupedByStore as $idToko => $items) {
+                $grossAmount = 0;
+                $totalModal = 0;
+                $itemsProcessed = [];
+                $actualIdToko = ($idToko == 0) ? null : $idToko;
 
-            $trxData = [
-                'invoice' => 'CS-' . time() . '-' . $customerId,
-                'id_toko' => $data->id_toko ?? null,
-                'amount' => $grossAmount,
-                'actual_total' => $grandTotal,
-                'total_payment' => 0,
-                'status' => 'WAITING_PAYMENT',
-                'delivery_status' => 'NOT_READY',
-                'discount_type' => 'FIXED',
-                'discount_amount' => 0,
-                'total_modal' => $totalModal,
-                'created_by' => 0, // Customer created
-                'date_time' => date('Y-m-d H:i:s'),
-            ];
+                // 3. Stock Check & Pricing Logic
+                foreach ($items as $item) {
+                    $idBarang = $item['id_barang'];
+                    $qty = (int) $item['jumlah'];
 
-            $this->transactionModel->insert($trxData);
-            $trxId = $this->transactionModel->getInsertID();
+                    // Check Stock
+                    $stockEntry = $this->stockModel
+                        ->where('id_barang', $idBarang)
+                        ->where('id_toko', $actualIdToko)
+                        ->first();
 
-            $invoice = 'INV' . date('ymd') . $trxId;
-            $this->transactionModel->update($trxId, ['invoice' => $invoice]);
+                    if (!$stockEntry || $stockEntry['stock'] < $qty) {
+                        throw new \Exception("Insufficient stock for {$item['nama_barang']} in selected store");
+                    }
 
-            // Save Metadata
-            $meta = [
-                'customer_id' => $customerId,
-                'customer_name' => $customer['nama_customer'],
-                'customer_phone' => $customer['no_hp_customer'],
-                'alamat' => $data->alamat ?? $customer['alamat'],
-                'source' => 'CUSTOMER_APP',
-                'biaya_pengiriman' => $data->biaya_pengiriman ?? 0
-            ];
+                    // Price Logic (Customer Discount)
+                    $originalPrice = (float) $item['harga_jual'];
+                    $itemDiscountValue = 0;
+                    if (!empty($customer['discount_type'])) {
+                        $itemDiscountValue = $this->calculateDiscount($originalPrice, $customer['discount_type'], (float) $customer['discount_value']);
+                    }
+                    $finalPrice = max(0, $originalPrice - $itemDiscountValue);
 
-            foreach ($meta as $key => $val) {
-                $this->transactionMetaModel->insert([
-                    'transaction_id' => $trxId,
-                    'key' => $key,
-                    'value' => (string) $val
-                ]);
+                    $grossAmount += ($originalPrice * $qty);
+                    $totalModal += ($item['harga_modal'] * $qty);
+
+                    $itemsProcessed[] = [
+                        'kode_barang' => $idBarang,
+                        'qty' => $qty,
+                        'original_price' => $originalPrice,
+                        'final_price' => $finalPrice,
+                        'modal' => $item['harga_modal'],
+                        'total_modal_item' => $item['harga_modal'] * $qty,
+                        'discount_value' => $itemDiscountValue * $qty
+                    ];
+                }
+
+                // Per-store shipping & discount
+                $storeConfig = $shippingMap[$idToko] ?? [
+                    'pengiriman' => '',
+                    'biaya_pengiriman' => 0,
+                    'discount_type' => 'FIXED',
+                    'discount_amount' => 0
+                ];
+                $shippingCost = (float) $storeConfig['biaya_pengiriman'];
+                $pengirimanCourier = $storeConfig['pengiriman'];
+
+                $totalItemDiscount = array_sum(array_column($itemsProcessed, 'discount_value'));
+                $subtotalAfterItemDiscount = $grossAmount - $totalItemDiscount;
+
+                $txnDiscountType = $storeConfig['discount_type'];
+                $txnDiscountAmount = $storeConfig['discount_amount'];
+                $txnDiscountValue = $this->calculateDiscount($subtotalAfterItemDiscount, $txnDiscountType, $txnDiscountAmount);
+
+                $finalTotalDiscount = $totalItemDiscount + $txnDiscountValue;
+                $grandTotal = ($subtotalAfterItemDiscount - $txnDiscountValue) + $shippingCost;
+
+                // 4. Create Transaction
+                $trxData = [
+                    'invoice' => 'CS-TMP-' . time() . '-' . rand(100, 999),
+                    'id_toko' => $actualIdToko,
+                    'amount' => $grossAmount,
+                    'actual_total' => $grandTotal,
+                    'total_payment' => 0,
+                    'status' => 'WAITING_PAYMENT',
+                    'delivery_status' => 'NOT_READY',
+                    'discount_type' => $txnDiscountType,
+                    'discount_amount' => $txnDiscountAmount,
+                    'total_modal' => $totalModal,
+                    'created_by' => 0, // Customer trigger
+                    'date_time' => date('Y-m-d H:i:s'),
+                ];
+
+                $this->transactionModel->insert($trxData);
+                $trxId = $this->transactionModel->getInsertID();
+
+                $invoiceNo = 'INV' . date('ymd') . $trxId;
+                $this->transactionModel->update($trxId, ['invoice' => $invoiceNo]);
+
+                // 5. Meta Data
+                $metaEntries = [
+                    'customer_id' => $customerId,
+                    'alamat' => $data['alamat'] ?? $customer['alamat'],
+                    'provinsi' => $data['provinsi'] ?? $customer['provinsi'],
+                    'kota_kabupaten' => $data['kota_kabupaten'] ?? $customer['kota_kabupaten'],
+                    'kecamatan' => $data['kecamatan'] ?? $customer['kecamatan'],
+                    'kelurahan' => $data['kelurahan'] ?? $customer['kelurahan'],
+                    'kode_pos' => $data['kode_pos'] ?? $customer['kode_pos'],
+                    'pengiriman' => $pengirimanCourier,
+                    'biaya_pengiriman' => $shippingCost,
+                    'tx_discount_value' => $txnDiscountValue,
+                    'item_discount_total' => $totalItemDiscount,
+                    'source' => 'CUSTOMER_PORTAL'
+                ];
+
+                foreach ($metaEntries as $k => $v) {
+                    $this->transactionMetaModel->insert([
+                        'transaction_id' => $trxId,
+                        'key' => $k,
+                        'value' => (string) $v
+                    ]);
+                }
+
+                // 6. Sales Products & Stock Deduction & Journaling
+                foreach ($itemsProcessed as $it) {
+                    $this->salesProductModel->insert([
+                        'id_transaction' => $trxId,
+                        'kode_barang' => $it['kode_barang'],
+                        'jumlah' => $it['qty'],
+                        'harga_system' => $it['original_price'],
+                        'harga_jual' => $it['final_price'],
+                        'total' => $it['final_price'] * $it['qty'],
+                        'modal_system' => $it['modal'],
+                        'total_modal' => $it['total_modal_item'],
+                        'actual_per_piece' => $it['final_price'],
+                        'actual_total' => $it['final_price'] * $it['qty']
+                    ]);
+
+                    $this->deductStock($it['kode_barang'], $actualIdToko, $it['qty'], $trxId, "Invoice {$invoiceNo}");
+                }
+
+                // Accounting: Sales Journal (Matches TransactionControllerV2 logic)
+                $journalId = $this->createJournal('SALES', $trxId, $invoiceNo, date('Y-m-d'), "Invoice #{$invoiceNo}", $actualIdToko);
+
+                // Dr AR (1003)
+                $this->addJournalItem($journalId, '10' . $actualIdToko . '3', $grandTotal, 0, $actualIdToko);
+
+                // Dr Sales Discount (4002) - Combined (Item + TXN)
+                if ($finalTotalDiscount > 0) {
+                    $this->addJournalItem($journalId, '40' . $actualIdToko . '2', $finalTotalDiscount, 0, $actualIdToko);
+                }
+
+                // Cr Sales Revenue (4001) - Gross
+                $this->addJournalItem($journalId, '40' . $actualIdToko . '1', 0, $grossAmount, $actualIdToko);
+
+                // Cr Shipping Revenue if any
+                if ($shippingCost > 0) {
+                    $this->addJournalItem($journalId, '40' . $actualIdToko . '1', 0, $shippingCost, $actualIdToko);
+                }
+
+                // Accounting: COGS Journal
+                if ($totalModal > 0) {
+                    $cogsJournalId = $this->createJournal('COGS', $trxId, $invoiceNo, date('Y-m-d'), "COGS Invoice {$invoiceNo}", $actualIdToko);
+                    $this->addJournalItem($cogsJournalId, '50' . $actualIdToko . '1', $totalModal, 0, $actualIdToko); // Dr COGS
+                    $this->addJournalItem($cogsJournalId, '10' . $actualIdToko . '4', 0, $totalModal, $actualIdToko); // Cr Inventory
+                }
+
+                $createdInvoices[] = [
+                    'id' => $trxId,
+                    'invoice' => $invoiceNo,
+                    'store' => $idToko,
+                    'total' => $grandTotal
+                ];
             }
 
-            // Save Items
-            foreach ($itemsProcessed as $it) {
-                $this->salesProductModel->insert([
-                    'id_transaction' => $trxId,
-                    'kode_barang' => $it['product']['id_barang'],
-                    'jumlah' => $it['qty'],
-                    'harga_system' => $it['product']['harga_jual'],
-                    'harga_jual' => $it['price'],
-                    'total' => $it['price'] * $it['qty'],
-                    'modal_system' => $it['product']['harga_modal'],
-                    'total_modal' => $it['modal'],
-                    'actual_per_piece' => $it['price'],
-                    'actual_total' => $it['price'] * $it['qty']
-                ]);
-            }
-
-            // Clear Cart after checkout if successful
-            $this->cartModel->where('customer_id', $customerId)->delete();
+            // 7. Clear successful items from cart
+            $this->cartModel->whereIn('id', $cartIds)->delete();
 
             $this->db->transComplete();
 
-            return $this->jsonResponse->oneResp('Checkout successful', [
-                'id' => $trxId,
-                'invoice' => $invoice,
-                'total_amount' => $grandTotal
-            ], 201);
+            if ($this->db->transStatus() === false) {
+                throw new \Exception("Database transaction failed");
+            }
+
+            return $this->jsonResponse->oneResp('Checkout successful', $createdInvoices, 201);
 
         } catch (\Exception $e) {
+            $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -436,5 +560,79 @@ class CustomerTransactionControllerV2 extends ResourceController
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
+    }
+
+    // --- HELPERS ---
+
+    private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null)
+    {
+        $this->journalModel->insert([
+            'id_toko' => $tokoId,
+            'reference_type' => $refType,
+            'reference_id' => $refId,
+            'reference_no' => $refNo,
+            'date' => $date,
+            'description' => $desc,
+            'created_at' => date('Y-m-d H:i:s')
+        ]);
+        return $this->journalModel->getInsertID();
+    }
+
+    private function addJournalItem($journalId, $accountCode, $debit, $credit, $tokoId = null)
+    {
+        $account = $this->accountModel->getByBaseCode($accountCode, $tokoId);
+        if (!$account) {
+            $account = $this->accountModel->where('code', $accountCode)->first();
+        }
+
+        if (!$account)
+            return;
+
+        $this->journalItemModel->insert([
+            'journal_id' => $journalId,
+            'account_id' => $account['id'],
+            'debit' => $debit,
+            'credit' => $credit,
+            'created_at' => date('Y-m-d H:i:s')
+        ]);
+    }
+
+    private function deductStock($kodeBarang, $tokoId, $qty, $refId, $desc)
+    {
+        $stock = $this->stockModel
+            ->where('id_barang', $kodeBarang)
+            ->where('id_toko', $tokoId)
+            ->first();
+
+        $newStock = ($stock ? $stock['stock'] : 0) - $qty;
+
+        if ($stock) {
+            $this->stockModel->update($stock['id'], ['stock' => $newStock]);
+        } else {
+            $this->stockModel->insert([
+                'id_barang' => $kodeBarang,
+                'id_toko' => $tokoId,
+                'stock' => -$qty,
+                'barang_cacat' => 0
+            ]);
+        }
+
+        $this->stockLedgerModel->insert([
+            'id_barang' => $kodeBarang,
+            'id_toko' => $tokoId,
+            'qty' => -$qty,
+            'balance' => $newStock,
+            'reference_type' => 'SALES',
+            'reference_id' => $refId,
+            'description' => $desc
+        ]);
+    }
+
+    private function calculateDiscount($subtotal, $type, $amount)
+    {
+        if (strtoupper($type) === 'PERCENTAGE' || strtoupper($type) === 'PERCENT') {
+            return ($subtotal * $amount) / 100;
+        }
+        return $amount;
     }
 }

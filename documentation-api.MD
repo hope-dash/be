@@ -1457,24 +1457,67 @@ Menghapus **seluruh** isi keranjang belanja customer.
 
 - **URL**: `DELETE /api/v2/customer/cart`
 
-### F. Checkout
+### C. Checkout (Create Order)
 
-Mengubah isi keranjang menjadi Invoice.
+Mengubah isi keranjang menjadi Invoice. Jika item berasal dari toko yang berbeda, sistem akan otomatis memecahnya menjadi beberapa invoice (1 invoice per toko).
 
 - **URL**: `POST /api/v2/customer/checkout`
 - **Auth**: Customer JWT Token Required
 - **Logic**:
-  - Otomatis membuat invoice status `WAITING_PAYMENT`.
-  - Mengosongkan keranjang belanja.
+  - Validasi stok di masing-masing toko.
+  - Otomatis mencatat Jurnal Akuntansi (Sales & COGS).
+  - Mengosongkan item yang berhasil di-order dari keranjang belanja.
   - Harga barang otomatis menggunakan **Customer Price** (setelah diskon level customer).
 - **Body**:
 
 ```json
 {
-  "items": [{ "id_barang": "PROD-001", "jumlah": 2 }],
-  "id_toko": 1,
+  "cart_ids": [1, 5, 8], // ID dari tabel cart
   "alamat": "Jl. Kemenangan No. 8",
-  "biaya_pengiriman": 15000
+  "provinsi": "DKI Jakarta",
+  "kota_kabupaten": "Jakarta Selatan",
+  "kecamatan": "Tebet",
+  "kelurahan": "Kebon Baru",
+  "kode_pos": "12345",
+  "stores": [
+    {
+      "id_toko": 1,
+      "pengiriman": "JNE REG",
+      "biaya_pengiriman": 15000,
+      "discount_type": "PERCENTAGE",
+      "discount_amount": 10
+    },
+    {
+      "id_toko": 2,
+      "pengiriman": "J&T Express",
+      "biaya_pengiriman": 12000,
+      "discount_type": "FIXED",
+      "discount_amount": 5000
+    }
+  ]
+}
+```
+
+- **Response (Success)**:
+
+```json
+{
+  "status": 201,
+  "message": "Checkout successful",
+  "data": [
+    {
+      "id": 123,
+      "invoice": "INV240221123",
+      "store": 1,
+      "total": 515000
+    },
+    {
+      "id": 124,
+      "invoice": "INV240221124",
+      "store": 2,
+      "total": 300000
+    }
+  ]
 }
 ```
 
