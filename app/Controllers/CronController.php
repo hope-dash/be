@@ -86,6 +86,9 @@ class CronController extends Controller
 
         try {
             $config = config('CronJob');
+            $scheduler = service('scheduler');
+            $config->init($scheduler);
+
             $runner = new \Daycry\CronJob\JobRunner($config);
             $runner->run();
 
