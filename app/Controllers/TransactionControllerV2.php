@@ -529,8 +529,9 @@ class TransactionControllerV2 extends ResourceController
                 $this->paymentModel->update($payment['id'], ['status' => 'REJECTED']);
 
                 // Set transaction status back to WAITING_PAYMENT
+                $newStatus = 'WAITING_PAYMENT';
                 $this->transactionModel->update($id, [
-                    'status' => 'WAITING_PAYMENT'
+                    'status' => $newStatus
                 ]);
 
                 log_aktivitas([
@@ -582,14 +583,22 @@ class TransactionControllerV2 extends ResourceController
                 throw new \Exception("Database transaction failed");
             }
 
-            if ($action === 'ACCEPT' && $this->db->transStatus() !== false) {
-                // Re-fetch trx data with customer information for email
-                $trxWithCust = $this->transactionModel
-                    ->select('transaction.*, customer.email, customer.nama_customer')
-                    ->join('customer', 'customer.id = transaction.customer_id', 'left')
-                    ->find($id);
-                if ($trxWithCust) {
-                    send_payment_confirmed_email($trxWithCust);
+            if ($this->db->transStatus() !== false) {
+                // Fetch customer information for email
+                $custData = $this->transactionMetaModel
+                    ->select('customer.email, customer.nama_customer')
+                    ->join('customer', 'customer.id = transaction_meta.value', 'left')
+                    ->where('transaction_meta.transaction_id', $id)
+                    ->where('transaction_meta.key', 'customer_id')
+                    ->first();
+
+                if ($custData) {
+                    $trx['customer'] = $custData;
+                    if ($action === 'ACCEPT') {
+                        send_payment_confirmed_email($trx);
+                    } else if ($action === 'REJECT') {
+                        send_payment_rejected_email($trx, $data->reason ?? '');
+                    }
                 }
             }
 
@@ -999,17 +1008,22 @@ class TransactionControllerV2 extends ResourceController
             $this->db->transComplete();
 
             if ($this->db->transStatus() !== false) {
-                // Re-fetch for email context
-                $trxWithCust = $this->transactionModel
-                    ->select('transaction.*, customer.email, customer.nama_customer')
-                    ->join('customer', 'customer.id = transaction.customer_id', 'left')
-                    ->find($id);
+                // Fetch customer information for email
+                $custData = $this->transactionMetaModel
+                    ->select('customer.email, customer.nama_customer')
+                    ->join('customer', 'customer.id = transaction_meta.value', 'left')
+                    ->where('transaction_meta.transaction_id', $id)
+                    ->where('transaction_meta.key', 'customer_id')
+                    ->first();
 
-                if ($trxWithCust) {
+                if ($custData) {
+                    $trx['customer'] = $custData;
                     if (strtoupper($status ?? '') === 'READY') {
-                        send_order_ready_email($trxWithCust);
+                        send_order_ready_email($trx);
                     } else if (strtoupper($status ?? '') === 'SHIPPED') {
-                        send_order_shipped_email($trxWithCust, $resi, $courier);
+                        send_order_shipped_email($trx, $resi, $courier);
+                    } else if (strtoupper($status ?? '') === 'DELIVERED') {
+                        send_order_delivered_email($trx);
                     }
                 }
             }

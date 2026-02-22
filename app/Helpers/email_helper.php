@@ -311,6 +311,37 @@ if (!function_exists('send_payment_confirmed_email')) {
     }
 }
 
+if (!function_exists('send_payment_rejected_email')) {
+    /**
+     * Email when payment is rejected
+     */
+    function send_payment_rejected_email($transaction, $reason)
+    {
+        if (empty($transaction['customer']['email']))
+            return false;
+
+        $email = $transaction['customer']['email'];
+        $name = $transaction['customer']['nama_customer'];
+        $invoice = $transaction['invoice'];
+
+        $content = '
+            <h2>Pembayaran Ditolak</h2>
+            <p>Halo, ' . htmlspecialchars($name) . '. Mohon maaf, pembayaran Anda untuk pesanan <strong>' . htmlspecialchars($invoice) . '</strong> belum dapat kami verifikasi.</p>
+            
+            <div class="info-box">
+                <p><strong>Alasan Penolakan:</strong> ' . htmlspecialchars($reason ?: 'Bukti pembayaran tidak sesuai atau tidak terbaca.') . '</p>
+            </div>
+            
+            <p>Silakan lakukan pembayaran ulang atau unggah bukti pembayaran yang valid melalui aplikasi/website kami agar kami dapat segera memproses pesanan Anda.</p>
+            
+            <p>Terima kasih atas pengertiannya.</p>
+        ';
+
+        $html = get_email_template('Pembayaran Ditolak - ' . $invoice, $content);
+        return enqueue_email($email, 'Update Status Pembayaran Pesanan #' . $invoice, $html);
+    }
+}
+
 if (!function_exists('send_order_ready_email')) {
     /**
      * Email when order status is READY
@@ -361,5 +392,30 @@ if (!function_exists('send_order_shipped_email')) {
 
         $html = get_email_template('Pesanan Dikirim - ' . $invoice, $content);
         return enqueue_email($email, 'Pesanan Anda Sudah Dikirim #' . $invoice, $html);
+    }
+}
+
+if (!function_exists('send_order_delivered_email')) {
+    /**
+     * Email when order status is DELIVERED
+     */
+    function send_order_delivered_email($transaction)
+    {
+        if (empty($transaction['customer']['email']))
+            return false;
+
+        $email = $transaction['customer']['email'];
+        $name = $transaction['customer']['nama_customer'];
+        $invoice = $transaction['invoice'];
+
+        $content = '
+            <h2>Pesanan Telah Diterima!</h2>
+            <p>Halo, ' . htmlspecialchars($name) . '. Kabar baik! Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah berhasil diterima atau diambil.</p>
+            <p>Terima kasih telah berbelanja di Hope Sparepart. Kami berharap produk yang Anda terima sesuai dengan keinginan Anda.</p>
+            <p>Jika Anda puas dengan pelayanan kami, mohon berikan ulasan positif Anda. Sampai jumpa di pesanan berikutnya!</p>
+        ';
+
+        $html = get_email_template('Pesanan Diterima - ' . $invoice, $content);
+        return enqueue_email($email, 'Pesanan Anda Telah Diterima #' . $invoice, $html);
     }
 }
