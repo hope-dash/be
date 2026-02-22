@@ -14,6 +14,7 @@ use App\Models\CashflowModel;
 use App\Models\AccountModel;
 use App\Models\JournalModel;
 use App\Models\JournalItemModel;
+use App\Models\StockLedgerModel;
 use CodeIgniter\HTTP\ResponseInterface;
 use DateTime;
 use PhpParser\Node\Scalar\Float_;
@@ -33,6 +34,7 @@ class TransactionController extends BaseController
     protected $accountModel;
     protected $journalModel;
     protected $journalItemModel;
+    protected $stockLedgerModel;
 
     public function __construct()
     {
@@ -48,6 +50,7 @@ class TransactionController extends BaseController
         $this->accountModel = new AccountModel();
         $this->journalModel = new JournalModel();
         $this->journalItemModel = new JournalItemModel();
+        $this->stockLedgerModel = new StockLedgerModel();
         $this->db = \Config\Database::connect(); // Memuat database
     }
 
@@ -1333,6 +1336,48 @@ class TransactionController extends BaseController
             $limit,
             200
         );
+    }
+    public function listStockLedger()
+    {
+        $idToko = $this->request->getGet('id_toko');
+        $kodeBarang = $this->request->getGet('kode_barang');
+        $dateStart = $this->request->getGet('date_start');
+        $dateEnd = $this->request->getGet('date_end');
+        $limit = (int) ($this->request->getGet('limit') ?: 10);
+        $page = (int) ($this->request->getGet('page') ?: 1);
+        $offset = ($page - 1) * $limit;
+
+        $builder = $this->db->table('stock_ledgers sl')
+            ->select('sl.*, p.nama_barang, t.toko_name, 
+                CONCAT(COALESCE(p.nama_barang, ""), " ", COALESCE(mb.nama_model, ""), " ", COALESCE(s.seri, "")) as nama_lengkap_barang')
+            ->join('product p', 'sl.id_barang = p.id_barang', 'left')
+            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+            ->join('toko t', 'sl.id_toko = t.id', 'left');
+
+        if ($idToko) {
+            $builder->where('sl.id_toko', $idToko);
+        }
+        if ($kodeBarang) {
+            $builder->where('sl.id_barang', $kodeBarang);
+        }
+        if ($dateStart) {
+            $builder->where('sl.created_at >=', $dateStart . ' 00:00:00');
+        }
+        if ($dateEnd) {
+            $builder->where('sl.created_at <=', $dateEnd . ' 23:59:59');
+        }
+
+        $countBuilder = clone $builder;
+        $total_data = $countBuilder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        $result = $builder->orderBy('sl.id', 'DESC')
+            ->limit($limit, $offset)
+            ->get()
+            ->getResultArray();
+
+        return $this->jsonResponse->multiResp('Success', $result, $total_data, $total_page, $page, $limit, 200);
     }
     public function calculateExpenseAllocation()
     {
