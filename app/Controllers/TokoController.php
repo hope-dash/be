@@ -275,14 +275,20 @@ class TokoController extends BaseController
             $tokoIds = array_filter(array_map('trim', explode(',', $tokoParam)));
             $isAll = $this->request->getGet('is_all') === 'true';
 
-            $query = $this->modelToko->select('id, toko_name, phone_number, bank, nama_pemilik, nomer_rekening')->where('deleted_at', NULL);
+            $query = $this->modelToko->builder()
+                ->select('toko.id, toko.toko_name, toko.phone_number, toko.bank, toko.nama_pemilik, toko.nomer_rekening, toko.alamat, provincy.name as province_name, provincy.name as provincies_name, kota_kabupaten.name as city_name, kecamatan.name as district_name, kelurahan.name as village_name')
+                ->join('provincy', 'toko.provinsi = provincy.code', 'left')
+                ->join('kota_kabupaten', 'toko.kota_kabupaten = kota_kabupaten.code', 'left')
+                ->join('kecamatan', 'toko.kecamatan = kecamatan.code', 'left')
+                ->join('kelurahan', 'toko.kelurahan = kelurahan.code', 'left')
+                ->where('toko.deleted_at', NULL);
 
             if (!$isAll) {
-                $query->where('type', 'CABANG');
+                $query->where('toko.type', 'CABANG');
             }
 
             if (!empty($tokoIds)) {
-                $query->whereIn('id', $tokoIds);
+                $query->whereIn('toko.id', $tokoIds);
             }
 
             $result = $query->get()->getResult();
@@ -294,7 +300,13 @@ class TokoController extends BaseController
                     'phone_number' => $row->phone_number,
                     'bank' => $row->bank,
                     'nama_pemilik' => $row->nama_pemilik,
-                    'nomer_rekening' => $row->nomer_rekening
+                    'nomer_rekening' => $row->nomer_rekening,
+                    'alamat' => $row->alamat,
+                    'province_name' => $row->province_name,
+                    'provincies_name' => $row->provincies_name,
+                    'city_name' => $row->city_name,
+                    'district_name' => $row->district_name,
+                    'village_name' => $row->village_name
                 ];
             }, $result);
 

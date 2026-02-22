@@ -1263,7 +1263,7 @@ class TransactionController extends BaseController
             $baseBuilder->whereIn('transaction.id_toko', $role);
         }
         if ($idToko) {
-            $baseBuilder->where('sp.id_toko', $idToko); // Fixed: changed to alias sp
+            $baseBuilder->where('transaction.id_toko', $idToko);
         }
 
         if ($dateStart) {
