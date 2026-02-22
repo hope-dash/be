@@ -26,6 +26,10 @@ $routes->post('api/closing/auto-monthly', 'ClosingController::autoCloseMonthly')
 $routes->post('api/v2/upload/image', 'UploadController::uploadImage', ['filter' => 'anyJwtAuth']);
 $routes->post('api/upload/image', 'UploadController::uploadImage', ['filter' => 'anyJwtAuth']);
 
+// Cron Jobs
+$routes->get('api/cron/process-email', 'CronController::processEmailQueue');
+$routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
+
 
 $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
     //user
