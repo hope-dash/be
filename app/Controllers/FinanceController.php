@@ -40,12 +40,17 @@ class FinanceController extends ResourceController
         // Since we have `id_toko` on Journal Header, we can't easily have ONE journal for TWO tokos.
         // We need 2 Journals.
 
-        $amount = $data->amount;
+        $amount = $data->amount ?? 0;
         if ($amount <= 0)
             return $this->jsonResponse->error("Amount must be positive", 400);
 
-        $fromToko = $data->source_toko_id;
-        $toToko = $data->target_toko_id;
+        $fromToko = $data->source_toko_id ?? null;
+        $toToko = $data->target_toko_id ?? null;
+        $description = $data->description ?? "Transfer antar toko";
+
+        if (!$fromToko || !$toToko) {
+            return $this->jsonResponse->error("Source and Target Toko ID are required", 400);
+        }
 
         $this->db->transStart();
 
@@ -53,7 +58,7 @@ class FinanceController extends ResourceController
 
             if ($fromToko == $toToko) {
                 // Case: Same Store (Internal Transfer e.g. Cash to Bank)
-                $j1 = $this->createJournal('TRANSFER', "TRF-" . date('ymdHis'), $data->description ?? "Internal Transfer", $data->date ?? date('Y-m-d'), $fromToko);
+                $j1 = $this->createJournal('TRANSFER', "TRF-" . date('ymdHis'), $description, $data->date ?? date('Y-m-d'), $fromToko);
 
                 // Credit Source Account
                 $this->addJournalItem($j1, $data->source_account_code, 0, $amount, $fromToko);
@@ -63,14 +68,14 @@ class FinanceController extends ResourceController
                 $j2 = null;
             } else {
                 // 1. Source Journal: Cr SourceAccount, Dr TargetAccount (Transit)
-                $j1 = $this->createJournal('TRANSFER_OUT', "TRF-" . date('ymdHis'), "Transfer Out to Toko #$toToko" . ($data->description ? ": " . $data->description : ""), $data->date ?? date('Y-m-d'), $fromToko);
+                $j1 = $this->createJournal('TRANSFER_OUT', "TRF-" . date('ymdHis'), "Transfer Out to Toko #$toToko: " . $description, $data->date ?? date('Y-m-d'), $fromToko);
                 $this->addJournalItem($j1, $data->source_account_code, 0, $amount, $fromToko); // Credit
-                $this->addJournalItem($j1, $data->target_account_code, $amount, 0, $fromToko); // Debit
+                $this->addJournalItem($j1, '10' . $fromToko . '5', $amount, 0, $fromToko); // Debit (Funds in Transit)
 
                 // 2. Dest Journal: Dr DestAccount, Cr inter-store clearing
-                $j2 = $this->createJournal('TRANSFER_IN', "TRF-" . date('ymdHis'), "Transfer In from Toko #$fromToko" . ($data->description ? ": " . $data->description : ""), $data->date ?? date('Y-m-d'), $toToko);
+                $j2 = $this->createJournal('TRANSFER_IN', "TRF-" . date('ymdHis'), "Transfer In from Toko #$fromToko: " . $description, $data->date ?? date('Y-m-d'), $toToko);
                 $this->addJournalItem($j2, $data->target_account_code, $amount, 0, $toToko); // Debit
-                $this->addJournalItem($j2, '30' . $fromToko . '1', 0, $amount, $toToko); // Credit
+                $this->addJournalItem($j2, '10' . $toToko . '5', 0, $amount, $toToko); // Credit (Funds in Transit)
             }
 
             $this->db->transComplete();
