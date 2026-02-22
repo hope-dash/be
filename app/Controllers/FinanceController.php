@@ -70,12 +70,12 @@ class FinanceController extends ResourceController
                 // 1. Source Journal: Cr SourceAccount, Dr TargetAccount (Transit)
                 $j1 = $this->createJournal('TRANSFER_OUT', "TRF-" . date('ymdHis'), "Transfer Out to Toko #$toToko: " . $description, $data->date ?? date('Y-m-d'), $fromToko);
                 $this->addJournalItem($j1, $data->source_account_code, 0, $amount, $fromToko); // Credit
-                $this->addJournalItem($j1, '10' . $fromToko . '5', $amount, 0, $fromToko); // Debit (Funds in Transit)
+                $this->addJournalItem($j1, '30' . $fromToko . '1', $amount, 0, $fromToko); // Debit (Funds in Transit)
 
                 // 2. Dest Journal: Dr DestAccount, Cr inter-store clearing
                 $j2 = $this->createJournal('TRANSFER_IN', "TRF-" . date('ymdHis'), "Transfer In from Toko #$fromToko: " . $description, $data->date ?? date('Y-m-d'), $toToko);
                 $this->addJournalItem($j2, $data->target_account_code, $amount, 0, $toToko); // Debit
-                $this->addJournalItem($j2, '10' . $toToko . '5', 0, $amount, $toToko); // Credit (Funds in Transit)
+                $this->addJournalItem($j2, '10' . $toToko . '2', 0, $amount, $toToko); // Credit (Funds in Transit)
             }
 
             $this->db->transComplete();
