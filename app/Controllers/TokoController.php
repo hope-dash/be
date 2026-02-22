@@ -183,12 +183,14 @@ class TokoController extends BaseController
     {
         try {
             $toko = $this->modelToko->builder()
-                ->select('toko.*, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->select('toko.*, provincy.name as province_name, provincy.name as provincies_name, kota_kabupaten.name as city_name, kecamatan.name as district_name, kelurahan.name as village_name')
                 ->join('provincy', 'toko.provinsi = provincy.code', 'left')
                 ->join('kota_kabupaten', 'toko.kota_kabupaten = kota_kabupaten.code', 'left')
                 ->join('kecamatan', 'toko.kecamatan = kecamatan.code', 'left')
                 ->join('kelurahan', 'toko.kelurahan = kelurahan.code', 'left')
                 ->where('toko.id', $id)
+                ->where('toko.deleted_at', null)
+                ->groupBy('toko.id')
                 ->get()
                 ->getRowArray();
 
@@ -238,11 +240,12 @@ class TokoController extends BaseController
             $offset = ($page - 1) * $limit;
 
             $builder = $this->modelToko->builder()
-                ->select('toko.*, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->select('toko.*, provincy.name as province_name, provincy.name as provincies_name, kota_kabupaten.name as city_name, kecamatan.name as district_name, kelurahan.name as village_name')
                 ->join('provincy', 'toko.provinsi = provincy.code', 'left')
                 ->join('kota_kabupaten', 'toko.kota_kabupaten = kota_kabupaten.code', 'left')
                 ->join('kecamatan', 'toko.kecamatan = kecamatan.code', 'left')
-                ->join('kelurahan', 'toko.kelurahan = kelurahan.code', 'left');
+                ->join('kelurahan', 'toko.kelurahan = kelurahan.code', 'left')
+                ->where('toko.deleted_at', null);
 
             if (!empty($namaToko)) {
                 $builder->like('toko.toko_name', $namaToko, 'both');
@@ -252,7 +255,8 @@ class TokoController extends BaseController
             $total_page = ceil($total_data / $limit);
 
             // Get paginated results
-            $result = $builder->orderBy('toko.' . $sortBy, $sortMethod)
+            $result = $builder->groupBy('toko.id')
+                ->orderBy('toko.' . $sortBy, $sortMethod)
                 ->limit($limit, $offset)
                 ->get()
                 ->getResult();

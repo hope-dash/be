@@ -527,6 +527,7 @@ class TransactionController extends BaseController
 
         $status = $request->getGet('status');
         $delivery_status = $request->getGet('delivery_status');
+        $source = $request->getGet('source');
         $id_toko = $request->getGet('id_toko');
         $date_start = $request->getGet('date_start');
         $date_end = $request->getGet('date_end');
@@ -555,7 +556,7 @@ class TransactionController extends BaseController
             // OPTIMIZED PATH (Search with Subqueries, Simple Sort)
             // ==========================================
             $builder = $db->table('transaction t')
-                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount,t.actual_total, t.po, t.total_payment, t.status, t.id_toko, t.date_time, toko.toko_name')
+                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.actual_total, t.po, t.total_payment, t.status, t.delivery_status, t.id_toko, t.date_time, toko.toko_name')
                 ->join('toko', 't.id_toko = toko.id', 'left');
 
             // Apply Basic Filters
@@ -568,6 +569,9 @@ class TransactionController extends BaseController
             }
             if ($delivery_status)
                 $builder->like('t.delivery_status', $delivery_status, 'both');
+            if ($source) {
+                $builder->where("EXISTS (SELECT 1 FROM transaction_meta tm_source_f WHERE tm_source_f.transaction_id = t.id AND tm_source_f.key = 'source' AND tm_source_f.value LIKE '%{$db->escapeLikeString($source)}%')");
+            }
             if (!empty($role) && !$id_toko)
                 $builder->whereIn('t.id_toko', $role);
             if ($id_toko)
@@ -630,7 +634,7 @@ class TransactionController extends BaseController
                 // 1. Get Transaction Meta (Customer Info & Jatuh Tempo)
                 $metas = $db->table('transaction_meta')
                     ->whereIn('transaction_id', $transactionIds)
-                    ->whereIn('key', ['customer_id', 'customer_name', 'jatuh_tempo', 'pengiriman', 'resi'])
+                    ->whereIn('key', ['customer_id', 'customer_name', 'jatuh_tempo', 'pengiriman', 'resi', 'source'])
                     ->get()
                     ->getResultArray();
 
@@ -683,6 +687,7 @@ class TransactionController extends BaseController
                     // Add Pengiriman and Resi
                     $row['pengiriman'] = $tMeta['pengiriman'] ?? null;
                     $row['resi'] = $tMeta['resi'] ?? null;
+                    $row['source'] = $tMeta['source'] ?? null;
                 }
                 unset($row);
             }
@@ -713,7 +718,9 @@ class TransactionController extends BaseController
                     ELSE FALSE
                 END AS jatuh_tempo,
                 tm_pengiriman.value AS pengiriman,
-                tm_resi.value AS resi
+                tm_resi.value AS resi,
+                tm_source.value AS source,
+                t.delivery_status
             ")
                 ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
                 ->join('customer c', 'tm_cust.value = c.id', 'left')
@@ -721,6 +728,7 @@ class TransactionController extends BaseController
                 ->join('transaction_meta tm_jatuh_tempo', 't.id = tm_jatuh_tempo.transaction_id AND tm_jatuh_tempo.key = "jatuh_tempo"', 'left')
                 ->join('transaction_meta tm_pengiriman', 't.id = tm_pengiriman.transaction_id AND tm_pengiriman.key = "pengiriman"', 'left')
                 ->join('transaction_meta tm_resi', 't.id = tm_resi.transaction_id AND tm_resi.key = "resi"', 'left')
+                ->join('transaction_meta tm_source', 't.id = tm_source.transaction_id AND tm_source.key = "source"', 'left')
                 ->join('toko', 't.id_toko = toko.id', 'left');
 
             // Apply Filters
@@ -731,6 +739,11 @@ class TransactionController extends BaseController
                     $builder->where('t.status', $status);
                 }
             }
+            if ($delivery_status)
+                $builder->like('t.delivery_status', $delivery_status, 'both');
+            if ($source)
+                $builder->like('tm_source.value', $source, 'both');
+
             if (!empty($role) && !$id_toko)
                 $builder->whereIn('t.id_toko', $role);
             if ($id_toko)

@@ -636,7 +636,7 @@ class CustomerControllerV2 extends ResourceController
             $customer = $this->request->customer;
 
             $profile = $this->customerModel->builder()
-                ->select('customer.id, customer.nama_customer, customer.email, customer.no_hp_customer, customer.alamat, customer.provinsi, customer.kota_kabupaten, customer.kecamatan, customer.kelurahan, customer.kode_pos, customer.discount_type, customer.discount_value, provincy.name as nama_provinsi, kota_kabupaten.name as nama_kota, kecamatan.name as nama_kecamatan, kelurahan.name as nama_kelurahan')
+                ->select('customer.id, customer.nama_customer, customer.email, customer.no_hp_customer, customer.alamat, customer.provinsi, customer.kota_kabupaten, customer.kecamatan, customer.kelurahan, customer.kode_pos, customer.discount_type, customer.discount_value, provincy.name as province_name, provincy.name as provincies_name, kota_kabupaten.name as city_name, kecamatan.name as district_name, kelurahan.name as village_name')
                 ->join('provincy', 'customer.provinsi = provincy.code', 'left')
                 ->join('kota_kabupaten', 'customer.kota_kabupaten = kota_kabupaten.code', 'left')
                 ->join('kecamatan', 'customer.kecamatan = kecamatan.code', 'left')
