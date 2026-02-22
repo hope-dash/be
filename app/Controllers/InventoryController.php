@@ -32,6 +32,7 @@ class InventoryController extends ResourceController
         $this->productModel = new ProductModel();
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
+        helper('log');
     }
 
     // Transfer Stock (Antar Toko)
@@ -112,6 +113,15 @@ class InventoryController extends ResourceController
                     'description' => $note
                 ]);
 
+                // Activity Log for each product item
+                log_aktivitas([
+                    'user_id' => $user,
+                    'action_type' => 'STOCK_TRANSFER',
+                    'target_table' => 'product',
+                    'target_id' => $product['id'],
+                    'description' => "Transfer Stok: Produk $code dikirim dari Toko #$fromToko ke Toko #$toToko. Qty: $qty. Stok baru di target: $newStock"
+                ]);
+
                 // Calculate Value (Using Cost Price)
                 $totalValue += ($product['harga_modal'] * $qty);
             }
@@ -144,6 +154,20 @@ class InventoryController extends ResourceController
             }
 
             $this->db->transComplete();
+
+            log_aktivitas([
+                'user_id' => $user,
+                'action_type' => 'STOCK_TRANSFER',
+                'target_table' => 'stock',
+                'target_id' => 0,
+                'description' => "Transfer stock dari Toko #$fromToko ke Toko #$toToko. Ref: $refId",
+                'detail' => [
+                    'source_toko' => $fromToko,
+                    'target_toko' => $toToko,
+                    'items' => $data->items,
+                    'ref_id' => $refId
+                ]
+            ]);
 
             return $this->jsonResponse->oneResp('Stock transfer successful', ['ref_id' => $refId], 200);
 

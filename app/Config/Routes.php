@@ -164,6 +164,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
 
         // Purchase V2 (Overriding/Alternative to old Pembelian)
         $routes->post('purchase', 'PembelianControllerV2::create');
+        $routes->post('purchase/(:num)/review', 'PembelianControllerV2::review/$1');
         $routes->post('purchase/(:num)/execute', 'PembelianControllerV2::execute/$1');
 
         // Accounting Reports

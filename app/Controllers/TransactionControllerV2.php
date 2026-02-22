@@ -1112,6 +1112,16 @@ class TransactionControllerV2 extends ResourceController
             'reference_id' => $trxId,
             'description' => $reason
         ]);
+
+        // Activity Log
+        $product = $this->productModel->where('id_barang', $productCode)->first();
+        log_aktivitas([
+            'user_id' => $this->request->user['user_id'] ?? 0,
+            'action_type' => 'STOCK_OUT',
+            'target_table' => 'product',
+            'target_id' => $product ? $product['id'] : 0,
+            'description' => "Pengurangan Stock: Produk $productCode di Toko #$tokoId. Qty: -$qty, Sisa: $newStock. Ref: $reason"
+        ]);
     }
 
     private function addStock($productCode, $tokoId, $qty, $trxId, $reason, $isDamaged = false)
@@ -1138,6 +1148,16 @@ class TransactionControllerV2 extends ResourceController
             'reference_type' => 'RETURN',
             'reference_id' => $trxId,
             'description' => $reason
+        ]);
+
+        // Activity Log
+        $product = $this->productModel->where('id_barang', $productCode)->first();
+        log_aktivitas([
+            'user_id' => $this->request->user['user_id'] ?? 0,
+            'action_type' => 'STOCK_IN',
+            'target_table' => 'product',
+            'target_id' => $product ? $product['id'] : 0,
+            'description' => "Penambahan Stock (Return): Produk $productCode di Toko #$tokoId. Qty: +$qty, Total: $newStock. Ref: $reason"
         ]);
     }
 

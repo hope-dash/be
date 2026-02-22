@@ -44,6 +44,49 @@ class PembelianControllerV2 extends ResourceController
         $this->productModel = new ProductModel();
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
+        helper('log');
+    }
+
+    /**
+     * REVIEW/APPROVE PEMBELIAN
+     * Changes status from NEED_REVIEW to APPROVED
+     */
+    public function review($id = null)
+    {
+        $user = $this->request->user;
+        $activeUser = $user['user_id'] ?? null;
+
+        $pembelian = $this->pembelianModel->find($id);
+        if (!$pembelian) {
+            return $this->jsonResponse->error('Pembelian tidak ditemukan', 404);
+        }
+
+        if ($pembelian['status'] !== 'NEED_REVIEW') {
+            return $this->jsonResponse->error('Hanya pembelian dengan status NEED_REVIEW yang dapat di-approve. Status saat ini: ' . $pembelian['status'], 400);
+        }
+
+        $this->db->transStart();
+        try {
+            $this->pembelianModel->update($id, [
+                'status' => 'APPROVED',
+                'updated_by' => $activeUser
+            ]);
+
+            $this->db->transComplete();
+
+            log_aktivitas([
+                'user_id' => $activeUser,
+                'action_type' => 'APPROVE_PURCHASE',
+                'target_table' => 'pembelian',
+                'target_id' => $id,
+                'description' => "Menyetujui (Approve) pembelian ID: #$id senilai " . number_format($pembelian['total_belanja'], 0, ',', '.')
+            ]);
+
+            return $this->jsonResponse->oneResp('Pembelian berhasil di-approve', ['id' => $id], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
     }
 
     // CREATE PEMBELIAN (Draft/Review)
@@ -115,6 +158,16 @@ class PembelianControllerV2 extends ResourceController
             }
 
             $this->db->transComplete();
+
+            log_aktivitas([
+                'user_id' => $user['user_id'],
+                'action_type' => 'CREATE_PURCHASE',
+                'target_table' => 'pembelian',
+                'target_id' => $pembelianId,
+                'description' => "Membuat draft pembelian barang senilai " . number_format($grandTotal, 0, ',', '.'),
+                'detail' => ['id_toko' => $request['id_toko'], 'total' => $grandTotal]
+            ]);
+
             return $this->jsonResponse->oneResp('Pembelian disimpan (Draft)', ['id' => $pembelianId], 201);
 
         } catch (\Exception $e) {
@@ -229,6 +282,15 @@ class PembelianControllerV2 extends ResourceController
                     'reference_id' => $pembelianId,
                     'description' => "Pembelian Barang (Avg Cost Updated: {$oldCostDisplay} -> {$newAvgCostDisplay})"
                 ]);
+
+                // Activity Log for each product
+                log_aktivitas([
+                    'user_id' => $user['user_id'],
+                    'action_type' => 'STOCK_IN',
+                    'target_table' => 'product',
+                    'target_id' => $product['id'],
+                    'description' => "Belanja: Produk {$item['kode_barang']} di Toko #{$pembelian['id_toko']}. Stock: $oldQty -> $totalNewQty, Modal: $oldCostDisplay -> $newAvgCostDisplay"
+                ]);
             }
 
             // Update Header
@@ -238,6 +300,15 @@ class PembelianControllerV2 extends ResourceController
             ]);
 
             $this->db->transComplete();
+
+            log_aktivitas([
+                'user_id' => $user['user_id'],
+                'action_type' => 'EXECUTE_PURCHASE',
+                'target_table' => 'pembelian',
+                'target_id' => $pembelianId,
+                'description' => "Mengeksekusi pembelian ID: #$pembelianId, stock bertambah dan jurnal dicatat."
+            ]);
+
             return $this->jsonResponse->oneResp('Pembelian berhasil diproses', ['id' => $pembelianId], 200);
 
         } catch (\Exception $e) {
