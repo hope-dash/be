@@ -24,6 +24,7 @@ class BarangController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
+
         $validation = \Config\Services::validation();
         $validation->setRules([
             'kode_awal' => 'required',
@@ -33,6 +34,19 @@ class BarangController extends ResourceController
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
+
+        // Check uniqueness of kode_awal (must be unique globally, even if deleted)
+        $existingKode = $this->modelBarangModel->withDeleted()->where('kode_awal', $data->kode_awal)->first();
+        if ($existingKode) {
+            return $this->jsonResponse->error("Kode Awal '" . $data->kode_awal . "' sudah pernah digunakan (meskipun sudah dihapus) dan tidak boleh diulang.", 400);
+        }
+
+        // Check uniqueness of nama_model (only active records are checked)
+        $existingModel = $this->modelBarangModel->where('nama_model', $data->nama_model)->first();
+        if ($existingModel) {
+            return $this->jsonResponse->error("Nama Model '" . $data->nama_model . "' sudah ada yang aktif. Gunakan nama lain atau hapus model yang lama.", 400);
+        }
+
         $data->created_by = $token['user_id'];
         $this->modelBarangModel->insert($data);
 
@@ -80,6 +94,13 @@ class BarangController extends ResourceController
         if (!$this->validate($validation->getRules())) {
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
+
+        // Check uniqueness of seri name (only active records)
+        $existingSeri = $this->seriModel->where('seri', $data->seri)->first();
+        if ($existingSeri) {
+            return $this->jsonResponse->error("Seri '" . $data->seri . "' sudah ada yang aktif.", 400);
+        }
+
         $data->created_by = $token['user_id'];
 
         $this->seriModel->insert($data);
@@ -120,9 +141,32 @@ class BarangController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
+
+        // Check uniqueness of kode_awal if being updated (must be unique globally)
+        if (isset($data->kode_awal)) {
+            $existingKode = $this->modelBarangModel->withDeleted()
+                ->where('kode_awal', $data->kode_awal)
+                ->where('id !=', $id)
+                ->first();
+            if ($existingKode) {
+                return $this->jsonResponse->error("Kode Awal '" . $data->kode_awal . "' sudah pernah digunakan oleh model lain (termasuk yang sudah dihapus).", 400);
+            }
+        }
+
+        // Check uniqueness of nama_model if being updated (only active records)
+        if (isset($data->nama_model)) {
+            $existingModel = $this->modelBarangModel
+                ->where('nama_model', $data->nama_model)
+                ->where('id !=', $id)
+                ->first();
+            if ($existingModel) {
+                return $this->jsonResponse->error("Nama Model '" . $data->nama_model . "' sudah digunakan oleh model aktif lainnya.", 400);
+            }
+        }
+
         $data->updated_by = $token['user_id'];
         $this->modelBarangModel->update($id, $data);
-        return $this->jsonResponse->oneResp('Update ' . $data->nama_model . ' successfully', [], 200);
+        return $this->jsonResponse->oneResp('Update ' . ($data->nama_model ?? 'Model') . ' successfully', [], 200);
     }
 
     // Update Seri
@@ -130,9 +174,21 @@ class BarangController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
+
+        // Check uniqueness of seri name if being updated (only active records)
+        if (isset($data->seri)) {
+            $existingSeri = $this->seriModel
+                ->where('seri', $data->seri)
+                ->where('id !=', $id)
+                ->first();
+            if ($existingSeri) {
+                return $this->jsonResponse->error("Seri '" . $data->seri . "' sudah digunakan oleh seri aktif lainnya.", 400);
+            }
+        }
+
         $data->updated_by = $token['user_id'];
         $this->seriModel->update($id, $data);
-        return $this->jsonResponse->oneResp('Update ' . $data->seri . ' successfully', [], 200);
+        return $this->jsonResponse->oneResp('Update ' . ($data->seri ?? 'Seri') . ' successfully', [], 200);
     }
 
     public function deleteModel($id = null)
