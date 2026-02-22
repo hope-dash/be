@@ -80,13 +80,14 @@ class CronController extends Controller
     public function runScheduler()
     {
         // Check if the library is installed
-        if (!class_exists('\Daycry\CronJob\Scheduler')) {
-            return $this->jsonResponse->error('Daycry CronJob library is not installed. Please run composer install.', 500);
+        if (!class_exists('\Daycry\CronJob\JobRunner')) {
+            return $this->jsonResponse->error('Daycry CronJob library is not installed correctly.', 500);
         }
 
         try {
-            $scheduler = service('cronjob');
-            $scheduler->run();
+            $config = config('CronJob');
+            $runner = new \Daycry\CronJob\JobRunner($config);
+            $runner->run();
 
             return $this->jsonResponse->oneResp('Scheduler run successfully', [], 200);
         } catch (\Exception $e) {

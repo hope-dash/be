@@ -15,7 +15,7 @@ class CronJob extends BaseConfig
     | The database group to use for logging.
     |
     */
-    public string $databaseGroup = 'default';
+    public ?string $databaseGroup = 'default';
 
     /*
     |--------------------------------------------------------------------------
@@ -60,7 +60,11 @@ class CronJob extends BaseConfig
     | The email address to send notifications to.
     |
     */
-    public ?string $notificationEmail = null;
+    public bool $notification = false;
+    public string $from = 'your@example.com';
+    public string $fromName = 'CronJob';
+    public string $to = 'your@example.com';
+    public string $toName = 'User';
 
     /**
      * Define the application's command schedule.
