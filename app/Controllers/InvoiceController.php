@@ -222,6 +222,7 @@ class InvoiceController extends Controller
             ->select("
                 sp.*,
                 p.nama_barang,
+                p.berat,
                 mb.nama_model,
                 s.seri,
                 CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang

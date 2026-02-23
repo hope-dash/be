@@ -459,9 +459,27 @@
                         </span>
                     </div>
                 <?php endif; ?>
+
+                <?php
+                if (!empty($transaction['meta']['adjustments'])):
+                    $adjustments = json_decode($transaction['meta']['adjustments'], true) ?? [];
+                    foreach ($adjustments as $adj):
+                        $isAddition = ($adj['type'] === 'addition');
+                        $sign = $isAddition ? '+ Rp ' : '- Rp ';
+                        ?>
+                        <div class="summary-row">
+                            <span><?= esc($adj['component_name']) ?>:</span>
+                            <span><?= $sign . number_format($adj['amount'], 0, ',', '.') ?></span>
+                        </div>
+                        <?php
+                    endforeach;
+                endif;
+                ?>
+
                 <div class="summary-row total">
                     <span>TOTAL:</span>
-                    <span>Rp <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?></span>
+                    <span>Rp
+                        <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?></span>
                 </div>
                 <?php if (!empty($transaction['total_paid'])): ?>
                     <div class="summary-row" style="color: #27ae60;">

@@ -610,6 +610,134 @@ class TransactionControllerV2 extends ResourceController
         }
     }
 
+    public function adjust($id = null)
+    {
+        $data = $this->request->getJSON();
+        $userId = $this->request->user['user_id'] ?? 0;
+
+        $trx = $this->transactionModel->find($id);
+        if (!$trx)
+            return $this->jsonResponse->error("Transaction not found", 404);
+
+        $componentName = $data->component_name ?? 'Penambahan/Pengurangan';
+        $type = $data->type ?? 'addition'; // 'addition' or 'subtraction'
+        $amount = (float) ($data->amount ?? 0);
+
+        if ($amount <= 0) {
+            return $this->jsonResponse->error("Amount must be greater than 0", 400);
+        }
+
+        $this->db->transStart();
+        try {
+            $actualTotal = (float) $trx['actual_total'];
+            $newActualTotal = ($type === 'addition') ? ($actualTotal + $amount) : ($actualTotal - $amount);
+
+            if ($newActualTotal < 0)
+                $newActualTotal = 0;
+
+            // Journal Entry for Adjustment
+            $jId = $this->createJournal('ADJUSTMENT', $id, $trx['invoice'], date('Y-m-d'), "Invoice Adjustment: {$componentName}", $trx['id_toko']);
+
+            if ($type === 'addition') {
+                // Increase AR
+                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', $amount, 0, $trx['id_toko']);
+                // Increase Other Income / Sales
+                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', 0, $amount, $trx['id_toko']);
+            } else {
+                // Increase Sales Discount (Debit)
+                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '2', $amount, 0, $trx['id_toko']);
+                // Decrease AR
+                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']);
+            }
+
+            // Check if status needs to change from PAID to NEED_REFUND or PARTIALLY_PAID
+            $totalPayment = (float) $trx['total_payment'];
+            $newStatus = $trx['status'];
+            $refundNeeded = 0;
+
+            if ($newActualTotal < $totalPayment) {
+                $newStatus = 'NEED_REFUND';
+                $refundNeeded = $totalPayment - $newActualTotal;
+            } else if ($newActualTotal == $totalPayment) {
+                $newStatus = ($totalPayment > 0) ? 'PAID' : 'WAITING_PAYMENT';
+            } else if ($totalPayment > 0 && $newActualTotal > $totalPayment) {
+                $newStatus = 'PARTIALLY_PAID';
+            } else if ($totalPayment == 0) {
+                $newStatus = 'WAITING_PAYMENT';
+            }
+
+            // Handle refund_needed meta
+            $refundMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'refund_needed')->first();
+            if ($refundNeeded > 0) {
+                if ($refundMeta) {
+                    $this->transactionMetaModel->update($refundMeta['id'], ['value' => $refundNeeded]);
+                } else {
+                    $this->transactionMetaModel->insert([
+                        'transaction_id' => $id,
+                        'key' => 'refund_needed',
+                        'value' => $refundNeeded
+                    ]);
+                }
+            } elseif ($refundMeta) {
+                $this->transactionMetaModel->update($refundMeta['id'], ['value' => 0]);
+            }
+
+            $this->transactionModel->update($id, [
+                'actual_total' => $newActualTotal,
+                'status' => $newStatus
+            ]);
+
+            // Save adjustments to meta
+            $adjustmentsJSON = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'adjustments')->first();
+            $adjustmentsRecord = $adjustmentsJSON ? json_decode($adjustmentsJSON['value'], true) : [];
+            $adjustmentsRecord[] = [
+                'component_name' => $componentName,
+                'type' => $type,
+                'amount' => $amount,
+                'date' => date('Y-m-d H:i:s')
+            ];
+
+            if ($adjustmentsJSON) {
+                $this->transactionMetaModel->update($adjustmentsJSON['id'], ['value' => json_encode($adjustmentsRecord)]);
+            } else {
+                $this->transactionMetaModel->insert([
+                    'transaction_id' => $id,
+                    'key' => 'adjustments',
+                    'value' => json_encode($adjustmentsRecord)
+                ]);
+            }
+
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'ADJUST_INVOICE',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Penyesuaian Transaksi {$trx['invoice']} - {$componentName} ({$type}): {$amount}",
+                'detail' => [
+                    'component_name' => $componentName,
+                    'type' => $type,
+                    'amount' => $amount,
+                    'old_total' => $actualTotal,
+                    'new_total' => $newActualTotal
+                ]
+            ]);
+
+            $this->db->transComplete();
+            if ($this->db->transStatus() === false) {
+                throw new \Exception("Failed to update transaction");
+            }
+
+            return $this->jsonResponse->oneResp('Transaction adjusted successfully', [
+                'new_actual_total' => $newActualTotal,
+                'status' => $newStatus
+            ], 200);
+
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
     // 3. Cancel Transaction
     public function cancel($id = null)
     {
@@ -1188,7 +1316,7 @@ class TransactionControllerV2 extends ResourceController
             $transaction['meta'] = $metaMap;
 
             // Security Check: If hit by Customer, verify ownership
-            if (isset($this->request->customer)) {
+            if (property_exists($this->request, 'customer') && isset($this->request->customer)) {
                 $customerId = $this->request->customer['id'];
                 if (!isset($metaMap['customer_id']) || (int) $metaMap['customer_id'] !== (int) $customerId) {
                     return $this->jsonResponse->error("Unauthorized: You do not have permission to view this transaction.", 403);
@@ -1200,6 +1328,7 @@ class TransactionControllerV2 extends ResourceController
                 ->select("
                     sp.*,
                     p.nama_barang,
+                    p.berat,
                     mb.nama_model,
                     s.seri,
                     CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang

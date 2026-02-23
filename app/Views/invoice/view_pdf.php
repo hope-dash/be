@@ -506,6 +506,25 @@
                                 </tr>
                             </table>
                         <?php endif; ?>
+
+                        <?php
+                        if (!empty($transaction['meta']['adjustments'])):
+                            $adjustments = json_decode($transaction['meta']['adjustments'], true) ?? [];
+                            foreach ($adjustments as $adj):
+                                $isAddition = ($adj['type'] === 'addition');
+                                $sign = $isAddition ? '+ Rp ' : '- Rp ';
+                                ?>
+                                <table class="summary-row" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td><?= esc($adj['component_name']) ?>:</td>
+                                        <td class="text-right"><?= $sign . number_format($adj['amount'], 0, ',', '.') ?></td>
+                                    </tr>
+                                </table>
+                                <?php
+                            endforeach;
+                        endif;
+                        ?>
+
                         <table class="summary-row total" cellpadding="0" cellspacing="0">
                             <tr>
                                 <td>TOTAL:</td>
