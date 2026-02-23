@@ -398,7 +398,7 @@
                 $no = 1;
                 $subtotal = 0;
                 foreach ($transaction['items'] as $item):
-                    $itemTotal = ($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0);
+                    $itemTotal = $item['actual_total'] ?? (($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0));
                     $subtotal += $itemTotal;
                     ?>
                     <tr>
@@ -471,7 +471,16 @@
                                 </tr>
                             </table>
                         <?php endif; ?>
-                        <?php if (!empty($transaction['ppn'])): ?>
+                        <?php if (!empty($transaction['meta']['ppn']) && !empty($transaction['meta']['ppn_value'])): ?>
+                            <table class="summary-row" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td>Pajak (PPN <?= esc($transaction['meta']['ppn']) ?>%):</td>
+                                    <td class="text-right">Rp
+                                        <?= number_format($transaction['meta']['ppn_value'], 0, ',', '.') ?>
+                                    </td>
+                                </tr>
+                            </table>
+                        <?php elseif (!empty($transaction['ppn'])): ?>
                             <table class="summary-row" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td>Pajak (PPN):</td>
@@ -501,7 +510,7 @@
                             <tr>
                                 <td>TOTAL:</td>
                                 <td class="text-right">Rp
-                                    <?= number_format($transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?>
+                                    <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?>
                                 </td>
                             </tr>
                         </table>
@@ -518,7 +527,7 @@
                                 <tr>
                                     <td style="color: #e74c3c;">Sisa:</td>
                                     <td class="text-right" style="color: #e74c3c;">Rp
-                                        <?= number_format(($transaction['total_harga'] ?? $subtotal) - $transaction['total_paid'], 0, ',', '.') ?>
+                                        <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) - $transaction['total_paid'], 0, ',', '.') ?>
                                     </td>
                                 </tr>
                             </table>

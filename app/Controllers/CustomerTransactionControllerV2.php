@@ -573,6 +573,140 @@ class CustomerTransactionControllerV2 extends ResourceController
         }
     }
 
+    // --- CANCEL TRANSACTION ---
+    public function cancel($id = null)
+    {
+        $data = $this->request->getJSON();
+        $customerId = $this->request->customer['id'] ?? 0;
+
+        $trx = $this->transactionModel->find($id);
+        if (!$trx)
+            return $this->jsonResponse->error("Transaction not found", 404);
+
+        // Security Check: Make sure transaction belongs to customer
+        $meta = $this->transactionMetaModel
+            ->where('transaction_id', $id)
+            ->where('key', 'customer_id')
+            ->where('value', (string) $customerId)
+            ->first();
+
+        if (!$meta) {
+            return $this->jsonResponse->error("Unauthorized access to this transaction", 403);
+        }
+
+        $this->db->transStart();
+        try {
+            // Restore Stock
+            $items = $this->salesProductModel->where('id_transaction', $id)->findAll();
+            $cogsReversal = 0;
+
+            foreach ($items as $item) {
+                $this->addStock($item['kode_barang'], $trx['id_toko'], $item['jumlah'], $id, "Cancel Transaction {$trx['invoice']}");
+                $cogsReversal += $item['total_modal'];
+            }
+
+            // Reverse COGS
+            if ($cogsReversal > 0) {
+                $jId = $this->createJournal('CANCEL_COGS', $id, $trx['invoice'], date('Y-m-d'), "Reversal COGS {$trx['invoice']}", $trx['id_toko']);
+                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '4', $cogsReversal, 0, $trx['id_toko']);
+                $this->addJournalItem($jId, '50' . $trx['id_toko'] . '1', 0, $cogsReversal, $trx['id_toko']);
+            }
+
+            // Reverse Sales
+            $jIdSales = $this->createJournal('CANCEL_SALES', $id, $trx['invoice'], date('Y-m-d'), "Cancellation {$trx['invoice']}", $trx['id_toko']);
+
+            // Get meta for accurate reversal
+            $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+            $metaMap = [];
+            foreach ($metas as $m) {
+                $metaMap[$m['key']] = $m['value'];
+            }
+
+            $ppnValue = (float) ($metaMap['ppn_value'] ?? 0);
+            $itemDiscountTotal = (float) ($metaMap['item_discount_total'] ?? 0);
+            $txDiscountValue = (float) ($metaMap['tx_discount_value'] ?? 0);
+            $totalDiscount = $itemDiscountTotal + $txDiscountValue;
+            $shippingCost = (float) ($metaMap['biaya_pengiriman'] ?? 0);
+            $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
+
+            // Reverse AR
+            $this->addJournalItem($jIdSales, '10' . $trx['id_toko'] . '3', 0, $trx['actual_total'], $trx['id_toko']);
+
+            // Reverse Discount (Contra-Revenue)
+            if ($totalDiscount > 0) {
+                $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '2', 0, $totalDiscount, $trx['id_toko']);
+            }
+
+            // Reverse Gross Sales
+            $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $trx['amount'], 0, $trx['id_toko']);
+
+            // Reverse PPN
+            if ($ppnValue > 0) {
+                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '1', $ppnValue, 0, $trx['id_toko']);
+            }
+
+            // Reverse Shipping (Only if NOT delivered)
+            $isDelivered = (strtoupper($trx['delivery_status'] ?? '') === 'DELIVERED');
+
+            if (!$isDelivered) {
+                if (!$isFreeOngkir && $shippingCost > 0) {
+                    $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $shippingCost, 0, $trx['id_toko']);
+                }
+                if ($isFreeOngkir && $shippingCost > 0) {
+                    $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '1', $shippingCost, 0, $trx['id_toko']); // Reverse AP
+                    $this->addJournalItem($jIdSales, '50' . $trx['id_toko'] . '6', 0, $shippingCost, $trx['id_toko']); // Reverse Expense
+                }
+            }
+
+            $newStatus = 'CANCEL';
+            $refundNeeded = 0;
+
+            // Store cancel reason if provided
+            if (isset($data->cancel_reason) && !empty($data->cancel_reason)) {
+                $this->transactionMetaModel->insert([
+                    'transaction_id' => $id,
+                    'key' => 'cancel_reason',
+                    'value' => $data->cancel_reason
+                ]);
+            }
+
+            if ($trx['total_payment'] > 0) {
+                $newStatus = 'NEED_REFUND';
+                $refundNeeded = (float) $trx['total_payment'];
+
+                if (strtoupper($trx['delivery_status'] ?? '') === 'DELIVERED' && !$isFreeOngkir && $shippingCost > 0) {
+                    $refundNeeded -= $shippingCost;
+                    if ($refundNeeded < 0)
+                        $refundNeeded = 0;
+                }
+
+                $this->transactionMetaModel->insert([
+                    'transaction_id' => $id,
+                    'key' => 'refund_needed',
+                    'value' => $refundNeeded
+                ]);
+            }
+
+            $this->transactionModel->update($id, ['status' => $newStatus]);
+
+            $this->db->transComplete();
+
+            log_aktivitas([
+                'user_id' => 0, // System/Customer trigger
+                'action_type' => 'CANCEL_CUSTOMER',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Customer cancelled transaction. Status: $newStatus",
+                'detail' => ['customer_id' => $customerId]
+            ]);
+
+            return $this->jsonResponse->oneResp('Transaction cancelled successfully', ['status' => $newStatus], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
     // --- HELPERS ---
 
     private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null)
@@ -636,6 +770,32 @@ class CustomerTransactionControllerV2 extends ResourceController
             'reference_type' => 'SALES',
             'reference_id' => $refId,
             'description' => $desc
+        ]);
+    }
+
+    private function addStock($productCode, $tokoId, $qty, $trxId, $reason, $isDamaged = false)
+    {
+        $stockEntry = $this->stockModel->where('id_barang', $productCode)->where('id_toko', $tokoId)->first();
+        if (!$stockEntry)
+            return;
+
+        if ($isDamaged) {
+            $newCacat = $stockEntry['barang_cacat'] + $qty;
+            $this->stockModel->update($stockEntry['id'], ['barang_cacat' => $newCacat]);
+            return;
+        }
+
+        $newStock = $stockEntry['stock'] + $qty;
+        $this->stockModel->update($stockEntry['id'], ['stock' => $newStock]);
+
+        $this->stockLedgerModel->insert([
+            'id_barang' => $productCode,
+            'id_toko' => $tokoId,
+            'qty' => $qty,
+            'balance' => $newStock,
+            'reference_type' => 'RETURN', // CANCEL/RETURN depending on caller (aligned with addStock logic)
+            'reference_id' => $trxId,
+            'description' => $reason
         ]);
     }
 

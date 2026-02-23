@@ -253,7 +253,7 @@
             <?php
             $subtotal = 0;
             foreach ($transaction['items'] as $item):
-                $itemTotal = ($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0);
+                $itemTotal = $item['actual_total'] ?? (($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0));
                 $subtotal += $itemTotal;
                 ?>
                 <div class="item-row">
@@ -303,7 +303,14 @@
                     </span>
                 </div>
             <?php endif; ?>
-            <?php if (!empty($transaction['ppn'])): ?>
+            <?php if (!empty($transaction['meta']['ppn']) && !empty($transaction['meta']['ppn_value'])): ?>
+                <div class="summary-row">
+                    <span>PPN (<?= esc($transaction['meta']['ppn']) ?>%):</span>
+                    <span>Rp
+                        <?= number_format($transaction['meta']['ppn_value'], 0, ',', '.') ?>
+                    </span>
+                </div>
+            <?php elseif (!empty($transaction['ppn'])): ?>
                 <div class="summary-row">
                     <span>PPN:</span>
                     <span>Rp
@@ -326,7 +333,7 @@
             <div class="summary-row total">
                 <span>TOTAL:</span>
                 <span>Rp
-                    <?= number_format($transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?>
+                    <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?>
                 </span>
             </div>
         </div>
@@ -344,14 +351,14 @@
                     <div class="payment-row">
                         <span class="bold">Kembalian:</span>
                         <span>Rp
-                            <?= number_format(max(0, $transaction['total_paid'] - ($transaction['total_harga'] ?? $subtotal)), 0, ',', '.') ?>
+                            <?= number_format(max(0, $transaction['total_paid'] - ($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal)), 0, ',', '.') ?>
                         </span>
                     </div>
-                    <?php if ($transaction['total_paid'] < ($transaction['total_harga'] ?? $subtotal)): ?>
+                    <?php if ($transaction['total_paid'] < ($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal)): ?>
                         <div class="payment-row">
                             <span class="bold">Sisa:</span>
                             <span>Rp
-                                <?= number_format(($transaction['total_harga'] ?? $subtotal) - $transaction['total_paid'], 0, ',', '.') ?>
+                                <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) - $transaction['total_paid'], 0, ',', '.') ?>
                             </span>
                         </div>
                     <?php endif; ?>

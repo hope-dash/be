@@ -236,6 +236,7 @@ $routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function ($ro
     // Transaction Routes
     $routes->get('transactions', 'CustomerTransactionControllerV2::getTransactions');
     $routes->get('transaction/(:num)', 'TransactionControllerV2::getDetail/$1');
+    $routes->post('transaction/(:num)/cancel', 'CustomerTransactionControllerV2::cancel/$1');
     $routes->post('checkout', 'CustomerTransactionControllerV2::checkout');
     $routes->post('payment/upload', 'CustomerTransactionControllerV2::uploadPaymentProof');
 });
