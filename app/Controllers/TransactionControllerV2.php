@@ -602,7 +602,7 @@ class TransactionControllerV2 extends ResourceController
                 }
             }
 
-            return $this->jsonResponse->oneResp("Pembayaran berhasil di" . strtolower($action)", ['new_status' => $newStatus ?? null], 200);
+            return $this->jsonResponse->oneResp("Pembayaran berhasil di" . strtolower($action), ['new_status' => $newStatus ?? null], 200);
 
         } catch (\Exception $e) {
             $this->db->transRollback();
@@ -725,6 +725,19 @@ class TransactionControllerV2 extends ResourceController
             $this->db->transComplete();
             if ($this->db->transStatus() === false) {
                 throw new \Exception("Gagal memperbarui transaksi");
+            }
+
+            // Fetch customer information for email
+            $custData = $this->transactionMetaModel
+                ->select('customer.email, customer.nama_customer')
+                ->join('customer', 'customer.id = transaction_meta.value', 'left')
+                ->where('transaction_meta.transaction_id', $id)
+                ->where('transaction_meta.key', 'customer_id')
+                ->first();
+
+            if ($custData) {
+                $trx['customer'] = $custData;
+                send_invoice_adjusted_email($trx, $componentName, $type, $amount, $newActualTotal);
             }
 
             return $this->jsonResponse->oneResp('Transaksi berhasil disesuaikan', [

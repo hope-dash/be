@@ -419,3 +419,46 @@ if (!function_exists('send_order_delivered_email')) {
         return enqueue_email($email, 'Pesanan Anda Telah Diterima #' . $invoice, $html);
     }
 }
+
+if (!function_exists('send_invoice_adjusted_email')) {
+    /**
+     * Email when an invoice is adjusted
+     */
+    function send_invoice_adjusted_email($transaction, $componentName, $type, $amount, $newActualTotal)
+    {
+        if (empty($transaction['customer']['email']))
+            return false;
+
+        $email = $transaction['customer']['email'];
+        $name = $transaction['customer']['nama_customer'];
+        $invoice = $transaction['invoice'];
+
+        $sign = ($type === 'addition') ? 'Penambahan' : 'Pengurangan';
+        $amountStr = number_format($amount, 0, ',', '.');
+        $newTotalStr = number_format($newActualTotal, 0, ',', '.');
+
+        $content = '
+            <h2>Pembaruan Invoice</h2>
+            <p>Halo, ' . htmlspecialchars($name) . '. Terdapat penyesuaian biaya pada pesanan Anda dengan nomor invoice <strong>' . htmlspecialchars($invoice) . '</strong>.</p>
+            
+            <div class="info-box">
+                <p><strong>Komponen:</strong> ' . htmlspecialchars($componentName) . '</p>
+                <p><strong>Jenis Penyesuaian:</strong> ' . $sign . '</p>
+                <p><strong>Nominal Penyesuaian:</strong> Rp ' . $amountStr . '</p>
+                <hr style="border-top: 1px solid #ddd; border-bottom: none; border-left: none; border-right: none;" />
+                <p><strong>Total Tagihan Baru:</strong> Rp ' . $newTotalStr . '</p>
+            </div>
+            
+            <p>Anda dapat melihat detail pesanan Anda melalui link di bawah ini:</p>
+            
+            <center>
+                <a href="' . env('app.baseURL', 'http://localhost:3000') . '/api/invoice/download/' . $transaction['id'] . '" class="button" style="color: #ffffff;">Lihat Invoice Terbaru</a>
+            </center>
+            
+            <p>Terima kasih atas pengertian dan kepercayaan Anda.</p>
+        ';
+
+        $html = get_email_template('Pembaruan Invoice - ' . $invoice, $content);
+        return enqueue_email($email, 'Pembaruan Tagihan Pesanan #' . $invoice, $html);
+    }
+}
