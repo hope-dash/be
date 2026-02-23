@@ -64,7 +64,7 @@ class TransactionControllerV2 extends ResourceController
         try {
             $items = $data->items ?? $data->item ?? []; // Support both keys
             if (empty($items))
-                throw new \Exception("Items cannot be empty");
+                throw new \Exception("Item tidak boleh kosong");
 
             // -- 0. Customer Handling --
             $customerId = $data->customer_id ?? null;
@@ -102,7 +102,7 @@ class TransactionControllerV2 extends ResourceController
                 // Compatible with both 'id_barang' and 'kode_barang'
                 $idBarang = $item->id_barang ?? $item->kode_barang ?? null;
                 if (!$idBarang)
-                    throw new \Exception("Item code/id missing");
+                    throw new \Exception("Kode/ID item tidak ditemukan");
 
                 // Compatible with 'price' or 'harga_jual'
                 $price = $item->price ?? $item->harga_jual ?? 0;
@@ -321,7 +321,7 @@ class TransactionControllerV2 extends ResourceController
             $this->db->transComplete();
 
             if ($this->db->transStatus() === false) {
-                return $this->jsonResponse->error('Transaction failed to save', 500);
+                return $this->jsonResponse->error('Transaksi gagal disimpan', 500);
             }
 
             log_aktivitas([
@@ -363,7 +363,7 @@ class TransactionControllerV2 extends ResourceController
                 }
             }
 
-            return $this->jsonResponse->oneResp('Transaction created successfully', ['id' => $trxId], 201);
+            return $this->jsonResponse->oneResp('Transaksi berhasil dibuat', ['id' => $trxId], 201);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -377,7 +377,7 @@ class TransactionControllerV2 extends ResourceController
             $data = $this->request->getJSON();
             $items = $data->items ?? $data->item ?? [];
             if (empty($items))
-                throw new \Exception("Items cannot be empty");
+                throw new \Exception("Item tidak boleh kosong");
 
             $grossAmount = 0;
             $totalItemDiscount = 0;
@@ -426,7 +426,7 @@ class TransactionControllerV2 extends ResourceController
             $chargedShipping = $isFreeOngkir ? 0 : $shippingCost;
             $grandTotal = $afterDiscountSubtotal + $ppnValue + $chargedShipping;
 
-            return $this->jsonResponse->oneResp('Calculation successful', [
+            return $this->jsonResponse->oneResp('Kalkulasi berhasil', [
                 'subtotal' => $grossAmount,
                 'diskon_item' => $totalItemDiscount,
                 'diskon_tambahan' => $txDiscountValue,
@@ -449,7 +449,7 @@ class TransactionControllerV2 extends ResourceController
 
         $trx = $this->transactionModel->find($id);
         if (!$trx)
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         $amount = $data->amount;
         $method = $data->payment_method ?? 'CASH';
@@ -490,7 +490,7 @@ class TransactionControllerV2 extends ResourceController
                 'detail' => ['amount' => $amount, 'method' => $method, 'image' => $data->image ?? null]
             ]);
 
-            return $this->jsonResponse->oneResp('Payment added successfully', ['new_status' => $newStatus], 200);
+            return $this->jsonResponse->oneResp('Pembayaran berhasil ditambahkan', ['new_status' => $newStatus], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -504,12 +504,12 @@ class TransactionControllerV2 extends ResourceController
         $action = strtoupper($data->action ?? ''); // ACCEPT or REJECT
 
         if (!$id) {
-            return $this->jsonResponse->error("ID is required", 400);
+            return $this->jsonResponse->error("ID wajib diisi", 400);
         }
 
         $trx = $this->transactionModel->find($id);
         if (!$trx) {
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
         }
 
         // Find the pending payment for this transaction
@@ -519,7 +519,7 @@ class TransactionControllerV2 extends ResourceController
             ->first();
 
         if (!$payment) {
-            return $this->jsonResponse->error("No pending payment found for this transaction", 404);
+            return $this->jsonResponse->error("Tidak ada pembayaran tertunda yang ditemukan untuk transaksi ini", 404);
         }
 
         $this->db->transStart();
@@ -575,12 +575,12 @@ class TransactionControllerV2 extends ResourceController
                     'detail' => ['payment_id' => $payment['id'], 'amount' => $amount]
                 ]);
             } else {
-                throw new \Exception("Invalid action: $action. Use ACCEPT or REJECT.");
+                throw new \Exception("Aksi tidak valid: $action. Gunakan ACCEPT atau REJECT.");
             }
 
             $this->db->transComplete();
             if ($this->db->transStatus() === false) {
-                throw new \Exception("Database transaction failed");
+                throw new \Exception("Transaksi database gagal");
             }
 
             if ($this->db->transStatus() !== false) {
@@ -602,7 +602,7 @@ class TransactionControllerV2 extends ResourceController
                 }
             }
 
-            return $this->jsonResponse->oneResp("Payment " . strtolower($action) . "ed successfully", ['new_status' => $newStatus ?? null], 200);
+            return $this->jsonResponse->oneResp("Pembayaran berhasil di" . strtolower($action)", ['new_status' => $newStatus ?? null], 200);
 
         } catch (\Exception $e) {
             $this->db->transRollback();
@@ -617,14 +617,14 @@ class TransactionControllerV2 extends ResourceController
 
         $trx = $this->transactionModel->find($id);
         if (!$trx)
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         $componentName = $data->component_name ?? 'Penambahan/Pengurangan';
         $type = $data->type ?? 'addition'; // 'addition' or 'subtraction'
         $amount = (float) ($data->amount ?? 0);
 
         if ($amount <= 0) {
-            return $this->jsonResponse->error("Amount must be greater than 0", 400);
+            return $this->jsonResponse->error("Jumlah harus lebih besar dari 0", 400);
         }
 
         $this->db->transStart();
@@ -724,10 +724,10 @@ class TransactionControllerV2 extends ResourceController
 
             $this->db->transComplete();
             if ($this->db->transStatus() === false) {
-                throw new \Exception("Failed to update transaction");
+                throw new \Exception("Gagal memperbarui transaksi");
             }
 
-            return $this->jsonResponse->oneResp('Transaction adjusted successfully', [
+            return $this->jsonResponse->oneResp('Transaksi berhasil disesuaikan', [
                 'new_actual_total' => $newActualTotal,
                 'status' => $newStatus
             ], 200);
@@ -746,7 +746,7 @@ class TransactionControllerV2 extends ResourceController
 
         $trx = $this->transactionModel->find($id);
         if (!$trx)
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         $this->db->transStart();
         try {
@@ -857,7 +857,7 @@ class TransactionControllerV2 extends ResourceController
                 'description' => "Transaction cancelled. Status: $newStatus",
             ]);
 
-            return $this->jsonResponse->oneResp('Transaction cancelled successfully', ['status' => $newStatus], 200);
+            return $this->jsonResponse->oneResp('Transaksi berhasil dibatalkan', ['status' => $newStatus], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -872,7 +872,7 @@ class TransactionControllerV2 extends ResourceController
 
         $trx = $this->transactionModel->find($id);
         if (!$trx)
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         $this->db->transStart();
         try {
@@ -989,7 +989,7 @@ class TransactionControllerV2 extends ResourceController
                 ]);
             }
 
-            return $this->jsonResponse->oneResp('Return processed successfully', [
+            return $this->jsonResponse->oneResp('Retur berhasil diproses', [
                 'items_returned' => count($returnDetails),
                 'total_value' => $revenueReduction
             ], 200);
@@ -1009,7 +1009,7 @@ class TransactionControllerV2 extends ResourceController
 
         $trx = $this->transactionModel->find($id);
         if (!$trx)
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         $this->db->transStart();
         try {
@@ -1064,7 +1064,7 @@ class TransactionControllerV2 extends ResourceController
                 'detail' => ['amount' => $amount, 'reason' => $reason]
             ]);
 
-            return $this->jsonResponse->oneResp('Refund processed successfully', [], 200);
+            return $this->jsonResponse->oneResp('Refund berhasil diproses', [], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -1078,14 +1078,14 @@ class TransactionControllerV2 extends ResourceController
 
         $trx = $this->transactionModel->find($id);
         if (!$trx)
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         $status = $data->status ?? null;
         $resi = $data->resi ?? null;
         $courier = $data->courier ?? null;
 
         if (!$status && !$resi && !$courier) {
-            return $this->jsonResponse->error("At least one field (status, resi, courier) is required", 400);
+            return $this->jsonResponse->error("Parameter status, resi, atau kurir wajib diisi", 400);
         }
 
         $this->db->transStart();
@@ -1156,7 +1156,7 @@ class TransactionControllerV2 extends ResourceController
                 }
             }
 
-            return $this->jsonResponse->oneResp("Delivery status updated successfully", [], 200);
+            return $this->jsonResponse->oneResp("Status pengiriman berhasil diperbarui", [], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -1294,7 +1294,7 @@ class TransactionControllerV2 extends ResourceController
     {
         try {
             if (!$id)
-                return $this->jsonResponse->error("ID is required", 400);
+                return $this->jsonResponse->error("ID wajib diisi", 400);
 
             $db = \Config\Database::connect();
 
@@ -1305,7 +1305,7 @@ class TransactionControllerV2 extends ResourceController
                 ->find($id);
 
             if (!$transaction)
-                return $this->jsonResponse->error("Transaction not found", 404);
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
             // 2. Get All Metadata
             $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
@@ -1319,7 +1319,7 @@ class TransactionControllerV2 extends ResourceController
             if (property_exists($this->request, 'customer') && isset($this->request->customer)) {
                 $customerId = $this->request->customer['id'];
                 if (!isset($metaMap['customer_id']) || (int) $metaMap['customer_id'] !== (int) $customerId) {
-                    return $this->jsonResponse->error("Unauthorized: You do not have permission to view this transaction.", 403);
+                    return $this->jsonResponse->error("Akses Ditolak: Anda tidak memiliki izin untuk melihat transaksi ini.", 403);
                 }
             }
 
@@ -1350,7 +1350,7 @@ class TransactionControllerV2 extends ResourceController
 
             $transaction['payments'] = $payments;
 
-            return $this->jsonResponse->oneResp('Success', $transaction, 200);
+            return $this->jsonResponse->oneResp('Sukses', $transaction, 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -1411,16 +1411,16 @@ class TransactionControllerV2 extends ResourceController
             $userId = $this->request->user['user_id'] ?? 0;
 
             if (!$id) {
-                return $this->jsonResponse->error("Transaction ID required", 400);
+                return $this->jsonResponse->error("ID Transaksi wajib diisi", 400);
             }
 
             $trx = $this->transactionModel->find($id);
             if (!$trx) {
-                return $this->jsonResponse->error("Transaction not found", 404);
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
             }
 
             if (empty($data->key) || !isset($data->value)) {
-                return $this->jsonResponse->error("Key and value are required", 400);
+                return $this->jsonResponse->error("Key dan value wajib diisi", 400);
             }
 
             // Check if meta key already exists
@@ -1456,7 +1456,7 @@ class TransactionControllerV2 extends ResourceController
                 ]
             ]);
 
-            return $this->jsonResponse->oneResp('Transaction meta updated successfully', [], 200);
+            return $this->jsonResponse->oneResp('Meta transaksi berhasil diperbarui', [], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }

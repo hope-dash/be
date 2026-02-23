@@ -137,7 +137,7 @@ class CustomerTransactionControllerV2 extends ResourceController
             $data = $this->request->getJSON();
 
             if (empty($data->id_barang) || empty($data->jumlah)) {
-                return $this->jsonResponse->error("Product ID and quantity are required", 400);
+                return $this->jsonResponse->error("ID Produk dan jumlah wajib diisi", 400);
             }
 
             $qty = (int) $data->jumlah;
@@ -160,7 +160,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                 $this->cartModel->update($existing['id'], [
                     'jumlah' => (int) $existing['jumlah'] + $qty
                 ]);
-                $message = "Cart item incremented";
+                $message = "Jumlah item keranjang berhasil ditambah";
             } else {
                 // If new, insert
                 $this->cartModel->insert([
@@ -169,7 +169,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                     'jumlah' => $qty,
                     'id_toko' => $idToko
                 ]);
-                $message = "Item added to cart";
+                $message = "Item berhasil ditambahkan ke keranjang";
             }
 
             return $this->jsonResponse->oneResp($message, [], 200);
@@ -185,19 +185,19 @@ class CustomerTransactionControllerV2 extends ResourceController
             $data = $this->request->getJSON();
 
             if (empty($data->jumlah)) {
-                return $this->jsonResponse->error("Quantity is required", 400);
+                return $this->jsonResponse->error("Jumlah wajib diisi", 400);
             }
 
             $item = $this->cartModel->find($id);
             if (!$item || $item['customer_id'] != $customerId) {
-                return $this->jsonResponse->error("Item not found in your cart", 404);
+                return $this->jsonResponse->error("Item tidak ditemukan di keranjang Anda", 404);
             }
 
             $this->cartModel->update($id, [
                 'jumlah' => (int) $data->jumlah
             ]);
 
-            return $this->jsonResponse->oneResp('Cart item updated', [], 200);
+            return $this->jsonResponse->oneResp('Item keranjang berhasil diperbarui', [], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -208,7 +208,7 @@ class CustomerTransactionControllerV2 extends ResourceController
         try {
             $customerId = $this->request->customer['id'];
             $this->cartModel->where('customer_id', $customerId)->delete();
-            return $this->jsonResponse->oneResp('Cart cleared', [], 200);
+            return $this->jsonResponse->oneResp('Keranjang berhasil dikosongkan', [], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -221,11 +221,11 @@ class CustomerTransactionControllerV2 extends ResourceController
             $item = $this->cartModel->find($id);
 
             if (!$item || $item['customer_id'] != $customerId) {
-                return $this->jsonResponse->error("Item not found in your cart", 404);
+                return $this->jsonResponse->error("Item tidak ditemukan di keranjang Anda", 404);
             }
 
             $this->cartModel->delete($id);
-            return $this->jsonResponse->oneResp('Item removed from cart', [], 200);
+            return $this->jsonResponse->oneResp('Item berhasil dihapus dari keranjang', [], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -242,12 +242,12 @@ class CustomerTransactionControllerV2 extends ResourceController
         // Fetch fresh customer data for discounts and address
         $customer = $this->customerModel->find($customerId);
         if (!$customer) {
-            return $this->jsonResponse->error("Customer not found", 404);
+            return $this->jsonResponse->error("Pelanggan tidak ditemukan", 404);
         }
 
         $cartIds = $data['cart_ids'] ?? [];
         if (empty($cartIds)) {
-            return $this->jsonResponse->error("No cart items selected", 400);
+            return $this->jsonResponse->error("Tidak ada item keranjang yang dipilih", 400);
         }
 
         $this->db->transStart();
@@ -262,7 +262,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                 ->findAll();
 
             if (empty($cartItems)) {
-                throw new \Exception("Selected cart items not found");
+                throw new \Exception("Item keranjang yang dipilih tidak ditemukan");
             }
 
             // 2. Group by id_toko
@@ -304,7 +304,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                         ->first();
 
                     if (!$stockEntry || $stockEntry['stock'] < $qty) {
-                        throw new \Exception("Insufficient stock for {$item['nama_barang']} in selected store");
+                        throw new \Exception("Stok kurang untuk {$item['nama_barang']} di toko pilihan");
                     }
 
                     // Price Logic (Customer Discount)
@@ -450,10 +450,10 @@ class CustomerTransactionControllerV2 extends ResourceController
             $this->db->transComplete();
 
             if ($this->db->transStatus() === false) {
-                throw new \Exception("Database transaction failed");
+                throw new \Exception("Transaksi database gagal");
             }
 
-            return $this->jsonResponse->oneResp('Checkout successful', $createdInvoices, 201);
+            return $this->jsonResponse->oneResp('Checkout berhasil', $createdInvoices, 201);
 
         } catch (\Exception $e) {
             $this->db->transRollback();
@@ -470,12 +470,12 @@ class CustomerTransactionControllerV2 extends ResourceController
             $data = $this->request->getJSON();
 
             if (empty($data->transaction_id) || empty($data->image_url)) {
-                return $this->jsonResponse->error("Transaction ID and proof image are required", 400);
+                return $this->jsonResponse->error("ID Transaksi dan bukti pembayaran wajib diisi", 400);
             }
 
             $trx = $this->transactionModel->find($data->transaction_id);
             if (!$trx) {
-                return $this->jsonResponse->error("Transaction not found", 404);
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
             }
 
             // Verify it belongs to this customer
@@ -486,7 +486,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                 ->first();
 
             if (!$meta) {
-                return $this->jsonResponse->error("Unauthorized access to this transaction", 403);
+                return $this->jsonResponse->error("Akses tidak sah ke transaksi ini", 403);
             }
 
             $this->db->transStart();
@@ -507,7 +507,7 @@ class CustomerTransactionControllerV2 extends ResourceController
 
             $this->db->transComplete();
 
-            return $this->jsonResponse->oneResp('Payment proof uploaded successfully. Waiting for verification.', [], 200);
+            return $this->jsonResponse->oneResp('Bukti pembayaran berhasil diunggah. Menunggu verifikasi.', [], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
@@ -567,7 +567,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                 $trx['status_label'] = $this->transactionModel->getStatuses()[$trx['status']] ?? $trx['status'];
             }
 
-            return $this->jsonResponse->multiResp('Transactions fetched', $transactions, $totalData, $totalPage, $page, $limit, 200);
+            return $this->jsonResponse->multiResp('Data transaksi berhasil diambil', $transactions, $totalData, $totalPage, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -581,7 +581,7 @@ class CustomerTransactionControllerV2 extends ResourceController
 
         $trx = $this->transactionModel->find($id);
         if (!$trx)
-            return $this->jsonResponse->error("Transaction not found", 404);
+            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         // Security Check: Make sure transaction belongs to customer
         $meta = $this->transactionMetaModel
@@ -591,7 +591,7 @@ class CustomerTransactionControllerV2 extends ResourceController
             ->first();
 
         if (!$meta) {
-            return $this->jsonResponse->error("Unauthorized access to this transaction", 403);
+            return $this->jsonResponse->error("Akses tidak sah ke transaksi ini", 403);
         }
 
         $this->db->transStart();
@@ -700,7 +700,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                 'detail' => ['customer_id' => $customerId]
             ]);
 
-            return $this->jsonResponse->oneResp('Transaction cancelled successfully', ['status' => $newStatus], 200);
+            return $this->jsonResponse->oneResp('Transaksi berhasil dibatalkan', ['status' => $newStatus], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
