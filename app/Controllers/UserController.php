@@ -236,7 +236,12 @@ class UserController extends ResourceController
 
     public function userByToken()
     {
-        $user = $this->request->user;
+        $tokenUser = $this->request->user;
+        $user = $this->model->find($tokenUser['user_id']);
+
+        if (!$user) {
+            return $this->jsonResponse->error("User Not Found", 401);
+        }
 
         $accessArray = json_decode($user['access'], true);
         $permissions = !empty($user['permissions']) ? json_decode($user['permissions'], true) : [];
@@ -258,6 +263,7 @@ class UserController extends ResourceController
         $result = [
             'user_id' => $user['user_id'],
             'name' => $user['name'],
+            'username' => $user['username'],
             'email' => $user['email'],
             'access' => $accessArray,
             'permissions' => $permissions,

@@ -625,16 +625,24 @@ class ProductController extends ResourceController
             $this->stockModel->insert($stockData);
             $newStockId = $this->stockModel->getInsertID();
 
+            $alasan = $data->alasan ?? 'Penyesuaian manual';
+            $descParts = [];
+            if (0 != $data->stock)
+                $descParts[] = "normal dari 0->{$data->stock}";
+            if (0 != $data->barang_cacat)
+                $descParts[] = "cacat dari 0->{$data->barang_cacat}";
+            $descText = !empty($descParts) ? implode(', ', $descParts) : "tidak ada perubahan";
+
             log_aktivitas([
                 'user_id' => $token['user_id'],
                 'action_type' => 'ADJUST_STOCK',
                 'target_table' => 'stock',
                 'target_id' => $newStockId,
-                'description' => "Penambahan awal (penyesuaian) stok produk {$product['nama_barang']} (ID Barang: {$id_barang}) di toko {$data->id_toko}. Stock ready: 0 -> {$data->stock}, cacat: 0 -> {$data->barang_cacat}.",
+                'description' => "{$descText}, keterangan: {$alasan}",
                 'detail' => [
                     'old' => null,
                     'new' => $stockData,
-                    'alasan' => $data->alasan ?? 'Penyesuaian manual'
+                    'alasan' => $alasan
                 ],
             ]);
         } else {
@@ -648,18 +656,28 @@ class ProductController extends ResourceController
 
             $this->stockModel->update($existingStock['id'], $stockData);
 
-            log_aktivitas([
-                'user_id' => $token['user_id'],
-                'action_type' => 'ADJUST_STOCK',
-                'target_table' => 'stock',
-                'target_id' => $existingStock['id'],
-                'description' => "Penyesuaian stok produk {$product['nama_barang']} (ID Barang: {$id_barang}) di toko {$data->id_toko}. Stock ready: $oldStock -> {$data->stock}, cacat: $oldCacat -> {$data->barang_cacat}.",
-                'detail' => [
-                    'old' => $existingStock,
-                    'new' => $stockData,
-                    'alasan' => $data->alasan ?? 'Penyesuaian manual'
-                ],
-            ]);
+            $alasan = $data->alasan ?? 'Penyesuaian manual';
+            $descParts = [];
+            if ($oldStock != $data->stock)
+                $descParts[] = "normal dari {$oldStock}->{$data->stock}";
+            if ($oldCacat != $data->barang_cacat)
+                $descParts[] = "cacat dari {$oldCacat}->{$data->barang_cacat}";
+
+            if (!empty($descParts)) {
+                $descText = implode(', ', $descParts);
+                log_aktivitas([
+                    'user_id' => $token['user_id'],
+                    'action_type' => 'ADJUST_STOCK',
+                    'target_table' => 'stock',
+                    'target_id' => $existingStock['id'],
+                    'description' => "{$descText}, keterangan: {$alasan}",
+                    'detail' => [
+                        'old' => $existingStock,
+                        'new' => $stockData,
+                        'alasan' => $alasan
+                    ],
+                ]);
+            }
         }
 
         return $this->jsonResponse->oneResp('Penyesuaian stok berhasil', ['id' => $id, 'id_barang' => $id_barang, 'id_toko' => $data->id_toko], 200);
@@ -1653,6 +1671,8 @@ class ProductController extends ResourceController
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
+            $idToko = $this->request->getGet('id_toko');
+
             // === Bangun query dasar ===
             $builder = $this->productModel
                 ->select([
@@ -1696,10 +1716,15 @@ class ProductController extends ResourceController
             // === Hitung stock dari table stock ===
             $stockData = [];
             if (!empty($productCodes)) {
-                $stocks = $this->stockModel
+                $stockQuery = $this->stockModel
                     ->select('id_barang, SUM(stock) as total_stock, SUM(barang_cacat) as total_cacat')
-                    ->whereIn('id_barang', $productCodes)
-                    ->groupBy('id_barang')
+                    ->whereIn('id_barang', $productCodes);
+
+                if (!empty($idToko)) {
+                    $stockQuery->where('id_toko', $idToko);
+                }
+
+                $stocks = $stockQuery->groupBy('id_barang')
                     ->get()
                     ->getResultArray();
 
@@ -1714,12 +1739,17 @@ class ProductController extends ResourceController
             // === Hitung stock gantung (waiting_payment) dari sales_product + transaction ===
             $pendingStockData = [];
             if (!empty($productCodes)) {
-                $pendingStocks = $this->db->table('sales_product sp')
+                $pendingQuery = $this->db->table('sales_product sp')
                     ->select('sp.kode_barang, SUM(sp.jumlah) as total_pending')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $productCodes)
-                    ->where('t.status', 'WAITING_PAYMENT')
-                    ->groupBy('sp.kode_barang')
+                    ->where('t.status', 'WAITING_PAYMENT');
+
+                if (!empty($idToko)) {
+                    $pendingQuery->where('t.id_toko', $idToko);
+                }
+
+                $pendingStocks = $pendingQuery->groupBy('sp.kode_barang')
                     ->get()
                     ->getResultArray();
 
@@ -1797,10 +1827,15 @@ class ProductController extends ResourceController
             // Hitung stock global
             $globalStockData = [];
             if (!empty($allProductCodes)) {
-                $globalStocks = $this->stockModel
+                $globalStockQuery = $this->stockModel
                     ->select('id_barang, SUM(stock) as total_stock, SUM(barang_cacat) as total_cacat')
-                    ->whereIn('id_barang', $allProductCodes)
-                    ->groupBy('id_barang')
+                    ->whereIn('id_barang', $allProductCodes);
+
+                if (!empty($idToko)) {
+                    $globalStockQuery->where('id_toko', $idToko);
+                }
+
+                $globalStocks = $globalStockQuery->groupBy('id_barang')
                     ->get()
                     ->getResultArray();
 
@@ -1815,12 +1850,17 @@ class ProductController extends ResourceController
             // Hitung stock gantung global
             $globalPendingStockData = [];
             if (!empty($allProductCodes)) {
-                $globalPendingStocks = $this->db->table('sales_product sp')
+                $globalPendingQuery = $this->db->table('sales_product sp')
                     ->select('sp.kode_barang, SUM(sp.jumlah) as total_pending')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $allProductCodes)
-                    ->where('t.status', 'WAITING_PAYMENT')
-                    ->groupBy('sp.kode_barang')
+                    ->where('t.status', 'WAITING_PAYMENT');
+
+                if (!empty($idToko)) {
+                    $globalPendingQuery->where('t.id_toko', $idToko);
+                }
+
+                $globalPendingStocks = $globalPendingQuery->groupBy('sp.kode_barang')
                     ->get()
                     ->getResultArray();
 
