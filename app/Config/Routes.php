@@ -175,6 +175,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->get('report/ledger', 'AccountingReportController::ledger');
         $routes->get('report/ledger/detail', 'AccountingReportController::ledgerDetail');
         $routes->get('report/income-statement', 'AccountingReportController::incomeStatement');
+        $routes->get('report/income-statement-accrual', 'AccountingReportController::incomeStatementAccrual');
         $routes->get('report/balance-sheet', 'AccountingReportController::balanceSheet');
 
         // Closing
@@ -191,6 +192,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
         // Product V2
         $routes->post('product', 'ProductController::createProductV2');
         $routes->put('product/(:num)', 'ProductController::updateProductV2/$1');
+        $routes->post('product/(:num)/adjust-stock', 'ProductController::adjustStock/$1');
 
         // Transaction List & Meta
         $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');

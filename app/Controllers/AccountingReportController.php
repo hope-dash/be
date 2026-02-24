@@ -482,6 +482,94 @@ class AccountingReportController extends ResourceController
         ];
     }
 
+    public function incomeStatementAccrual()
+    {
+        $startDate = $this->request->getGet('start_date') ?? date('Y-m-01');
+        $endDate = $this->request->getGet('end_date') ?? date('Y-m-t');
+        $tokoId = $this->request->getGet('id_toko');
+
+        $current = $this->getIncomeStatementDataAccrual($startDate, $endDate, $tokoId);
+
+        // --- Previous Period Comparison ---
+        $startObj = new \DateTime($startDate);
+        $endObj = new \DateTime($endDate);
+        $interval = $startObj->diff($endObj);
+        $days = $interval->days + 1;
+
+        $prevEndObj = (clone $startObj)->modify('-1 day');
+        $prevStartObj = (clone $prevEndObj)->modify("-" . ($days - 1) . " days");
+
+        $prevStartDate = $prevStartObj->format('Y-m-d');
+        $prevEndDate = $prevEndObj->format('Y-m-d');
+
+        $prev = $this->getIncomeStatementDataAccrual($prevStartDate, $prevEndDate, $tokoId);
+
+        // Growth Calculation
+        $growth = 0;
+        if ($prev['net_income'] != 0) {
+            $growth = (($current['net_income'] - $prev['net_income']) / abs($prev['net_income'])) * 100;
+        } else if ($current['net_income'] > 0) {
+            $growth = 100;
+        }
+
+        // Performance Text
+        $performanceTitle = ($growth >= 0) ? "Performa Positif" : "Performa Menurun";
+        $trend = ($growth >= 0) ? "meningkat" : "menurun";
+        $absGrowth = number_format(abs($growth), 1);
+
+        $expGrowth = ($prev['total_expense'] > 0) ? (($current['total_expense'] - $prev['total_expense']) / $prev['total_expense']) * 100 : 0;
+        $expText = ($expGrowth <= 5) ? "Pengeluaran operasional terkendali." : "Pengeluaran operasional meningkat " . number_format($expGrowth, 1) . "%.";
+
+        $description = "Laba bersih berdasarkan jurnal periode ini $trend $absGrowth% dibandingkan periode sebelumnya. $expText";
+
+        return $this->jsonResponse->oneResp('Income Statement (Accrual)', [
+            'period' => "$startDate to $endDate",
+            'prev_period' => "$prevStartDate to $prevEndDate",
+            'summary_highlights' => $current['highlights'],
+            'performance' => [
+                'title' => $performanceTitle,
+                'description' => $description,
+                'is_positive' => ($growth >= 0)
+            ],
+            'revenues' => $current['revenues'],
+            'expenses' => $current['expenses'],
+            'net_income' => $current['net_income']
+        ], 200);
+    }
+
+    private function getIncomeStatementDataAccrual($startDate, $endDate, $tokoId)
+    {
+        $revenues = $this->getAccountGroupBalance('REVENUE', $startDate, $endDate, $tokoId, true);
+        $expenses = $this->getAccountGroupBalance('EXPENSE', $startDate, $endDate, $tokoId, true);
+
+        $totalRevenue = $revenues['total'];
+        $totalExpense = $expenses['total'];
+
+        $cogs = 0;
+        foreach ($expenses['details'] as $e) {
+            if (strpos($e['code'], '5') === 0) {
+                $cogs += $e['balance'];
+            }
+        }
+
+        $netIncome = $totalRevenue - $totalExpense;
+        $grossProfit = $totalRevenue - $cogs;
+
+        $highlights = [
+            'gross_margin' => ($totalRevenue > 0) ? round(($grossProfit / $totalRevenue) * 100, 1) : 0,
+            'net_profit_margin' => ($totalRevenue > 0) ? round(($netIncome / $totalRevenue) * 100, 1) : 0,
+            'expense_ratio' => ($totalRevenue > 0) ? round(($totalExpense / $totalRevenue) * 100, 1) : 0
+        ];
+
+        return [
+            'revenues' => $revenues,
+            'expenses' => $expenses,
+            'total_expense' => $totalExpense,
+            'net_income' => $netIncome,
+            'highlights' => $highlights
+        ];
+    }
+
     // 4. BALANCE SHEET (Neraca)
     public function balanceSheet()
     {

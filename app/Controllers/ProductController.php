@@ -14,6 +14,9 @@ use CodeIgniter\RESTful\ResourceController;
 use App\Models\JsonResponse;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
+/**
+ * @property \CodeIgniter\HTTP\IncomingRequest $request
+ */
 class ProductController extends ResourceController
 {
     protected $modelBarangModel;
@@ -390,10 +393,6 @@ class ProductController extends ResourceController
         }
 
 
-        foreach ($oldStockIndex as $oldKey => $oldStock) {
-            $changes[] = "Stock untuk toko ID {$oldStock['id_toko']} dihapus (stock lama: {$oldStock['stock']}, barang cacat: {$oldStock['barang_cacat']}, dropship: " . ($oldStock['dropship'] ? 'true' : 'false') . ")";
-        }
-
         if (empty($changes)) {
             return "Tidak ada perubahan data.";
         }
@@ -586,6 +585,84 @@ class ProductController extends ResourceController
         }
 
         return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id, 'id_barang' => $oldProductData['id_barang']], 200);
+    }
+
+    public function adjustStock($id = null)
+    {
+        $token = $this->request->user;
+        $data = $this->request->getJSON();
+
+        $validation = \Config\Services::validation();
+        $validation->setRules([
+            'id_toko' => 'required',
+            'stock' => 'required|numeric',
+            'barang_cacat' => 'required|numeric',
+        ]);
+
+        if (!$this->validate($validation->getRules())) {
+            return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+        }
+
+        $product = $this->productModel->find($id);
+        if (!$product) {
+            return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+        }
+
+        $id_barang = $product['id_barang'];
+
+        $existingStock = $this->stockModel
+            ->where('id_barang', $id_barang)
+            ->where('id_toko', $data->id_toko)
+            ->first();
+
+        if (!$existingStock) {
+            $stockData = [
+                'id_barang' => $id_barang,
+                'id_toko' => $data->id_toko,
+                'stock' => $data->stock,
+                'barang_cacat' => $data->barang_cacat,
+            ];
+            $this->stockModel->insert($stockData);
+            $newStockId = $this->stockModel->getInsertID();
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'ADJUST_STOCK',
+                'target_table' => 'stock',
+                'target_id' => $newStockId,
+                'description' => "Penambahan awal (penyesuaian) stok produk {$product['nama_barang']} (ID Barang: {$id_barang}) di toko {$data->id_toko}. Stock ready: 0 -> {$data->stock}, cacat: 0 -> {$data->barang_cacat}.",
+                'detail' => [
+                    'old' => null,
+                    'new' => $stockData,
+                    'alasan' => $data->alasan ?? 'Penyesuaian manual'
+                ],
+            ]);
+        } else {
+            $oldStock = $existingStock['stock'];
+            $oldCacat = $existingStock['barang_cacat'];
+
+            $stockData = [
+                'stock' => $data->stock,
+                'barang_cacat' => $data->barang_cacat,
+            ];
+
+            $this->stockModel->update($existingStock['id'], $stockData);
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'ADJUST_STOCK',
+                'target_table' => 'stock',
+                'target_id' => $existingStock['id'],
+                'description' => "Penyesuaian stok produk {$product['nama_barang']} (ID Barang: {$id_barang}) di toko {$data->id_toko}. Stock ready: $oldStock -> {$data->stock}, cacat: $oldCacat -> {$data->barang_cacat}.",
+                'detail' => [
+                    'old' => $existingStock,
+                    'new' => $stockData,
+                    'alasan' => $data->alasan ?? 'Penyesuaian manual'
+                ],
+            ]);
+        }
+
+        return $this->jsonResponse->oneResp('Penyesuaian stok berhasil', ['id' => $id, 'id_barang' => $id_barang, 'id_toko' => $data->id_toko], 200);
     }
 
     private function getProductDetailArray($id)

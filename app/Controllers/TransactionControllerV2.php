@@ -259,9 +259,9 @@ class TransactionControllerV2 extends ResourceController
             // 3. Cr Sales Revenue (Gross Sales from Items)
             $this->addJournalItem($journalId, '40' . $data->id_toko . '1', 0, $grossAmount, $data->id_toko);
 
-            // 4. Cr PPN Payable (using 2001 or 2005 if exists)
+            // 4. Cr PPN Keluaran (Output Tax) (2005)
             if ($ppnValue > 0) {
-                $this->addJournalItem($journalId, '20' . $data->id_toko . '1', 0, $ppnValue, $data->id_toko);
+                $this->addJournalItem($journalId, '20' . $data->id_toko . '5', 0, $ppnValue, $data->id_toko);
             }
 
             // 5. Shipping Logic
@@ -619,35 +619,210 @@ class TransactionControllerV2 extends ResourceController
         if (!$trx)
             return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
-        $componentName = $data->component_name ?? 'Penambahan/Pengurangan';
-        $type = $data->type ?? 'addition'; // 'addition' or 'subtraction'
-        $amount = (float) ($data->amount ?? 0);
+        // Expecting $data->adjustments = [{ category: 'Diskon', component_name: 'Diskon Tambahan', type: 'addition', amount: 1000 }, ...]
+        // For backwards compatibility, allow single object too
+        $adjustments = [];
+        if (isset($data->adjustments) && is_array($data->adjustments)) {
+            $adjustments = $data->adjustments;
+        } else {
+            $adjustments[] = [
+                'category' => $data->category ?? '',
+                'component_name' => $data->component_name ?? 'Penambahan/Pengurangan',
+                'type' => $data->type ?? 'addition',
+                'amount' => (float) ($data->amount ?? 0)
+            ];
+        }
 
-        if ($amount <= 0) {
-            return $this->jsonResponse->error("Jumlah harus lebih besar dari 0", 400);
+        if (empty($adjustments)) {
+            return $this->jsonResponse->error("Tidak ada data penyesuaian", 400);
         }
 
         $this->db->transStart();
         try {
             $actualTotal = (float) $trx['actual_total'];
-            $newActualTotal = ($type === 'addition') ? ($actualTotal + $amount) : ($actualTotal - $amount);
+            $newActualTotal = $actualTotal;
 
-            if ($newActualTotal < 0)
+            $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+            $metaMap = [];
+            foreach ($metas as $m) {
+                $metaMap[$m['key']] = $m;
+            }
+
+            $ppnPercent = (float) ($metaMap['ppn']['value'] ?? 0);
+            $currentPpnValue = (float) ($metaMap['ppn_value']['value'] ?? 0);
+            $ppnValueId = $metaMap['ppn_value']['id'] ?? null;
+            $ppnMetaId = $metaMap['ppn']['id'] ?? null;
+
+            // Compute current Base Subtotal accurately
+            $baseSubtotal = (float) $trx['amount']
+                - (float) ($metaMap['item_discount_total']['value'] ?? 0)
+                - (float) ($metaMap['tx_discount_value']['value'] ?? 0);
+
+            $adjustmentsJSON = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'adjustments')->first();
+            $previousAdjustments = $adjustmentsJSON ? json_decode($adjustmentsJSON['value'], true) : [];
+            foreach ($previousAdjustments as $pa) {
+                $pCat = strtolower(trim($pa['category'] ?? ''));
+                $pComp = $pa['component_name'] ?? '';
+                $isD = (!empty($pCat) && ($pCat === 'diskon' || $pCat === 'discount')) || (empty($pCat) && (stripos($pComp, 'diskon') !== false || stripos($pComp, 'discount') !== false));
+                if ($isD) {
+                    if (($pa['type'] ?? 'addition') === 'subtraction') {
+                        $baseSubtotal -= (float) $pa['amount'];
+                    } else {
+                        $baseSubtotal += (float) $pa['amount'];
+                    }
+                }
+            }
+
+            $totalArAdjustment = 0;
+            $totalIncomeAdjustment = 0;
+            $totalDiscountAdjustment = 0;
+            $totalPpnChange = 0;
+            $newPpnPercentToSave = null;
+            $trackedPpnValue = $currentPpnValue;
+
+            $logDetails = [];
+
+            foreach ($adjustments as $adjRaw) {
+                $adj = (array) $adjRaw;
+                $category = strtolower(trim($adj['category'] ?? ''));
+                $componentName = $adj['component_name'] ?? 'Penambahan/Pengurangan';
+                $type = $adj['type'] ?? 'addition';
+                $amount = (float) ($adj['amount'] ?? 0);
+
+                if (!empty($category)) {
+                    $isDiscountAdjustment = ($category === 'diskon' || $category === 'discount');
+                    $isPpnAdjustment = ($category === 'ppn' || $category === 'pajak');
+                } else {
+                    // Fallback to testing component_name if category missing
+                    $isDiscountAdjustment = stripos($componentName, 'diskon') !== false || stripos($componentName, 'discount') !== false;
+                    $isPpnAdjustment = stripos($componentName, 'ppn') !== false || stripos($componentName, 'pajak') !== false;
+                }
+
+                if ($amount < 0 || ($amount == 0 && !$isPpnAdjustment))
+                    continue;
+
+                $arAdjustment = 0;
+                $incomeAdjustment = 0;
+                $discountAdjustment = 0;
+                $ppnChange = 0;
+
+                if ($isDiscountAdjustment) {
+                    $ppnAdjustment = ($amount * $ppnPercent) / 100;
+
+                    if ($type === 'subtraction') {
+                        $arAdjustment = -($amount + $ppnAdjustment);
+                        $discountAdjustment = $amount;
+                        $ppnChange = -$ppnAdjustment;
+                        $baseSubtotal -= $amount;
+                    } else {
+                        $arAdjustment = ($amount + $ppnAdjustment);
+                        $discountAdjustment = -$amount;
+                        $ppnChange = $ppnAdjustment;
+                        $baseSubtotal += $amount;
+                    }
+                    $trackedPpnValue += $ppnChange;
+
+                } elseif ($isPpnAdjustment) {
+                    $newPpnPercent = $amount;
+                    $newPpnPercentToSave = $newPpnPercent;
+
+                    $calculatedNewPpnValue = ($baseSubtotal * $newPpnPercent) / 100;
+                    $ppnChange = $calculatedNewPpnValue - $trackedPpnValue;
+
+                    $arAdjustment = $ppnChange;
+
+                    $ppnPercent = $newPpnPercent;
+                    $trackedPpnValue = $calculatedNewPpnValue;
+
+                } else {
+                    if ($type === 'addition') {
+                        $arAdjustment = $amount;
+                        $incomeAdjustment = $amount;
+                    } else {
+                        $arAdjustment = -$amount;
+                        $incomeAdjustment = -$amount;
+                    }
+                }
+
+                $totalArAdjustment += $arAdjustment;
+                $totalIncomeAdjustment += $incomeAdjustment;
+                $totalDiscountAdjustment += $discountAdjustment;
+                $totalPpnChange += $ppnChange;
+
+                $logDetails[] = [
+                    'category' => $adj['category'] ?? '',
+                    'component_name' => $componentName,
+                    'type' => $type,
+                    'amount' => $amount
+                ];
+            }
+
+            $newActualTotal = $actualTotal + $totalArAdjustment;
+            if ($newActualTotal < 0) {
                 $newActualTotal = 0;
+            }
 
-            // Journal Entry for Adjustment
-            $jId = $this->createJournal('ADJUSTMENT', $id, $trx['invoice'], date('Y-m-d'), "Invoice Adjustment: {$componentName}", $trx['id_toko']);
+            // Update Meta PPN Value if changed
+            if ($totalPpnChange != 0) {
+                $newPpnValue = $currentPpnValue + $totalPpnChange;
+                if ($newPpnValue < 0)
+                    $newPpnValue = 0;
 
-            if ($type === 'addition') {
-                // Increase AR
-                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', $amount, 0, $trx['id_toko']);
-                // Increase Other Income / Sales
-                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', 0, $amount, $trx['id_toko']);
-            } else {
-                // Increase Sales Discount (Debit)
-                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '2', $amount, 0, $trx['id_toko']);
-                // Decrease AR
-                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']);
+                if ($ppnValueId) {
+                    $this->transactionMetaModel->update($ppnValueId, ['value' => (string) $newPpnValue]);
+                } else {
+                    $this->transactionMetaModel->insert([
+                        'transaction_id' => $id,
+                        'key' => 'ppn_value',
+                        'value' => (string) $newPpnValue
+                    ]);
+                }
+            }
+
+            // Save Meta PPN Percentage if changed
+            if ($newPpnPercentToSave !== null) {
+                if ($ppnMetaId) {
+                    $this->transactionMetaModel->update($ppnMetaId, ['value' => (string) $newPpnPercentToSave]);
+                } else {
+                    $this->transactionMetaModel->insert([
+                        'transaction_id' => $id,
+                        'key' => 'ppn',
+                        'value' => (string) $newPpnPercentToSave
+                    ]);
+                }
+            }
+
+            // Generate Journal
+            // Create a general descriptive text for the journal
+            $componentNames = implode(', ', array_column($logDetails, 'component_name'));
+            $jId = $this->createJournal('ADJUSTMENT', $id, $trx['invoice'], date('Y-m-d'), "Invoice Adjustment: {$componentNames}", $trx['id_toko']);
+
+            // 1. AR Booking (10x3)
+            if ($totalArAdjustment > 0) {
+                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', $totalArAdjustment, 0, $trx['id_toko']);
+            } elseif ($totalArAdjustment < 0) {
+                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', 0, abs($totalArAdjustment), $trx['id_toko']);
+            }
+
+            // 2. Discount Booking (40x2)
+            if ($totalDiscountAdjustment > 0) {
+                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '2', $totalDiscountAdjustment, 0, $trx['id_toko']);
+            } elseif ($totalDiscountAdjustment < 0) {
+                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '2', 0, abs($totalDiscountAdjustment), $trx['id_toko']);
+            }
+
+            // 3. PPN Booking (20x5)
+            if ($totalPpnChange > 0) {
+                $this->addJournalItem($jId, '20' . $trx['id_toko'] . '5', 0, $totalPpnChange, $trx['id_toko']);
+            } elseif ($totalPpnChange < 0) {
+                $this->addJournalItem($jId, '20' . $trx['id_toko'] . '5', abs($totalPpnChange), 0, $trx['id_toko']);
+            }
+
+            // 4. Other Income/Sales Booking (40x1)
+            if ($totalIncomeAdjustment > 0) {
+                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', 0, $totalIncomeAdjustment, $trx['id_toko']);
+            } elseif ($totalIncomeAdjustment < 0) {
+                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', abs($totalIncomeAdjustment), 0, $trx['id_toko']);
             }
 
             // Check if status needs to change from PAID to NEED_REFUND or PARTIALLY_PAID
@@ -690,12 +865,16 @@ class TransactionControllerV2 extends ResourceController
             // Save adjustments to meta
             $adjustmentsJSON = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'adjustments')->first();
             $adjustmentsRecord = $adjustmentsJSON ? json_decode($adjustmentsJSON['value'], true) : [];
-            $adjustmentsRecord[] = [
-                'component_name' => $componentName,
-                'type' => $type,
-                'amount' => $amount,
-                'date' => date('Y-m-d H:i:s')
-            ];
+
+            foreach ($logDetails as $adjLog) {
+                $adjustmentsRecord[] = [
+                    'category' => $adjLog['category'],
+                    'component_name' => $adjLog['component_name'],
+                    'type' => $adjLog['type'],
+                    'amount' => $adjLog['amount'],
+                    'date' => date('Y-m-d H:i:s')
+                ];
+            }
 
             if ($adjustmentsJSON) {
                 $this->transactionMetaModel->update($adjustmentsJSON['id'], ['value' => json_encode($adjustmentsRecord)]);
@@ -712,11 +891,9 @@ class TransactionControllerV2 extends ResourceController
                 'action_type' => 'ADJUST_INVOICE',
                 'target_table' => 'transaction',
                 'target_id' => $id,
-                'description' => "Penyesuaian Transaksi {$trx['invoice']} - {$componentName} ({$type}): {$amount}",
+                'description' => "Penyesuaian Transaksi {$trx['invoice']} - {$componentNames} Total: " . array_sum(array_column($logDetails, 'amount')),
                 'detail' => [
-                    'component_name' => $componentName,
-                    'type' => $type,
-                    'amount' => $amount,
+                    'adjustments' => $logDetails,
                     'old_total' => $actualTotal,
                     'new_total' => $newActualTotal
                 ]
@@ -737,7 +914,7 @@ class TransactionControllerV2 extends ResourceController
 
             if ($custData) {
                 $trx['customer'] = $custData;
-                send_invoice_adjusted_email($trx, $componentName, $type, $amount, $newActualTotal);
+                send_invoice_adjusted_email($trx, $componentNames, "Multiple", array_sum(array_column($logDetails, 'amount')), $newActualTotal);
             }
 
             return $this->jsonResponse->oneResp('Transaksi berhasil disesuaikan', [
@@ -807,9 +984,9 @@ class TransactionControllerV2 extends ResourceController
             // Reverse Gross Sales
             $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $trx['amount'], 0, $trx['id_toko']);
 
-            // Reverse PPN
+            // Reverse PPN Keluaran
             if ($ppnValue > 0) {
-                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '1', $ppnValue, 0, $trx['id_toko']);
+                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '5', $ppnValue, 0, $trx['id_toko']);
             }
 
             // Reverse Shipping (Only if NOT delivered)

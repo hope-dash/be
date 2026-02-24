@@ -640,9 +640,9 @@ class CustomerTransactionControllerV2 extends ResourceController
             // Reverse Gross Sales
             $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $trx['amount'], 0, $trx['id_toko']);
 
-            // Reverse PPN
+            // Reverse PPN Keluaran
             if ($ppnValue > 0) {
-                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '1', $ppnValue, 0, $trx['id_toko']);
+                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '5', $ppnValue, 0, $trx['id_toko']);
             }
 
             // Reverse Shipping (Only if NOT delivered)
