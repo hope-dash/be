@@ -124,7 +124,7 @@ if (!function_exists('get_email_template')) {
         </div>
         <div class="footer">
             <p>&copy; ' . date('Y') . ' Hope Sparepart. All rights reserved.</p>
-            <p>Jika Anda memiliki pertanyaan, silakan hubungi support wa ke +62 889-8099-8878 atau email admin@hopesparepart.com</p>
+            <p>Jika Anda memiliki pertanyaan, silakan hubungi support wa ke +62 889-8099-8878</p>
         </div>
     </div>
 </body>
@@ -434,7 +434,15 @@ if (!function_exists('send_invoice_adjusted_email')) {
         $invoice = $transaction['invoice'];
 
         $sign = ($type === 'addition') ? 'Penambahan' : 'Pengurangan';
-        $amountStr = number_format($amount, 0, ',', '.');
+
+        // Format amount: if it's PPN, render as percentage instead of Rupiah
+        $isPpn = stripos($componentName, 'ppn') !== false || stripos($componentName, 'pajak') !== false;
+        if ($isPpn && $type !== 'Multiple') {
+            $formattedAdjustment = (float) $amount . '%';
+        } else {
+            $formattedAdjustment = 'Rp ' . number_format($amount, 0, ',', '.');
+        }
+
         $newTotalStr = number_format($newActualTotal, 0, ',', '.');
 
         $content = '
@@ -444,7 +452,7 @@ if (!function_exists('send_invoice_adjusted_email')) {
             <div class="info-box">
                 <p><strong>Komponen:</strong> ' . htmlspecialchars($componentName) . '</p>
                 <p><strong>Jenis Penyesuaian:</strong> ' . $sign . '</p>
-                <p><strong>Nominal Penyesuaian:</strong> Rp ' . $amountStr . '</p>
+                <p><strong>Nominal Penyesuaian:</strong> ' . $formattedAdjustment . '</p>
                 <hr style="border-top: 1px solid #ddd; border-bottom: none; border-left: none; border-right: none;" />
                 <p><strong>Total Tagihan Baru:</strong> Rp ' . $newTotalStr . '</p>
             </div>

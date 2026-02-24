@@ -1215,7 +1215,7 @@ class TransactionControllerV2 extends ResourceController
 
             $jid = $this->createJournal('REFUND', $id, $trx['invoice'], date('Y-m-d'), "Refund: $reason", $trx['id_toko']);
             $this->addJournalItem($jid, '10' . $trx['id_toko'] . '3', $amount, 0, $trx['id_toko']);
-            $this->addJournalItem($jid, '10' . $trx['id_toko'] . '1', 0, $amount, $trx['id_toko']);
+            $this->addJournalItem($jid, '10' . $trx['id_toko'] . '2', 0, $amount, $trx['id_toko']);
 
             $refundMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'refund_needed')->first();
             $newStatus = 'PARTIALLY_REFUNDED';

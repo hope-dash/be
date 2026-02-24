@@ -224,6 +224,16 @@
             color: #721c24;
         }
 
+        .status-canceled {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        .status-refund {
+            background: #cce5ff;
+            color: #004085;
+        }
+
         .notes {
             background: #fffbea;
             padding: 12px;
@@ -360,6 +370,15 @@
                             } elseif ($status === 'partially_paid') {
                                 $statusClass = 'status-partial';
                                 $statusText = 'Dibayar Sebagian';
+                            } elseif ($status === 'cancel' || $status === 'canceled' || $status === 'cancelled') {
+                                $statusClass = 'status-canceled';
+                                $statusText = 'Dibatalkan';
+                            } elseif ($status === 'need_refund') {
+                                $statusClass = 'status-refund';
+                                $statusText = 'Butuh Refund';
+                            } elseif ($status === 'refunded') {
+                                $statusClass = 'status-refund';
+                                $statusText = 'Refund Selesai';
                             }
                             ?>
                             <span class="status-badge <?= $statusClass ?>">
