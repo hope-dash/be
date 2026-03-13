@@ -1,6 +1,7 @@
 <?php
 
 use Config\Database;
+use App\Libraries\TenantContext;
 
 if (!function_exists('log_aktivitas')) {
     /**
@@ -14,6 +15,7 @@ if (!function_exists('log_aktivitas')) {
         $builder = $db->table('log_aktivitas');
 
         $logData = [
+            'tenant_id' => TenantContext::id() ?: null,
             'user_id' => $data['user_id'] ?? null,
             'action_type' => $data['action_type'] ?? null,
             'target_table' => $data['target_table'] ?? null,

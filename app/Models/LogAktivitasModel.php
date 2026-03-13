@@ -2,13 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class LogAktivitasModel extends Model
+class LogAktivitasModel extends TenantScopedModel
 {
     protected $table = 'log_aktivitas';
     protected $primaryKey = 'id';
     protected $allowedFields = [
+        'tenant_id',
         'user_id',
         'action_type',
         'target_table',

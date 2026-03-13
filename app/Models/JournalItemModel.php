@@ -2,13 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class JournalItemModel extends Model
+class JournalItemModel extends TenantScopedModel
 {
     protected $table = 'journal_items';
     protected $primaryKey = 'id';
     protected $allowedFields = [
+        'tenant_id',
         'journal_id', 'account_id', 'debit', 'credit', 
         'created_at'
     ];

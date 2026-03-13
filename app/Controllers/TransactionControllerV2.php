@@ -15,6 +15,7 @@ use App\Models\TransactionPaymentModel;
 use App\Models\CustomerModel;
 use App\Models\JsonResponse;
 use App\Models\TransactionMetaModel;
+use App\Libraries\TenantContext;
 use CodeIgniter\API\ResponseTrait;
 
 class TransactionControllerV2 extends ResourceController
@@ -1491,7 +1492,7 @@ class TransactionControllerV2 extends ResourceController
             // 1. Get Transaction with Toko info
             $transaction = $this->transactionModel
                 ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo, toko.bank, toko.nomer_rekening, toko.nama_pemilik')
-                ->join('toko', 'transaction.id_toko = toko.id', 'left')
+                ->join('toko', 'transaction.id_toko = toko.id AND toko.tenant_id = transaction.tenant_id', 'left')
                 ->find($id);
 
             if (!$transaction)
@@ -1523,10 +1524,11 @@ class TransactionControllerV2 extends ResourceController
                     s.seri,
                     CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang
                 ")
-                ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
-                ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
-                ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+                ->join('product p', 'sp.kode_barang = p.id_barang AND p.tenant_id = sp.tenant_id', 'left')
+                ->join('model_barang mb', 'p.id_model_barang = mb.id AND mb.tenant_id = sp.tenant_id', 'left')
+                ->join('seri s', 'p.id_seri_barang = s.id AND s.tenant_id = sp.tenant_id', 'left')
                 ->where('sp.id_transaction', $id)
+                ->where('sp.tenant_id', TenantContext::id())
                 ->get()
                 ->getResultArray();
 

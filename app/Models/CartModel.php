@@ -2,13 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class CartModel extends Model
+class CartModel extends TenantScopedModel
 {
     protected $table = 'cart';
     protected $primaryKey = 'id';
     protected $allowedFields = [
+        'tenant_id',
         'customer_id',
         'id_barang',
         'jumlah',

@@ -17,6 +17,7 @@ use App\Models\StockLedgerModel;
 use App\Models\CustomerModel;
 use App\Models\TokoModel;
 use App\Models\JsonResponse;
+use App\Libraries\TenantContext;
 use CodeIgniter\API\ResponseTrait;
 
 class CustomerTransactionControllerV2 extends ResourceController
@@ -68,10 +69,10 @@ class CustomerTransactionControllerV2 extends ResourceController
 
             $items = $this->cartModel
                 ->select('cart.*, product.id as product_table_id, product.nama_barang,product.berat, product.harga_jual, model_barang.nama_model, seri.seri, toko.toko_name, toko.alamat as toko_alamat')
-                ->join('product', 'product.id_barang = cart.id_barang', 'left')
-                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->join('toko', 'toko.id = cart.id_toko', 'left')
+                ->join('product', 'product.id_barang = cart.id_barang AND product.tenant_id = cart.tenant_id', 'left')
+                ->join('model_barang', 'model_barang.id = product.id_model_barang AND model_barang.tenant_id = cart.tenant_id', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang AND seri.tenant_id = cart.tenant_id', 'left')
+                ->join('toko', 'toko.id = cart.id_toko AND toko.tenant_id = cart.tenant_id', 'left')
                 ->where('customer_id', $customerId)
                 ->findAll();
 
@@ -81,6 +82,7 @@ class CustomerTransactionControllerV2 extends ResourceController
             if (!empty($productTableIds)) {
                 $images = $this->db->table('image')
                     ->select('kode, url')
+                    ->where('tenant_id', TenantContext::id())
                     ->where('type', 'product')
                     ->whereIn('kode', $productTableIds)
                     ->get()->getResultArray();
@@ -256,7 +258,7 @@ class CustomerTransactionControllerV2 extends ResourceController
             // 1. Fetch cart items with product details
             $cartItems = $this->cartModel
                 ->select('cart.*, product.nama_barang, product.harga_jual, product.harga_modal')
-                ->join('product', 'product.id_barang = cart.id_barang')
+                ->join('product', 'product.id_barang = cart.id_barang AND product.tenant_id = cart.tenant_id')
                 ->whereIn('cart.id', $cartIds)
                 ->where('cart.customer_id', $customerId)
                 ->findAll();
@@ -527,7 +529,7 @@ class CustomerTransactionControllerV2 extends ResourceController
 
             $builder = $this->transactionModel
                 ->select('transaction.*')
-                ->join('transaction_meta', 'transaction_meta.transaction_id = transaction.id')
+                ->join('transaction_meta', 'transaction_meta.transaction_id = transaction.id AND transaction_meta.tenant_id = transaction.tenant_id')
                 ->where('transaction_meta.key', 'customer_id')
                 ->where('transaction_meta.value', (string) $customerId);
 
@@ -553,7 +555,7 @@ class CustomerTransactionControllerV2 extends ResourceController
             foreach ($transactions as &$trx) {
                 $firstItem = $this->salesProductModel
                     ->select('sales_product.kode_barang, product.nama_barang')
-                    ->join('product', 'product.id_barang = sales_product.kode_barang', 'left')
+                    ->join('product', 'product.id_barang = sales_product.kode_barang AND product.tenant_id = sales_product.tenant_id', 'left')
                     ->where('id_transaction', $trx['id'])
                     ->first();
 

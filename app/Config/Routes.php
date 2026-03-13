@@ -10,28 +10,28 @@ $routes->options('api/(:any)', function () {
     return service('response')->setStatusCode(200);
 });
 
-$routes->post('api/login', 'UserController::login');
-$routes->post('api/register-be', 'UserController::create_be');
-$routes->post('api/pricelist', 'ProductController::getProductStockForPricelist');
-$routes->post('api/login/customer', 'CustomerController::checkSpecialCustomer');
-$routes->get('api/dropdown/toko', 'TokoController::dropdownToko');
-$routes->get('api/dropdown/model_barang', 'BarangController::dropdownModel');
-$routes->get('api/dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction');
-$routes->get('api/dropdown/suplier', 'SuplierController::dropdownSuplier');
-$routes->get('api/detail/toko/(:num)', 'TokoController::getDetailById/$1');
-$routes->get('api/dropdown/seri', 'BarangController::dropdownSeri');
-$routes->get('api/dropdown/seri-by-product', 'ProductController::getListSeribySearchProduct');
-$routes->get('api/product/(:num)', 'ProductController::getDetailById/$1');
-$routes->post('api/closing/auto-monthly', 'ClosingController::autoCloseMonthly');
-$routes->post('api/v2/upload/image', 'UploadController::uploadImage', ['filter' => 'anyJwtAuth']);
-$routes->post('api/upload/image', 'UploadController::uploadImage', ['filter' => 'anyJwtAuth']);
+$routes->post('api/login', 'UserController::login', ['filter' => 'tenant']);
+$routes->post('api/register-be', 'UserController::create_be', ['filter' => 'tenant']);
+$routes->post('api/pricelist', 'ProductController::getProductStockForPricelist', ['filter' => 'tenant']);
+$routes->post('api/login/customer', 'CustomerController::checkSpecialCustomer', ['filter' => 'tenant']);
+$routes->get('api/dropdown/toko', 'TokoController::dropdownToko', ['filter' => 'tenant']);
+$routes->get('api/dropdown/model_barang', 'BarangController::dropdownModel', ['filter' => 'tenant']);
+$routes->get('api/dropdown/status-transaction', 'TransactionController::dropdownStatusTransaction', ['filter' => 'tenant']);
+$routes->get('api/dropdown/suplier', 'SuplierController::dropdownSuplier', ['filter' => 'tenant']);
+$routes->get('api/detail/toko/(:num)', 'TokoController::getDetailById/$1', ['filter' => 'tenant']);
+$routes->get('api/dropdown/seri', 'BarangController::dropdownSeri', ['filter' => 'tenant']);
+$routes->get('api/dropdown/seri-by-product', 'ProductController::getListSeribySearchProduct', ['filter' => 'tenant']);
+$routes->get('api/product/(:num)', 'ProductController::getDetailById/$1', ['filter' => 'tenant']);
+$routes->post('api/closing/auto-monthly', 'ClosingController::autoCloseMonthly', ['filter' => 'tenant']);
+$routes->post('api/v2/upload/image', 'UploadController::uploadImage', ['filter' => ['tenant', 'anyJwtAuth']]);
+$routes->post('api/upload/image', 'UploadController::uploadImage', ['filter' => ['tenant', 'anyJwtAuth']]);
 
 // Cron Jobs
 $routes->get('api/cron/process-email', 'CronController::processEmailQueue');
 $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
 
 
-$routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
+$routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     //user
     $routes->post('register', 'UserController::create');
     $routes->get('user/(:num)', 'UserController::userById/$1');
@@ -209,7 +209,7 @@ $routes->group('api', ['filter' => 'jwtAuth'], function ($routes) {
 });
 
 // Customer V2 Public Routes (No Auth Required) - OUTSIDE jwtAuth group
-$routes->group('api/v2/customer', function ($routes) {
+$routes->group('api/v2/customer', ['filter' => 'tenant'], function ($routes) {
     $routes->post('register', 'CustomerControllerV2::register');
     $routes->post('verify-email', 'CustomerControllerV2::verifyEmail');
     $routes->post('login', 'CustomerControllerV2::login');
@@ -223,7 +223,7 @@ $routes->group('api/v2/customer', function ($routes) {
 $routes->get('api/customer/verify', 'CustomerControllerV2::verifyEmailPage');
 
 // Customer V2 Protected Routes (Requires Customer Auth)
-$routes->group('api/v2/customer', ['filter' => 'customerJwtAuth'], function ($routes) {
+$routes->group('api/v2/customer', ['filter' => ['tenant', 'customerJwtAuth']], function ($routes) {
     $routes->get('profile', 'CustomerControllerV2::getProfile');
     $routes->put('profile', 'CustomerControllerV2::updateProfile');
     $routes->post('pricelist', 'ProductController::getProductStockForPricelistV2');
@@ -268,6 +268,3 @@ $routes->group('api/wilayah', function ($routes) {
 $routes->group('api/expedition', function ($routes) {
     $routes->get('shipping-cost', 'ExpeditionController::getShippingCost');
 });
-
-
-

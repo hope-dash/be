@@ -2,11 +2,9 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class StockModel extends Model
+class StockModel extends TenantScopedModel
 {
     protected $table = 'stock';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['id_barang', 'id_toko', 'stock', 'barang_cacat','dropship'];
+    protected $allowedFields = ['tenant_id', 'id_barang', 'id_toko', 'stock', 'barang_cacat', 'dropship'];
 }

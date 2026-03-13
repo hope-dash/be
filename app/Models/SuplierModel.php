@@ -2,14 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class SuplierModel extends Model
+class SuplierModel extends TenantScopedModel
 {
     protected $table = 'suplier';
     protected $primaryKey = 'id';
 
-    protected $allowedFields = ['suplier_name', 'suplier_number', 'notes', "created_by", "updated_by"];
+    protected $allowedFields = ['tenant_id', 'suplier_name', 'suplier_number', 'notes', "created_by", "updated_by"];
     protected $useSoftDeletes = true;
     protected $useTimestamps = true;
     protected $dateFormat = 'datetime';

@@ -2,14 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class CashflowModel extends Model
+class CashflowModel extends TenantScopedModel
 {
     protected $table = 'cashflow';
     protected $primaryKey = 'id';
     protected $useAutoIncrement = true;
-    protected $allowedFields = ['debit', 'credit', 'noted', 'type', 'status', 'metode', 'date_time', 'id_toko', 'closing'];
+    protected $allowedFields = ['tenant_id', 'debit', 'credit', 'noted', 'type', 'status', 'metode', 'date_time', 'id_toko', 'closing'];
 
     // Menggunakan timestamps otomatis jika diperlukan
     protected $useTimestamps = false;

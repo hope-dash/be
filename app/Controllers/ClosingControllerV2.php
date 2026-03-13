@@ -7,6 +7,7 @@ use App\Models\JournalModel;
 use App\Models\JournalItemModel;
 use App\Models\AccountModel;
 use App\Models\JsonResponse;
+use App\Libraries\TenantContext;
 
 class ClosingControllerV2 extends ResourceController
 {
@@ -148,11 +149,12 @@ class ClosingControllerV2 extends ResourceController
 
         foreach ($accounts as $acc) {
             $builderDebit = $this->db->table('journal_items')
-                ->join('journals', 'journals.id = journal_items.journal_id')
+                ->join('journals', 'journals.id = journal_items.journal_id AND journals.tenant_id = journal_items.tenant_id')
                 ->where('journal_items.account_id', $acc['id'])
                 ->where('journals.date >=', $startDate)
                 ->where('journals.date <=', $endDate)
-                ->where('journals.reference_type !=', 'CLOSING');
+                ->where('journals.reference_type !=', 'CLOSING')
+                ->where('journal_items.tenant_id', TenantContext::id());
 
             if ($tokoId) {
                 $builderDebit->where('journals.id_toko', $tokoId);
@@ -160,11 +162,12 @@ class ClosingControllerV2 extends ResourceController
             $debit = $builderDebit->selectSum('debit')->get()->getRow()->debit ?? 0;
 
             $builderCredit = $this->db->table('journal_items')
-                ->join('journals', 'journals.id = journal_items.journal_id')
+                ->join('journals', 'journals.id = journal_items.journal_id AND journals.tenant_id = journal_items.tenant_id')
                 ->where('journal_items.account_id', $acc['id'])
                 ->where('journals.date >=', $startDate)
                 ->where('journals.date <=', $endDate)
-                ->where('journals.reference_type !=', 'CLOSING');
+                ->where('journals.reference_type !=', 'CLOSING')
+                ->where('journal_items.tenant_id', TenantContext::id());
 
             if ($tokoId) {
                 $builderCredit->where('journals.id_toko', $tokoId);

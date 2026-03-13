@@ -2,13 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class SupplierClosingModel extends Model
+class SupplierClosingModel extends TenantScopedModel
 {
     protected $table = 'supplier_closing';
     protected $primaryKey = 'id';
     protected $allowedFields = [
+        'tenant_id',
         'transaction_id',
         'kode_barang',
         'transaction_date',

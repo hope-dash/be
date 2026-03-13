@@ -2,14 +2,13 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class TokoModel extends Model
+class TokoModel extends TenantScopedModel
 {
     protected $table = 'toko';
     protected $primaryKey = 'id';
     protected $useAutoIncrement = true;
     protected $allowedFields = [
+        "tenant_id",
         "toko_name",
         "alamat",
         "phone_number",

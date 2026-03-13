@@ -2,23 +2,25 @@
 
 namespace App\Models;
 
-class EmailQueueModel extends TenantScopedModel
+use CodeIgniter\Model;
+
+class TenantModel extends Model
 {
-    protected $table = 'email_queue';
+    protected $table = 'tenants';
     protected $primaryKey = 'id';
+    protected $returnType = 'array';
     protected $useAutoIncrement = true;
+
     protected $allowedFields = [
-        'tenant_id',
-        'recipient',
-        'subject',
-        'message',
+        'code',
+        'name',
         'status',
-        'attempts',
-        'error_message',
-        'scheduled_at',
-        'sent_at'
+        'created_at',
+        'updated_at',
     ];
+
     protected $useTimestamps = true;
     protected $createdField = 'created_at';
     protected $updatedField = 'updated_at';
 }
+

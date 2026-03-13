@@ -2,13 +2,11 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class TransactionModel extends Model
+class TransactionModel extends TenantScopedModel
 {
     protected $table = 'transaction';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['amount', 'total_payment', 'po', 'status', 'delivery_status', 'discount_type', 'discount_amount', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by','actual_total','total_modal'];
+    protected $allowedFields = ['tenant_id', 'amount', 'total_payment', 'po', 'status', 'delivery_status', 'discount_type', 'discount_amount', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by', 'actual_total', 'total_modal'];
 
     protected $statuses = [
         'SUCCESS' => 'Success',
@@ -32,7 +30,7 @@ class TransactionModel extends Model
     public function getStatuses()
     {
         return $this->statuses;
-    }
+}
 
 
 }

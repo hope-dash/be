@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class VoucherModel extends Model
+class VoucherModel extends TenantScopedModel
 {
     protected $table = 'voucher';
     protected $primaryKey = 'id';
@@ -13,6 +11,7 @@ class VoucherModel extends Model
     protected $useSoftDeletes = true;
     protected $protectFields = true;
     protected $allowedFields = [
+        'tenant_id',
         'code',
         'description',
         'discount_type',

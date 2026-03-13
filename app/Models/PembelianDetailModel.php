@@ -2,14 +2,13 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class PembelianDetailModel extends Model
+class PembelianDetailModel extends TenantScopedModel
 {
     protected $table = 'pembelian_detail';
     protected $primaryKey = 'id';
 
     protected $allowedFields = [
+        'tenant_id',
         'pembelian_id',
         'kode_barang',
         'jumlah',

@@ -2,13 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class AccountModel extends Model
+class AccountModel extends TenantScopedModel
 {
     protected $table = 'accounts';
     protected $primaryKey = 'id';
     protected $allowedFields = [
+        'tenant_id',
         'id_toko',
         'code',
         'base_code',

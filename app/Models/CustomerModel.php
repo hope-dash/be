@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class CustomerModel extends Model
+class CustomerModel extends TenantScopedModel
 {
     protected $table = 'customer';
     protected $primaryKey = 'id';
@@ -13,6 +11,7 @@ class CustomerModel extends Model
     protected $useSoftDeletes = true;
     protected $protectFields = true;
     protected $allowedFields = [
+        'tenant_id',
         'nama_customer',
         'no_hp_customer',
         'alamat',

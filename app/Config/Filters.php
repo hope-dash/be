@@ -38,6 +38,7 @@ class Filters extends BaseFilters
         'jwtAuth' => \App\Filters\JwtMiddleware::class,
         'customerJwtAuth' => \App\Filters\CustomerJwtMiddleware::class,
         'anyJwtAuth' => \App\Filters\AnyJwtMiddleware::class,
+        'tenant' => \App\Filters\TenantMiddleware::class,
     ];
 
     /**

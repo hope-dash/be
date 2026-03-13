@@ -9,6 +9,7 @@ use App\Models\StockModel;
 use App\Models\VoucherModel;
 use App\Models\Jwtoken;
 use App\Models\JsonResponse;
+use App\Libraries\TenantContext;
 use CodeIgniter\API\ResponseTrait;
 
 class CustomerControllerV2 extends ResourceController
@@ -287,8 +288,8 @@ class CustomerControllerV2 extends ResourceController
                 'model_barang.nama_model',
                 'seri.seri'
             ])
-                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+                ->join('model_barang', 'model_barang.id = product.id_model_barang AND model_barang.tenant_id = product.tenant_id', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang AND seri.tenant_id = product.tenant_id', 'left');
 
             // Apply store filter if id_toko is provided
             if ($idToko) {
@@ -342,9 +343,10 @@ class CustomerControllerV2 extends ResourceController
                     // Multi store mode: Fetch all CABANG stocks
                     $stockBuilder = $this->db->table('stock')
                         ->select('stock.*, toko.toko_name')
-                        ->join('toko', 'toko.id = stock.id_toko')
+                        ->join('toko', 'toko.id = stock.id_toko AND toko.tenant_id = stock.tenant_id')
                         ->where('toko.type', 'CABANG')
-                        ->whereIn('id_barang', $productIds);
+                        ->whereIn('id_barang', $productIds)
+                        ->where('stock.tenant_id', TenantContext::id());
 
                     $stocks = $stockBuilder->get()->getResultArray();
 
@@ -375,6 +377,7 @@ class CustomerControllerV2 extends ResourceController
 
                 $images = $this->db->table('image')
                     ->select('kode, url')
+                    ->where('tenant_id', TenantContext::id())
                     ->where('type', 'product')
                     ->whereIn('kode', $productTableIds)
                     ->get()
@@ -459,8 +462,8 @@ class CustomerControllerV2 extends ResourceController
                     'model_barang.nama_model',
                     'seri.seri'
                 ])
-                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->join('model_barang', 'model_barang.id = product.id_model_barang AND model_barang.tenant_id = product.tenant_id', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang AND seri.tenant_id = product.tenant_id', 'left')
                 ->where('product.id', $id)
                 ->first();
 
@@ -497,6 +500,7 @@ class CustomerControllerV2 extends ResourceController
             // Fetch Images
             $images = $this->db->table('image')
                 ->select('url')
+                ->where('tenant_id', TenantContext::id())
                 ->where('type', 'product')
                 ->where('kode', $product['id'])
                 ->get()
@@ -507,9 +511,10 @@ class CustomerControllerV2 extends ResourceController
             // Fetch Stock Breakdown
             $stockDetails = $this->db->table('stock')
                 ->select('stock.stock, stock.id_toko, toko.toko_name')
-                ->join('toko', 'toko.id = stock.id_toko')
+                ->join('toko', 'toko.id = stock.id_toko AND toko.tenant_id = stock.tenant_id')
                 ->where('toko.type', 'CABANG')
                 ->where('stock.id_barang', $product['id_barang'])
+                ->where('stock.tenant_id', TenantContext::id())
                 ->get()
                 ->getResultArray();
 

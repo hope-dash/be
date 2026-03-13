@@ -2,13 +2,11 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class SeriModel extends Model
+class SeriModel extends TenantScopedModel
 {
     protected $table = 'seri';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['seri', "created_by", "updated_by"];
+    protected $allowedFields = ['tenant_id', 'seri', "created_by", "updated_by"];
 
     protected $useSoftDeletes = true;
     protected $useTimestamps = true;

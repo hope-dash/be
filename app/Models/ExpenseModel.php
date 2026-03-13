@@ -2,13 +2,12 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class ExpenseModel extends Model
+class ExpenseModel extends TenantScopedModel
 {
     protected $table = 'expenses';
     protected $primaryKey = 'id';
     protected $allowedFields = [
+        'tenant_id',
         'id_toko',
         'account_id',
         'amount',

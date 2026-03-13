@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
-
-class UserModel extends Model
+class UserModel extends TenantScopedModel
 {
     protected $table = 'users';
     protected $primaryKey = 'user_id';
@@ -12,7 +10,7 @@ class UserModel extends Model
     protected $returnType = 'array';
     protected $useSoftDeletes = true;
     protected $protectFields = true;
-    protected $allowedFields = ["name", "username", "email", "password", "access", "permissions", "created_by", "updated_by", "deleted_at"];
+    protected $allowedFields = ["tenant_id", "name", "username", "email", "password", "access", "permissions", "created_by", "updated_by", "deleted_at"];
 
     // protected bool $allowEmptyInserts = false;
     // protected bool $updateOnlyChanged = true;
