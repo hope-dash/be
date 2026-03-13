@@ -214,6 +214,7 @@ class TransactionControllerV2 extends ResourceController
 
             $this->transactionModel->insert($trxData);
             $trxId = $this->transactionModel->getInsertID();
+            $subscriptionService->incrementTransactionUsed($tenantId, 1);
 
             // Update Invoice to use ID
             $invoice = 'INV' . date('ymd') . $trxId;

@@ -104,6 +104,7 @@ class ProductController extends ResourceController
         ];
 
         $this->productModel->insert($productData);
+        $subscriptionService->incrementProductUsed($tenantId, 1);
         log_aktivitas([
             'user_id' => $token['user_id'],
             'action_type' => 'CREATE',
@@ -195,6 +196,7 @@ class ProductController extends ResourceController
         ];
 
         $this->productModel->insert($productData);
+        $subscriptionService->incrementProductUsed($tenantId, 1);
         log_aktivitas([
             'user_id' => $token['user_id'],
             'action_type' => 'CREATE_V2',

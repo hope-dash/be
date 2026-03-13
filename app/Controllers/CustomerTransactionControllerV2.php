@@ -277,7 +277,8 @@ class CustomerTransactionControllerV2 extends ResourceController
 
             $transactionsToCreate = count($groupedByStore);
             $subscriptionService = new SubscriptionService($this->db);
-            $quotaCheck = $subscriptionService->canCreateTransactionsThisMonth(TenantContext::id(), $transactionsToCreate);
+            $tenantId = TenantContext::id();
+            $quotaCheck = $subscriptionService->canCreateTransactionsThisMonth($tenantId, $transactionsToCreate);
             if (!($quotaCheck['ok'] ?? false)) {
                 return $this->jsonResponse->error($quotaCheck['message'] ?? 'Kuota transaksi bulanan habis', $quotaCheck['code'] ?? 403);
             }
@@ -374,6 +375,7 @@ class CustomerTransactionControllerV2 extends ResourceController
 
                 $this->transactionModel->insert($trxData);
                 $trxId = $this->transactionModel->getInsertID();
+                $subscriptionService->incrementTransactionUsed($tenantId, 1);
 
                 $invoiceNo = 'INV' . date('ymd') . $trxId;
                 $this->transactionModel->update($trxId, ['invoice' => $invoiceNo]);

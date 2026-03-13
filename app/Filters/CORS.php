@@ -15,7 +15,7 @@ class CORS implements FilterInterface
         // Use PHP header() for maximum reliability across CI4 lifecycle
         header("Access-Control-Allow-Origin: $origin");
         header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PATCH, PUT, DELETE");
-        header("Access-Control-Allow-Headers: X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Authorization, Access-Control-Request-Method, Access-Control-Request-Headers");
+        header("Access-Control-Allow-Headers: X-API-KEY, X-Tenant, Origin, X-Requested-With, Content-Type, Accept, Authorization, Access-Control-Request-Method, Access-Control-Request-Headers");
         header("Access-Control-Allow-Credentials: true");
         header("Access-Control-Expose-Headers: Content-Disposition, Content-Length, X-Filename");
 

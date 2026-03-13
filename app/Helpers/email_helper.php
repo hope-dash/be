@@ -42,6 +42,55 @@ if (!function_exists('send_email')) {
     }
 }
 
+if (!function_exists('send_email_with_attachments')) {
+    /**
+     * Send email with file attachments (local filesystem paths).
+     *
+     * @param string $to
+     * @param string $subject
+     * @param string $message HTML
+     * @param array<int,string> $attachments
+     * @return bool
+     */
+    function send_email_with_attachments($to, $subject, $message, array $attachments = [])
+    {
+        $email = \Config\Services::email();
+
+        $config = [
+            'protocol' => 'smtp',
+            'SMTPHost' => env('email.SMTPHost'),
+            'SMTPUser' => env('email.SMTPUser'),
+            'SMTPPass' => env('email.SMTPPass'),
+            'SMTPPort' => (int) env('email.SMTPPort'),
+            'SMTPCrypto' => env('email.SMTPCrypto'),
+            'mailType' => 'html',
+            'charset' => 'utf-8',
+            'newline' => "\r\n",
+            'wordWrap' => true,
+        ];
+
+        $email->initialize($config);
+
+        $email->setFrom(env('email.fromEmail'), env('email.fromName'));
+        $email->setTo($to);
+        $email->setSubject($subject);
+        $email->setMessage($message);
+
+        foreach ($attachments as $path) {
+            if (is_string($path) && $path !== '' && file_exists($path)) {
+                $email->attach($path);
+            }
+        }
+
+        if ($email->send()) {
+            return true;
+        }
+
+        log_message('error', 'Email sending failed: ' . $email->printDebugger(['headers']));
+        return false;
+    }
+}
+
 if (!function_exists('get_email_template')) {
     /**
      * Get email template HTML

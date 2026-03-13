@@ -198,6 +198,17 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');
         $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
 
+        // Subscription
+        $routes->get('subscription', 'SubscriptionControllerV2::detail');
+        $routes->get('subscription/usage', 'SubscriptionControllerV2::usage');
+        $routes->get('subscription/packages', 'SubscriptionControllerV2::packages');
+        $routes->post('subscription/orders', 'SubscriptionControllerV2::createOrder');
+        $routes->post('subscription/orders/(:num)/pay', 'SubscriptionControllerV2::payOrder/$1');
+        $routes->post('subscription/orders/(:num)/cancel', 'SubscriptionControllerV2::cancelOrder/$1');
+        $routes->post('subscription/orders/upload-proof', 'SubscriptionControllerV2::uploadProof');
+
+       
+
         // Voucher Management (Admin)
         $routes->post('voucher', 'VoucherController::create');
         $routes->get('voucher', 'VoucherController::index');
@@ -251,6 +262,8 @@ $routes->get('api/invoice/download-mpdf/(:num)', 'InvoiceController::downloadPdf
 $routes->get('api/receipt/download/(:num)', 'InvoiceController::downloadReceiptPdf/$1');
 $routes->get('api/invoice/(:num)', 'InvoiceController::view/$1');
 $routes->get('api/receipt/(:num)', 'InvoiceController::receipt/$1');
+ // Tenant
+$routes->get('api/tenant/(:segment)', 'TenantControllerV2::show/$1');
 
 // Wilayah Indonesia API (Public - No Auth Required)
 $routes->group('api/wilayah', function ($routes) {

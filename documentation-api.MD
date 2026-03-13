@@ -119,6 +119,263 @@ UNPAID → PARTIALLY_PAID (add payment 50%) → PAID (add payment 50%)
 UNPAID → PAID (add payment 100%)
 ```
 
+---
+
+## 9. SUBSCRIPTION & TENANT (Multi-Client)
+
+Endpoint di bagian ini dipakai untuk melihat paket subscription tenant, kuota, dan pemakaian.
+
+**Headers wajib (Admin V2)**:
+
+- `Authorization: Bearer <jwt>` (User JWT)
+- `X-Tenant: <tenant_code>` (contoh: `hope`)
+
+> Catatan URL: route sebenarnya di server adalah `/api/v2/...` (karena group `api` + `v2`).
+
+### A. Subscription Detail (Active)
+
+Mendapatkan subscription aktif tenant + paketnya.
+
+- **URL**: `GET /api/v2/subscription`
+- **Auth**: User JWT Token Required
+- **Response**:
+
+```json
+{
+  "status": true,
+  "message": "Sukses",
+  "data": {
+    "subscription": {
+      "id": 1,
+      "tenant_id": 1,
+      "package_id": 1,
+      "status": "active",
+      "start_at": "2026-03-13 12:00:00",
+      "end_at": "2126-03-13 12:00:00"
+    },
+    "package": {
+      "code": "BASIC_3M",
+      "name": "Basic 3 Bulan",
+      "duration_months": 3,
+      "product_quota": 500,
+      "transaction_monthly_quota": 2000
+    }
+  }
+}
+```
+
+### B. Subscription Usage (Kuota & Pemakaian)
+
+Mendapatkan kuota & pemakaian tenant:
+
+- `products.used` dihitung dari jumlah row `product` tenant (exclude soft delete).
+- `transactions_monthly.used` dihitung dari jumlah row `transaction` tenant di bulan berjalan (reset otomatis tiap bulan karena query range).
+
+- **URL**: `GET /api/v2/subscription/usage`
+- **Auth**: User JWT Token Required
+- **Response**:
+
+```json
+{
+  "status": true,
+  "message": "Sukses",
+  "data": {
+    "period": {
+      "month_start": "2026-03-01 00:00:00",
+      "month_end": "2026-03-31 23:59:59"
+    },
+    "package": {
+      "code": "BASIC_3M",
+      "name": "Basic 3 Bulan",
+      "duration_months": 3
+    },
+    "usage": {
+      "products": { "used": 120, "limit": 500, "remaining": 380 },
+      "transactions_monthly": { "used": 430, "limit": 2000, "remaining": 1570 }
+    }
+  }
+}
+```
+
+Jika kuota unlimited, `limit` dan `remaining` akan bernilai `null`.
+
+### C. List Subscription Packages
+
+List paket subscription yang tersedia (aktif).
+
+- **URL**: `GET /api/v2/subscription/packages`
+- **Auth**: User JWT Token Required
+- **Response**:
+
+```json
+{
+  "status": true,
+  "message": "Sukses",
+  "data": {
+    "packages": [
+      {
+        "id": 1,
+        "code": "BASIC_3M",
+        "name": "Basic 3 Bulan",
+        "price": 1500000,
+        "currency": "IDR",
+        "duration_months": 3,
+        "product_quota": 500,
+        "transaction_monthly_quota": 2000,
+        "is_active": 1,
+        "created_at": "2026-03-13 12:00:00",
+        "updated_at": "2026-03-13 12:00:00"
+      }
+    ]
+  }
+}
+```
+
+### D. Create Subscription Order (Waiting Payment)
+
+Membuat order subscription dengan status `waiting_payment`.
+
+**Catatan**: `transaction_id` dipakai sebagai id transaksi dari payment gateway / sistem pembayaran (harus unique).
+
+- **URL**: `POST /api/v2/subscription/orders`
+- **Auth**: User JWT Token Required
+- **Body**:
+
+```json
+{
+  "transaction_id": "PAY-INV-123456",
+  "package_code": "BASIC_3M"
+}
+```
+
+atau bisa pakai `package_id`:
+
+```json
+{
+  "transaction_id": "PAY-INV-123456",
+  "package_id": 1
+}
+```
+
+- **Response**:
+
+```json
+{
+  "status": true,
+  "message": "Order created",
+  "data": {
+    "order": {
+      "id": 10,
+      "tenant_id": 1,
+      "package_id": 1,
+      "external_transaction_id": "PAY-INV-123456",
+      "status": "waiting_payment",
+      "amount": 1500000,
+      "currency": "IDR",
+      "paid_at": null,
+      "created_at": "2026-03-13 12:00:00",
+      "updated_at": "2026-03-13 12:00:00"
+    }
+  }
+}
+```
+
+### E. Execute Payment Success (Mark Order Paid)
+
+Menandai order subscription menjadi `paid`, lalu mengaktifkan / memperpanjang subscription tenant.
+
+- **URL**: `POST /api/v2/subscription/orders/{id}/pay`
+- **Auth**: User JWT Token Required
+- **Rules**:
+  - Jika tenant masih punya subscription aktif dan beli **package yang sama**, maka `end_at` akan **ditambah durasi package** dari `end_at` saat ini.
+  - Jika beli **package berbeda**, maka subscription aktif akan di-`expired` dan dibuat subscription baru dengan `start_at = today` dan `end_at = today + duration_months`.
+  - Setelah payment success, kuota tenant akan disesuaikan dengan package aktif.
+
+- **Response**:
+
+```json
+{
+  "status": true,
+  "message": "Payment success",
+  "data": {
+    "order": {
+      "id": 10,
+      "tenant_id": 1,
+      "package_id": 1,
+      "external_transaction_id": "PAY-INV-123456",
+      "status": "paid",
+      "amount": 1500000,
+      "currency": "IDR",
+      "paid_at": "2026-03-13 12:05:00",
+      "created_at": "2026-03-13 12:00:00",
+      "updated_at": "2026-03-13 12:05:00"
+    },
+    "subscription": {
+      "action": "extended",
+      "subscription_id": 1,
+      "start_at": "2026-01-01 00:00:00",
+      "end_at": "2026-06-30 23:59:59"
+    }
+  }
+}
+```
+
+### F. Get Tenant Detail by Code
+
+Ambil detail tenant berdasarkan code.
+
+- **URL**: `GET /api/v2/tenant/{code}`
+- **Auth**: User JWT Token Required
+- **Rules**:
+  - Request hanya boleh akses tenant sendiri (`{code}` harus sama dengan `X-Tenant`).
+- **Response**:
+
+```json
+{
+  "status": true,
+  "message": "Sukses",
+  "data": {
+    "tenant": {
+      "id": 1,
+      "code": "hope",
+      "name": "HOPE",
+      "logo_url": "https://cdn.example.com/tenant/hope/logo.png",
+      "status": "active",
+      "created_at": "2026-03-13 12:00:00",
+      "updated_at": "2026-03-13 12:00:00"
+    },
+    "waiting_payment_order": {
+      "id": 10,
+      "external_transaction_id": "PAY-INV-123456",
+      "status": "waiting_payment",
+      "amount": 1500000,
+      "currency": "IDR",
+      "created_at": "2026-03-13 12:00:00"
+    }
+  }
+}
+```
+
+Jika tidak ada order yang menunggu pembayaran, `waiting_payment_order` akan bernilai `null`.
+
+### G. Cancel Subscription Order
+
+Cancel order subscription yang statusnya masih `waiting_payment`.
+
+- **URL**: `POST /api/v2/subscription/orders/{id}/cancel`
+- **Auth**: User JWT Token Required
+
+### H. Upload Payment Proof (Manual)
+
+Upload bukti pembayaran manual untuk order berdasarkan `transaction_id`. Sistem akan mengirim email bukti pembayaran ke admin.
+
+- **URL**: `POST /api/v2/subscription/orders/upload-proof`
+- **Auth**: User JWT Token Required
+- **Content-Type**: `multipart/form-data`
+- **Form Data**:
+  - `transaction_id` (string, required): external transaction id dari order
+  - `image` (file, required): jpg/jpeg/png/webp/pdf
+
 **Scenario 3: Cancel sebelum bayar**
 
 ```
