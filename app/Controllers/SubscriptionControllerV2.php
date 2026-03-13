@@ -50,8 +50,8 @@ class SubscriptionControllerV2 extends ResourceController
                     'code' => $sub['package_code'],
                     'name' => $sub['package_name'],
                     'duration_months' => (int) $sub['duration_months'],
-                    'product_quota' => $sub['product_quota'] === null ? null : (int) $sub['product_quota'],
-                    'transaction_monthly_quota' => $sub['transaction_monthly_quota'] === null ? null : (int) $sub['transaction_monthly_quota'],
+                    'product_quota' => ($sub['product_quota_snapshot'] ?? $sub['product_quota']) === null ? null : (int) ($sub['product_quota_snapshot'] ?? $sub['product_quota']),
+                    'transaction_monthly_quota' => ($sub['transaction_monthly_quota_snapshot'] ?? $sub['transaction_monthly_quota']) === null ? null : (int) ($sub['transaction_monthly_quota_snapshot'] ?? $sub['transaction_monthly_quota']),
                 ],
             ], 200);
         } catch (\Throwable $e) {
@@ -78,13 +78,20 @@ class SubscriptionControllerV2 extends ResourceController
 
             $productUsed = (int) ($quotaRow['product_used'] ?? 0);
             $trxUsed = (int) ($quotaRow['transaction_monthly_used'] ?? 0);
-            $productLimit = $quotaRow['product_quota'] === null ? null : (int) $quotaRow['product_quota'];
-            $trxLimit = $quotaRow['transaction_monthly_quota'] === null ? null : (int) $quotaRow['transaction_monthly_quota'];
+            $productLimitRaw = $sub['product_quota_snapshot'] ?? ($sub['product_quota'] ?? null);
+            $trxLimitRaw = $sub['transaction_monthly_quota_snapshot'] ?? ($sub['transaction_monthly_quota'] ?? null);
+            $productLimit = $productLimitRaw === null ? null : (int) $productLimitRaw;
+            $trxLimit = $trxLimitRaw === null ? null : (int) $trxLimitRaw;
 
             $start = $quotaRow['month_start'] . ' 00:00:00';
             $end = date('Y-m-t 23:59:59', strtotime($start));
 
             return $this->jsonResponse->oneResp('Sukses', [
+                'subscription' => [
+                    'start_at' => $sub['start_at'] ?? null,
+                    'end_at' => $sub['end_at'] ?? null,
+                    'status' => $sub['status'] ?? null,
+                ],
                 'period' => [
                     'month_start' => $start,
                     'month_end' => $end,
@@ -315,6 +322,21 @@ class SubscriptionControllerV2 extends ResourceController
             ]);
 
             $result = $service->applyPaidPackagePurchase($tenantId, (int) $order['package_id']);
+            $quota = $service->syncCurrentTenantQuota($tenantId);
+            $activeSub = $service->getActiveSubscriptionWithPackage($tenantId);
+            $effective = null;
+            if ($activeSub) {
+                $effective = [
+                    'product_quota' => ($activeSub['product_quota_snapshot'] ?? ($activeSub['product_quota'] ?? null)) === null
+                        ? null
+                        : (int) ($activeSub['product_quota_snapshot'] ?? $activeSub['product_quota']),
+                    'transaction_monthly_quota' => ($activeSub['transaction_monthly_quota_snapshot'] ?? ($activeSub['transaction_monthly_quota'] ?? null)) === null
+                        ? null
+                        : (int) ($activeSub['transaction_monthly_quota_snapshot'] ?? $activeSub['transaction_monthly_quota']),
+                    'start_at' => $activeSub['start_at'] ?? null,
+                    'end_at' => $activeSub['end_at'] ?? null,
+                ];
+            }
 
             $this->db->transComplete();
             if ($this->db->transStatus() === false) {
@@ -325,6 +347,85 @@ class SubscriptionControllerV2 extends ResourceController
             return $this->jsonResponse->oneResp('Payment success', [
                 'order' => $updatedOrder,
                 'subscription' => $result,
+                'tenant_quota' => $quota,
+                'effective_limits' => $effective,
+            ], 200);
+        } catch (\Throwable $e) {
+            $this->db->transRollback();
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // POST /api/v2/subscription/orders/{id}/pay (PUBLIC - no JWT / X-Tenant)
+    public function publicPayOrder($id = null)
+    {
+        $id = (int) ($id ?? 0);
+        if ($id <= 0) {
+            return $this->jsonResponse->error('ID wajib diisi', 400);
+        }
+
+        // Optional hardening: set subscription.webhookKey in .env to require this key.
+        $requiredKey = (string) (env('subscription.webhookKey') ?? '');
+        if ($requiredKey !== '') {
+            $provided = trim((string) ($this->request->getHeaderLine('X-Webhook-Key') ?: $this->request->getGet('key')));
+            if ($provided === '' || !hash_equals($requiredKey, $provided)) {
+                return $this->jsonResponse->error('Forbidden', 403);
+            }
+        }
+
+        $service = new SubscriptionService($this->db);
+
+        $this->db->transStart();
+        try {
+            $order = $this->orderModel->find($id);
+            if (!$order) {
+                return $this->jsonResponse->error('Order tidak ditemukan', 404);
+            }
+
+            if (($order['status'] ?? '') !== 'waiting_payment') {
+                return $this->jsonResponse->error('Order status tidak valid untuk dibayar', 400);
+            }
+
+            $paidAt = date('Y-m-d H:i:s');
+            $this->orderModel->update($id, [
+                'status' => 'paid',
+                'paid_at' => $paidAt,
+            ]);
+
+            $tenantId = (int) ($order['tenant_id'] ?? 0);
+            $packageId = (int) ($order['package_id'] ?? 0);
+            if ($tenantId <= 0 || $packageId <= 0) {
+                throw new \Exception('Order data invalid');
+            }
+
+            $result = $service->applyPaidPackagePurchase($tenantId, $packageId);
+            $quota = $service->syncCurrentTenantQuota($tenantId);
+            $activeSub = $service->getActiveSubscriptionWithPackage($tenantId);
+            $effective = null;
+            if ($activeSub) {
+                $effective = [
+                    'product_quota' => ($activeSub['product_quota_snapshot'] ?? ($activeSub['product_quota'] ?? null)) === null
+                        ? null
+                        : (int) ($activeSub['product_quota_snapshot'] ?? $activeSub['product_quota']),
+                    'transaction_monthly_quota' => ($activeSub['transaction_monthly_quota_snapshot'] ?? ($activeSub['transaction_monthly_quota'] ?? null)) === null
+                        ? null
+                        : (int) ($activeSub['transaction_monthly_quota_snapshot'] ?? $activeSub['transaction_monthly_quota']),
+                    'start_at' => $activeSub['start_at'] ?? null,
+                    'end_at' => $activeSub['end_at'] ?? null,
+                ];
+            }
+
+            $this->db->transComplete();
+            if ($this->db->transStatus() === false) {
+                throw new \Exception('DB transaction failed');
+            }
+
+            $updatedOrder = $this->orderModel->find($id);
+            return $this->jsonResponse->oneResp('Payment success', [
+                'order' => $updatedOrder,
+                'subscription' => $result,
+                'tenant_quota' => $quota,
+                'effective_limits' => $effective,
             ], 200);
         } catch (\Throwable $e) {
             $this->db->transRollback();

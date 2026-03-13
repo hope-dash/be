@@ -50,6 +50,25 @@ class SubscriptionService
             return null;
         }
 
+        // Use snapshot quotas from tenant_subscriptions to avoid changing entitlements if package is edited later.
+        $productQuota = array_key_exists('product_quota_snapshot', $sub) ? $sub['product_quota_snapshot'] : null;
+        $trxQuota = array_key_exists('transaction_monthly_quota_snapshot', $sub) ? $sub['transaction_monthly_quota_snapshot'] : null;
+        if ($productQuota === null && array_key_exists('product_quota', $sub)) {
+            $productQuota = $sub['product_quota'];
+        }
+        if ($trxQuota === null && array_key_exists('transaction_monthly_quota', $sub)) {
+            $trxQuota = $sub['transaction_monthly_quota'];
+        }
+
+        return $this->syncCurrentTenantQuotaWithLimits($tenantId, $productQuota, $trxQuota);
+    }
+
+    public function syncCurrentTenantQuotaWithLimits(int $tenantId, $productQuota, $transactionMonthlyQuota): ?array
+    {
+        if (!$this->db->tableExists('tenant_quota')) {
+            return null;
+        }
+
         $monthStart = $this->getCurrentMonthStartDate();
         $monthStartDateTime = $monthStart . ' 00:00:00';
         $monthEndDateTime = date('Y-m-t 23:59:59');
@@ -82,10 +101,10 @@ class SubscriptionService
             ->get()
             ->getRowArray();
 
+        // Important: do NOT overwrite quota limits on existing rows.
+        // This prevents changing a tenant's already-bought quota if the package definition is edited later.
         $payload = [
-            'product_quota' => $sub['product_quota'],
             'product_used' => $productUsed,
-            'transaction_monthly_quota' => $sub['transaction_monthly_quota'],
             'transaction_monthly_used' => $trxUsed,
             'updated_at' => $now,
         ];
@@ -97,6 +116,8 @@ class SubscriptionService
         } else {
             $payload['tenant_id'] = $tenantId;
             $payload['month_start'] = $monthStart;
+            $payload['product_quota'] = $productQuota;
+            $payload['transaction_monthly_quota'] = $transactionMonthlyQuota;
             $payload['created_at'] = $now;
             $this->db->table('tenant_quota')->insert($payload);
         }
@@ -116,7 +137,7 @@ class SubscriptionService
         }
 
         $quotaRow = $this->syncCurrentTenantQuota($tenantId);
-        $quota = $quotaRow['product_quota'] ?? $sub['product_quota'];
+        $quota = $sub['product_quota_snapshot'] ?? ($sub['product_quota'] ?? null);
         $current = (int) ($quotaRow['product_used'] ?? 0);
 
         if ($quota === null || $quota === '') {
@@ -146,7 +167,7 @@ class SubscriptionService
         }
 
         $quotaRow = $this->syncCurrentTenantQuota($tenantId);
-        $quota = $quotaRow['transaction_monthly_quota'] ?? $sub['transaction_monthly_quota'];
+        $quota = $sub['transaction_monthly_quota_snapshot'] ?? ($sub['transaction_monthly_quota'] ?? null);
         $current = (int) ($quotaRow['transaction_monthly_used'] ?? 0);
 
         if ($quota === null || $quota === '') {
@@ -261,6 +282,7 @@ class SubscriptionService
                 'updated_at' => $now,
             ]);
 
+            // Refresh usage row (limits remain unchanged for this month).
             $this->syncCurrentTenantQuota($tenantId);
 
             return [
@@ -288,11 +310,14 @@ class SubscriptionService
             'status' => 'active',
             'start_at' => $now,
             'end_at' => $endAt,
+            'product_quota_snapshot' => $package['product_quota'],
+            'transaction_monthly_quota_snapshot' => $package['transaction_monthly_quota'],
             'created_at' => $now,
             'updated_at' => $now,
         ]);
 
         $subscriptionId = (int) ($this->db->insertID() ?: 0);
+        // Refresh usage row (limits for this month won't be overwritten if already exists).
         $this->syncCurrentTenantQuota($tenantId);
 
         return [

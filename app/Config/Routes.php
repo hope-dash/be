@@ -26,6 +26,9 @@ $routes->post('api/closing/auto-monthly', 'ClosingController::autoCloseMonthly',
 $routes->post('api/v2/upload/image', 'UploadController::uploadImage', ['filter' => ['tenant', 'anyJwtAuth']]);
 $routes->post('api/upload/image', 'UploadController::uploadImage', ['filter' => ['tenant', 'anyJwtAuth']]);
 
+// Public webhook-like endpoint (no JWT / X-Tenant)
+$routes->post('api/v2/subscription/orders/(:num)/pay', 'SubscriptionControllerV2::publicPayOrder/$1');
+
 // Cron Jobs
 $routes->get('api/cron/process-email', 'CronController::processEmailQueue');
 $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
@@ -203,7 +206,6 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->get('subscription/usage', 'SubscriptionControllerV2::usage');
         $routes->get('subscription/packages', 'SubscriptionControllerV2::packages');
         $routes->post('subscription/orders', 'SubscriptionControllerV2::createOrder');
-        $routes->post('subscription/orders/(:num)/pay', 'SubscriptionControllerV2::payOrder/$1');
         $routes->post('subscription/orders/(:num)/cancel', 'SubscriptionControllerV2::cancelOrder/$1');
         $routes->post('subscription/orders/upload-proof', 'SubscriptionControllerV2::uploadProof');
 
@@ -263,7 +265,8 @@ $routes->get('api/receipt/download/(:num)', 'InvoiceController::downloadReceiptP
 $routes->get('api/invoice/(:num)', 'InvoiceController::view/$1');
 $routes->get('api/receipt/(:num)', 'InvoiceController::receipt/$1');
  // Tenant
-$routes->get('api/tenant/(:segment)', 'TenantControllerV2::show/$1');
+$routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
+$routes->post('api/v2/subscription/orders/(:num)/pay', 'SubscriptionControllerV2::payOrder/$1');
 
 // Wilayah Indonesia API (Public - No Auth Required)
 $routes->group('api/wilayah', function ($routes) {

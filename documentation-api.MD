@@ -180,6 +180,11 @@ Mendapatkan kuota & pemakaian tenant:
   "status": true,
   "message": "Sukses",
   "data": {
+    "subscription": {
+      "start_at": "2026-03-01 00:00:00",
+      "end_at": "2026-03-31 23:59:59",
+      "status": "active"
+    },
     "period": {
       "month_start": "2026-03-01 00:00:00",
       "month_end": "2026-03-31 23:59:59"
@@ -285,7 +290,8 @@ atau bisa pakai `package_id`:
 Menandai order subscription menjadi `paid`, lalu mengaktifkan / memperpanjang subscription tenant.
 
 - **URL**: `POST /api/v2/subscription/orders/{id}/pay`
-- **Auth**: User JWT Token Required
+- **Auth**: Public (No JWT / No X-Tenant)
+- **Optional Security**: jika env `subscription.webhookKey` diset, wajib kirim `X-Webhook-Key: <key>` atau query `?key=<key>`
 - **Rules**:
   - Jika tenant masih punya subscription aktif dan beli **package yang sama**, maka `end_at` akan **ditambah durasi package** dari `end_at` saat ini.
   - Jika beli **package berbeda**, maka subscription aktif akan di-`expired` dan dibuat subscription baru dengan `start_at = today` dan `end_at = today + duration_months`.
