@@ -10,6 +10,8 @@ use App\Models\SalesProductModel;
 use App\Models\StockModel;
 use App\Models\TokoModel;
 use App\Models\TransactionModel;
+use App\Libraries\SubscriptionService;
+use App\Libraries\TenantContext;
 use CodeIgniter\RESTful\ResourceController;
 use App\Models\JsonResponse;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -49,6 +51,13 @@ class ProductController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
+
+        $tenantId = TenantContext::id();
+        $subscriptionService = new SubscriptionService($this->db);
+        $quotaCheck = $subscriptionService->canCreateProducts($tenantId, 1);
+        if (!($quotaCheck['ok'] ?? false)) {
+            return $this->jsonResponse->error($quotaCheck['message'] ?? 'Kuota product habis', $quotaCheck['code'] ?? 403);
+        }
 
         $validation = \Config\Services::validation();
         $validation->setRules([
@@ -133,6 +142,13 @@ class ProductController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
+
+        $tenantId = TenantContext::id();
+        $subscriptionService = new SubscriptionService($this->db);
+        $quotaCheck = $subscriptionService->canCreateProducts($tenantId, 1);
+        if (!($quotaCheck['ok'] ?? false)) {
+            return $this->jsonResponse->error($quotaCheck['message'] ?? 'Kuota product habis', $quotaCheck['code'] ?? 403);
+        }
 
         $validation = \Config\Services::validation();
         $validation->setRules([

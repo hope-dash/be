@@ -16,6 +16,7 @@ use App\Models\CustomerModel;
 use App\Models\JsonResponse;
 use App\Models\TransactionMetaModel;
 use App\Libraries\TenantContext;
+use App\Libraries\SubscriptionService;
 use CodeIgniter\API\ResponseTrait;
 
 class TransactionControllerV2 extends ResourceController
@@ -59,6 +60,13 @@ class TransactionControllerV2 extends ResourceController
     {
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
+
+        $tenantId = TenantContext::id();
+        $subscriptionService = new SubscriptionService($this->db);
+        $quotaCheck = $subscriptionService->canCreateTransactionsThisMonth($tenantId, 1);
+        if (!($quotaCheck['ok'] ?? false)) {
+            return $this->jsonResponse->error($quotaCheck['message'] ?? 'Kuota transaksi bulanan habis', $quotaCheck['code'] ?? 403);
+        }
 
         $this->db->transStart();
 

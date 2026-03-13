@@ -18,6 +18,7 @@ use App\Models\CustomerModel;
 use App\Models\TokoModel;
 use App\Models\JsonResponse;
 use App\Libraries\TenantContext;
+use App\Libraries\SubscriptionService;
 use CodeIgniter\API\ResponseTrait;
 
 class CustomerTransactionControllerV2 extends ResourceController
@@ -252,8 +253,6 @@ class CustomerTransactionControllerV2 extends ResourceController
             return $this->jsonResponse->error("Tidak ada item keranjang yang dipilih", 400);
         }
 
-        $this->db->transStart();
-
         try {
             // 1. Fetch cart items with product details
             $cartItems = $this->cartModel
@@ -275,6 +274,15 @@ class CustomerTransactionControllerV2 extends ResourceController
             }
 
             $createdInvoices = [];
+
+            $transactionsToCreate = count($groupedByStore);
+            $subscriptionService = new SubscriptionService($this->db);
+            $quotaCheck = $subscriptionService->canCreateTransactionsThisMonth(TenantContext::id(), $transactionsToCreate);
+            if (!($quotaCheck['ok'] ?? false)) {
+                return $this->jsonResponse->error($quotaCheck['message'] ?? 'Kuota transaksi bulanan habis', $quotaCheck['code'] ?? 403);
+            }
+
+            $this->db->transStart();
 
             // Build a lookup: id_toko => { pengiriman, biaya_pengiriman, discount_type, discount_amount }
             $shippingMap = [];

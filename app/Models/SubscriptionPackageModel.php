@@ -4,9 +4,9 @@ namespace App\Models;
 
 use CodeIgniter\Model;
 
-class TenantModel extends Model
+class SubscriptionPackageModel extends Model
 {
-    protected $table = 'tenants';
+    protected $table = 'subscription_packages';
     protected $primaryKey = 'id';
     protected $returnType = 'array';
     protected $useAutoIncrement = true;
@@ -14,8 +14,12 @@ class TenantModel extends Model
     protected $allowedFields = [
         'code',
         'name',
-        'logo_url',
-        'status',
+        'price',
+        'currency',
+        'duration_months',
+        'product_quota',
+        'transaction_monthly_quota',
+        'is_active',
         'created_at',
         'updated_at',
     ];
@@ -24,3 +28,4 @@ class TenantModel extends Model
     protected $createdField = 'created_at';
     protected $updatedField = 'updated_at';
 }
+
