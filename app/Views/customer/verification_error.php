@@ -165,7 +165,7 @@
         </div>
 
         <a href="<?= \App\Libraries\TenantContext::url() ?>" class="button">Kembali ke Beranda</a>
-        <a href="https://wa.me/6288980998878" class="button button-secondary">Hubungi Support WA</a>
+        <a href="mailto:<?= \App\Libraries\TenantContext::email() ?>" class="button button-secondary">Hubungi Support Email</a>
 
         <div class="footer">
             <p>&copy; <?= date('Y') ?> <?= \App\Libraries\TenantContext::name() ?>. All rights reserved.</p>

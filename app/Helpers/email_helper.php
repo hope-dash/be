@@ -173,7 +173,7 @@ if (!function_exists('get_email_template')) {
         </div>
         <div class="footer">
             <p>&copy; ' . date('Y') . ' ' . \App\Libraries\TenantContext::name() . '. All rights reserved.</p>
-            <p>Jika Anda memiliki pertanyaan, silakan hubungi support wa ke +62 889-8099-8878</p>
+            <p>Jika Anda memiliki pertanyaan, silakan hubungi kami di ' . \App\Libraries\TenantContext::email() . '</p>
         </div>
     </div>
 </body>
