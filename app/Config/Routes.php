@@ -220,6 +220,8 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
 
             // Tiktok Shop
             $routes->get('toko/tiktok-auth-url/(:num)', 'TiktokController::getAuthUrl/$1');
+            $routes->post('toko/tiktok/products/(:num)', 'TiktokController::getProducts/$1');
+            $routes->post('toko/tiktok/product-create/(:num)', 'TiktokController::createProduct/$1');
         // Global Upload
         }
         );

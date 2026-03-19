@@ -135,7 +135,127 @@ class TiktokController extends ResourceController
     }
 
     /**
-     * Create Signature for TikTok Shop API
+     * Get All Products (Search)
+     * POST /api/v2/toko/tiktok/products/(:num)
+     */
+    public function getProducts($idToko = null)
+    {
+        try {
+            $path = "/product/202502/products/search";
+            $params = [
+                'page_size' => 10,
+                'version'   => '202502'
+            ];
+            
+            // Empty body for search
+            $response = $this->makeTiktokRequest($idToko, 'POST', $path, $params, []);
+            
+            return $this->jsonResponse->oneResp('Sukses', $response, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Create Product
+     * POST /api/v2/toko/tiktok/product-create/(:num)
+     */
+    public function createProduct($idToko = null)
+    {
+        try {
+            $path = "/product/202309/products";
+            $productData = $this->request->getJSON(true) ?: [];
+            
+            $response = $this->makeTiktokRequest($idToko, 'POST', $path, [], $productData);
+            
+            return $this->jsonResponse->oneResp('Sukses', $response, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Helper to make signed requests to TikTok Shop API
+     */
+    private function makeTiktokRequest($idToko, $method, $path, $params = [], $body = [])
+    {
+        $toko = $this->tokoModel->find($idToko);
+        if (!$toko || !$toko['tiktok_access_token']) {
+            throw new \Exception("Toko tidak ditemukan atau belum terintegrasi TikTok.");
+        }
+
+        $appKey = env('TIKTOK_APP_KEY');
+        $appSecret = env('TIKTOK_APP_SECRET');
+        $accessToken = $toko['tiktok_access_token'];
+        $shopCipher = $toko['tiktok_shop_cipher'];
+
+        $params['app_key'] = $appKey;
+        $params['shop_cipher'] = $shopCipher;
+        $params['timestamp'] = time();
+
+        $signature = $this->generateSign2($path, $params, $body, $appSecret);
+
+        $params['sign'] = $signature;
+        
+        $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($params);
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
+        
+        $headers = [
+            "Content-Type: application/json",
+            "x-tts-access-token: " . $accessToken
+        ];
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        if ($method === 'POST' || $method === 'PUT') {
+            $jsonBody = empty($body) ? '{}' : json_encode($body);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonBody);
+        }
+
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        return json_decode($response, true);
+    }
+
+    /**
+     * New Signature Generation (V2)
+     */
+    private function generateSign2($path, $params, $body, $appSecret)
+    {
+        $excludeKeys = ["access_token", "sign"];
+
+        // 1. Sort keys (excluding access_token and sign)
+        $signParams = array_filter($params, function ($key) use ($excludeKeys) {
+            return !in_array($key, $excludeKeys);
+        }, ARRAY_FILTER_USE_KEY);
+        ksort($signParams);
+
+        // 2. Start with the path
+        $signString = $path;
+
+        // 3. Append sorted key-value pairs
+        foreach ($signParams as $key => $value) {
+            $signString .= $key . $value;
+        }
+
+        // 4. Always append the stringified body
+        // TikTok V2 signature requires {} for empty body
+        $jsonBody = empty($body) ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $signString .= $jsonBody;
+
+        // 5. Wrap with app secret
+        $finalString = $appSecret . $signString . $appSecret;
+
+        // 6. Generate HMAC-SHA256
+        return hash_hmac('sha256', $finalString, $appSecret);
+    }
+
+    /**
+     * Create Signature for TikTok Shop API (Original/Auth flow)
      */
     private function createSign($params, $secret)
     {
