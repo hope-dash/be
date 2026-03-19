@@ -132,94 +132,99 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     $routes->get('reporting/stock-ledger', 'TransactionController::listStockLedger');
 
     $routes->group('closing', function ($routes) {
-        $routes->post('process', 'ClosingController::closeMonthly');
-        $routes->post('rollback', 'ClosingController::rollbackClosingByMonth');
-        $routes->post('detail', 'ClosingController::getClosingDetailsByMonth');
-        $routes->get('list', 'ClosingController::listClosings');
-        $routes->get('suplier', 'ClosingController::getSupplierClosingReport');
+            $routes->post('process', 'ClosingController::closeMonthly');
+            $routes->post('rollback', 'ClosingController::rollbackClosingByMonth');
+            $routes->post('detail', 'ClosingController::getClosingDetailsByMonth');
+            $routes->get('list', 'ClosingController::listClosings');
+            $routes->get('suplier', 'ClosingController::getSupplierClosingReport');
 
 
 
-    });
+        }
+        );
 
-    $routes->resource('suplier', ['controller' => 'SuplierController']);
+        $routes->resource('suplier', ['controller' => 'SuplierController']);
 
-    // V2 Transaction Routes
-    $routes->group('v2', function ($routes) {
-        $routes->post('transaction', 'TransactionControllerV2::create');
-        $routes->get('transaction/(:num)', 'TransactionControllerV2::getDetail/$1');
-        $routes->post('transaction/count', 'TransactionControllerV2::calculate');
-        $routes->post('transaction/(:num)/payment', 'TransactionControllerV2::addPayment/$1');
-        $routes->post('transaction/(:num)/verify-payment', 'TransactionControllerV2::verifyPayment/$1');
-        $routes->post('transaction/(:num)/cancel', 'TransactionControllerV2::cancel/$1');
-        $routes->post('transaction/(:num)/adjust', 'TransactionControllerV2::adjust/$1');
-        $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
-        $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
-        $routes->post('transaction/(:num)/delivery-status', 'TransactionControllerV2::updateDeliveryStatus/$1');
+        // V2 Transaction Routes
+        $routes->group('v2', function ($routes) {
+            $routes->post('transaction', 'TransactionControllerV2::create');
+            $routes->get('transaction/(:num)', 'TransactionControllerV2::getDetail/$1');
+            $routes->post('transaction/count', 'TransactionControllerV2::calculate');
+            $routes->post('transaction/(:num)/payment', 'TransactionControllerV2::addPayment/$1');
+            $routes->post('transaction/(:num)/verify-payment', 'TransactionControllerV2::verifyPayment/$1');
+            $routes->post('transaction/(:num)/cancel', 'TransactionControllerV2::cancel/$1');
+            $routes->post('transaction/(:num)/adjust', 'TransactionControllerV2::adjust/$1');
+            $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
+            $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
+            $routes->post('transaction/(:num)/delivery-status', 'TransactionControllerV2::updateDeliveryStatus/$1');
 
-        // Journal Routes
-        $routes->get('journal', 'JournalController::index');
-        $routes->get('journal/(:num)', 'JournalController::show/$1');
-        $routes->post('journal/manual', 'JournalController::createManualJournal');
+            // Journal Routes
+            $routes->get('journal', 'JournalController::index');
+            $routes->get('journal/(:num)', 'JournalController::show/$1');
+            $routes->post('journal/manual', 'JournalController::createManualJournal');
 
-        // Expense Routes
-        $routes->get('expense/accounts', 'ExpenseController::accounts');
-        $routes->get('expense', 'ExpenseController::getList');
-        $routes->post('expense', 'ExpenseController::create');
+            // Expense Routes
+            $routes->get('expense/accounts', 'ExpenseController::accounts');
+            $routes->get('expense', 'ExpenseController::getList');
+            $routes->post('expense', 'ExpenseController::create');
 
-        // Purchase V2 (Overriding/Alternative to old Pembelian)
-        $routes->post('purchase', 'PembelianControllerV2::create');
-        $routes->post('purchase/(:num)/review', 'PembelianControllerV2::review/$1');
-        $routes->post('purchase/(:num)/execute', 'PembelianControllerV2::execute/$1');
+            // Purchase V2 (Overriding/Alternative to old Pembelian)
+            $routes->post('purchase', 'PembelianControllerV2::create');
+            $routes->post('purchase/(:num)/review', 'PembelianControllerV2::review/$1');
+            $routes->post('purchase/(:num)/execute', 'PembelianControllerV2::execute/$1');
 
-        // Accounting Reports
-        $routes->get('accounts', 'AccountingReportController::getAccounts');
-        $routes->get('report/journal', 'AccountingReportController::journal');
-        $routes->get('report/ledger', 'AccountingReportController::ledger');
-        $routes->get('report/ledger/detail', 'AccountingReportController::ledgerDetail');
-        $routes->get('report/income-statement', 'AccountingReportController::incomeStatement');
-        $routes->get('report/income-statement-accrual', 'AccountingReportController::incomeStatementAccrual');
-        $routes->get('report/balance-sheet', 'AccountingReportController::balanceSheet');
+            // Accounting Reports
+            $routes->get('accounts', 'AccountingReportController::getAccounts');
+            $routes->get('report/journal', 'AccountingReportController::journal');
+            $routes->get('report/ledger', 'AccountingReportController::ledger');
+            $routes->get('report/ledger/detail', 'AccountingReportController::ledgerDetail');
+            $routes->get('report/income-statement', 'AccountingReportController::incomeStatement');
+            $routes->get('report/income-statement-accrual', 'AccountingReportController::incomeStatementAccrual');
+            $routes->get('report/balance-sheet', 'AccountingReportController::balanceSheet');
 
-        // Closing
-        $routes->get('closing/preview', 'ClosingControllerV2::preview');
-        $routes->post('closing/process', 'ClosingControllerV2::process');
+            // Closing
+            $routes->get('closing/preview', 'ClosingControllerV2::preview');
+            $routes->post('closing/process', 'ClosingControllerV2::process');
 
-        // Finance (Transfer & Profit)
-        $routes->post('finance/transfer', 'FinanceController::transfer');
-        $routes->post('finance/distribute-profit', 'FinanceController::distributeProfit');
+            // Finance (Transfer & Profit)
+            $routes->post('finance/transfer', 'FinanceController::transfer');
+            $routes->post('finance/distribute-profit', 'FinanceController::distributeProfit');
 
-        // Inventory (Stock Transfer)
-        $routes->post('inventory/transfer', 'InventoryController::transfer');
+            // Inventory (Stock Transfer)
+            $routes->post('inventory/transfer', 'InventoryController::transfer');
 
-        // Product V2
-        $routes->post('product', 'ProductController::createProductV2');
-        $routes->put('product/(:num)', 'ProductController::updateProductV2/$1');
-        $routes->post('product/(:num)/adjust-stock', 'ProductController::adjustStock/$1');
+            // Product V2
+            $routes->post('product', 'ProductController::createProductV2');
+            $routes->put('product/(:num)', 'ProductController::updateProductV2/$1');
+            $routes->post('product/(:num)/adjust-stock', 'ProductController::adjustStock/$1');
 
-        // Transaction List & Meta
-        $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');
-        $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
+            // Transaction List & Meta
+            $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');
+            $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
 
-        // Subscription
-        $routes->get('subscription', 'SubscriptionControllerV2::detail');
-        $routes->get('subscription/usage', 'SubscriptionControllerV2::usage');
-        $routes->get('subscription/packages', 'SubscriptionControllerV2::packages');
-        $routes->post('subscription/orders', 'SubscriptionControllerV2::createOrder');
-        $routes->post('subscription/orders/(:num)/cancel', 'SubscriptionControllerV2::cancelOrder/$1');
-        $routes->post('subscription/orders/upload-proof', 'SubscriptionControllerV2::uploadProof');
+            // Subscription
+            $routes->get('subscription', 'SubscriptionControllerV2::detail');
+            $routes->get('subscription/usage', 'SubscriptionControllerV2::usage');
+            $routes->get('subscription/packages', 'SubscriptionControllerV2::packages');
+            $routes->post('subscription/orders', 'SubscriptionControllerV2::createOrder');
+            $routes->post('subscription/orders/(:num)/cancel', 'SubscriptionControllerV2::cancelOrder/$1');
+            $routes->post('subscription/orders/upload-proof', 'SubscriptionControllerV2::uploadProof');
 
-       
 
-        // Voucher Management (Admin)
-        $routes->post('voucher', 'VoucherController::create');
-        $routes->get('voucher', 'VoucherController::index');
-        $routes->put('voucher/(:num)', 'VoucherController::update/$1');
-        $routes->delete('voucher/(:num)', 'VoucherController::delete/$1');
+
+            // Voucher Management (Admin)
+            $routes->post('voucher', 'VoucherController::create');
+            $routes->get('voucher', 'VoucherController::index');
+            $routes->put('voucher/(:num)', 'VoucherController::update/$1');
+            $routes->delete('voucher/(:num)', 'VoucherController::delete/$1');
+
+            // Tiktok Shop
+            $routes->get('toko/tiktok-auth-url/(:num)', 'TiktokController::getAuthUrl/$1');
         // Global Upload
-    });
+        }
+        );
 
-});
+    });
 
 // Customer V2 Public Routes (No Auth Required) - OUTSIDE jwtAuth group
 $routes->group('api/v2/customer', ['filter' => 'tenant'], function ($routes) {
@@ -264,10 +269,13 @@ $routes->get('api/invoice/download-mpdf/(:num)', 'InvoiceController::downloadPdf
 $routes->get('api/receipt/download/(:num)', 'InvoiceController::downloadReceiptPdf/$1');
 $routes->get('api/invoice/(:num)', 'InvoiceController::view/$1');
 $routes->get('api/receipt/(:num)', 'InvoiceController::receipt/$1');
- // Tenant
+// Tenant
 $routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
 $routes->post('api/v2/tenant', 'TenantControllerV2::create');
 $routes->post('api/v2/subscription/orders/(:num)/pay', 'SubscriptionControllerV2::payOrder/$1');
+
+// TikTok Shop Callback
+$routes->get('tiktok_verif/(:num)', 'TiktokController::callback/$1');
 
 // Wilayah Indonesia API (Public - No Auth Required)
 $routes->group('api/wilayah', function ($routes) {

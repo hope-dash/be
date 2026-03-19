@@ -24,7 +24,11 @@ class TokoModel extends TenantScopedModel
         "kecamatan",
         "kelurahan",
         "kode_pos",
-        "type"
+        "type",
+        "tiktok_code",
+        "tiktok_shop_cipher",
+        "tiktok_access_token",
+        "tiktok_refresh_token"
     ];
     protected $useSoftDeletes = true;
     protected $protectFields = true;
