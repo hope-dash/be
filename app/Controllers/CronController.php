@@ -50,6 +50,13 @@ class CronController extends Controller
         foreach ($pendingEmails as $email) {
             $attempts = ($email['attempts'] ?? 0) + 1;
 
+            // Set tenant context for each email (needed by email_helper)
+            if (isset($email['tenant_id'])) {
+                $tenantModel = new \App\Models\TenantModel();
+                $tenant = $tenantModel->find($email['tenant_id']);
+                \App\Libraries\TenantContext::set($tenant);
+            }
+
             $success = send_email($email['recipient'], $email['subject'], $email['message']);
 
             if ($success) {

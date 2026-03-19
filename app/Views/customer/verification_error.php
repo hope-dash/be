@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verifikasi Gagal - Hope Sparepart</title>
+    <title>Verifikasi Gagal - <?= \App\Libraries\TenantContext::name() ?></title>
     <style>
         * {
             margin: 0;
@@ -164,11 +164,11 @@
             <p>• Jika masalah berlanjut, silakan hubungi customer service kami</p>
         </div>
 
-        <a href="<?= env('app.frontendURL') ?: 'https://hopesparepart.com' ?>" class="button">Kembali ke Beranda</a>
+        <a href="<?= \App\Libraries\TenantContext::url() ?>" class="button">Kembali ke Beranda</a>
         <a href="https://wa.me/6288980998878" class="button button-secondary">Hubungi Support WA</a>
 
         <div class="footer">
-            <p>&copy; <?= date('Y') ?> Hope Sparepart. All rights reserved.</p>
+            <p>&copy; <?= date('Y') ?> <?= \App\Libraries\TenantContext::name() ?>. All rights reserved.</p>
         </div>
     </div>
 </body>

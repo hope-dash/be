@@ -28,7 +28,7 @@ if (!function_exists('send_email')) {
 
         $email->initialize($config);
 
-        $email->setFrom(env('email.fromEmail'), env('email.fromName'));
+        $email->setFrom(\App\Libraries\TenantContext::email(), \App\Libraries\TenantContext::name());
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);
@@ -71,7 +71,7 @@ if (!function_exists('send_email_with_attachments')) {
 
         $email->initialize($config);
 
-        $email->setFrom(env('email.fromEmail'), env('email.fromName'));
+        $email->setFrom(\App\Libraries\TenantContext::email(), \App\Libraries\TenantContext::name());
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);
@@ -166,13 +166,13 @@ if (!function_exists('get_email_template')) {
 <body>
     <div class="container">
         <div class="header">
-            <h1>Hope Sparepart</h1>
+            <h1>' . \App\Libraries\TenantContext::name() . '</h1>
         </div>
         <div class="content">
             ' . $content . '
         </div>
         <div class="footer">
-            <p>&copy; ' . date('Y') . ' Hope Sparepart. All rights reserved.</p>
+            <p>&copy; ' . date('Y') . ' ' . \App\Libraries\TenantContext::name() . '. All rights reserved.</p>
             <p>Jika Anda memiliki pertanyaan, silakan hubungi support wa ke +62 889-8099-8878</p>
         </div>
     </div>
@@ -198,7 +198,7 @@ if (!function_exists('send_registration_email')) {
 
         $content = '
             <h2>Selamat Datang, ' . htmlspecialchars($name) . '!</h2>
-            <p>Terima kasih telah mendaftar di Hope Sparepart. Akun Anda telah berhasil dibuat.</p>
+            <p>Terima kasih telah mendaftar di ' . \App\Libraries\TenantContext::name() . '. Akun Anda telah berhasil dibuat.</p>
             
             <div class="info-box">
                 <h3>Informasi Akun Anda:</h3>
@@ -220,9 +220,9 @@ if (!function_exists('send_registration_email')) {
             </p>
         ';
 
-        $html = get_email_template('Selamat Datang di Hope Sparepart', $content);
+        $html = get_email_template('Selamat Datang di ' . \App\Libraries\TenantContext::name(), $content);
 
-        return send_email($email, 'Selamat Datang di Hope Sparepart - Verifikasi Email Anda', $html);
+        return send_email($email, 'Selamat Datang di ' . \App\Libraries\TenantContext::name() . ' - Verifikasi Email Anda', $html);
     }
 }
 
@@ -258,7 +258,7 @@ if (!function_exists('send_verification_email')) {
 
         $html = get_email_template('Verifikasi Email Anda', $content);
 
-        return send_email($email, 'Verifikasi Email Anda - Hope Sparepart', $html);
+        return send_email($email, 'Verifikasi Email Anda - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
 
@@ -307,7 +307,7 @@ if (!function_exists('send_invoice_email')) {
 
         $content = '
             <h2>Halo, ' . htmlspecialchars($name) . '!</h2>
-            <p>Terima kasih telah berbelanja di Hope Sparepart. Pesanan Anda dengan nomor invoice <strong>' . htmlspecialchars($invoiceDisplay) . '</strong> telah berhasil dibuat.</p>
+            <p>Terima kasih telah berbelanja di ' . \App\Libraries\TenantContext::name() . '. Pesanan Anda dengan nomor invoice <strong>' . htmlspecialchars($invoiceDisplay) . '</strong> telah berhasil dibuat.</p>
             
             <div class="info-box">
                 <h3>Detail Pembayaran:</h3>
@@ -330,7 +330,7 @@ if (!function_exists('send_invoice_email')) {
 
         $html = get_email_template('Invoice ' . $invoiceDisplay, $content);
 
-        return enqueue_email($email, 'Tagihan Pesanan #' . $invoiceDisplay . ' - Hope Sparepart', $html);
+        return enqueue_email($email, 'Tagihan Pesanan #' . $invoiceDisplay . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
 
@@ -436,7 +436,7 @@ if (!function_exists('send_order_shipped_email')) {
                 <p><strong>Nomor Resi:</strong> ' . htmlspecialchars($receiptNumber ?: '-') . '</p>
             </div>
             <p>Anda dapat melacak status pengiriman melalui website ekspedisi terkait menggunakan nomor resi di atas.</p>
-            <p>Terima kasih telah berbelanja di Hope Sparepart!</p>
+            <p>Terima kasih telah berbelanja di ' . \App\Libraries\TenantContext::name() . '!</p>
         ';
 
         $html = get_email_template('Pesanan Dikirim - ' . $invoice, $content);
@@ -460,7 +460,7 @@ if (!function_exists('send_order_delivered_email')) {
         $content = '
             <h2>Pesanan Telah Diterima!</h2>
             <p>Halo, ' . htmlspecialchars($name) . '. Kabar baik! Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah berhasil diterima atau diambil.</p>
-            <p>Terima kasih telah berbelanja di Hope Sparepart. Kami berharap produk yang Anda terima sesuai dengan keinginan Anda.</p>
+            <p>Terima kasih telah berbelanja di ' . \App\Libraries\TenantContext::name() . '. Kami berharap produk yang Anda terima sesuai dengan keinginan Anda.</p>
             <p>Jika Anda puas dengan pelayanan kami, mohon berikan ulasan positif Anda. Sampai jumpa di pesanan berikutnya!</p>
         ';
 

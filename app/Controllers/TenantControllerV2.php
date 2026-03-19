@@ -108,6 +108,8 @@ class TenantControllerV2 extends ResourceController
                 'code' => $code,
                 'name' => $input['toko_name'] ?? '',
                 'logo_url' => $input['logo_url'] ?? '',
+                'url' => $input['url'] ?? '',
+                'email' => $input['email'] ?? '',
                 'status' => 'active',
             ];
 

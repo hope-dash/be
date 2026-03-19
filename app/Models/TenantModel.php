@@ -15,6 +15,8 @@ class TenantModel extends Model
         'code',
         'name',
         'logo_url',
+        'url',
+        'email',
         'status',
         'created_at',
         'updated_at',

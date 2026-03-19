@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Terverifikasi - Hope Sparepart</title>
+    <title>Email Terverifikasi - <?= \App\Libraries\TenantContext::name() ?></title>
     <style>
         * {
             margin: 0;
@@ -163,14 +163,14 @@
                 <h3>Apa Selanjutnya?</h3>
                 <p>✓ Akun Anda sudah aktif dan siap digunakan</p>
                 <p>✓ Anda dapat login menggunakan email dan password yang telah dikirimkan</p>
-                <p>✓ Nikmati berbagai penawaran menarik dari Hope Sparepart</p>
+                <p>✓ Nikmati berbagai penawaran menarik dari <?= \App\Libraries\TenantContext::name() ?></p>
             </div>
         <?php endif; ?>
         
-        <a href="<?= env('app.frontendURL') ?: 'https://hopesparepart.com' ?>" class="button">Kembali ke Beranda</a>
+        <a href="<?= \App\Libraries\TenantContext::url() ?>" class="button">Kembali ke Beranda</a>
         
         <div class="footer">
-            <p>&copy; <?= date('Y') ?> Hope Sparepart. All rights reserved.</p>
+            <p>&copy; <?= date('Y') ?> <?= \App\Libraries\TenantContext::name() ?>. All rights reserved.</p>
         </div>
     </div>
 </body>

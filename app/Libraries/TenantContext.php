@@ -34,5 +34,20 @@ final class TenantContext
     {
         return self::$tenant['code'] ?? null;
     }
+
+    public static function name(): string
+    {
+        return self::$tenant['name'] ?? env('email.fromName', 'Hope Sparepart');
+    }
+
+    public static function email(): string
+    {
+        return self::$tenant['email'] ?? env('email.fromEmail', 'admin@hopesparepart.com');
+    }
+
+    public static function url(): string
+    {
+        return self::$tenant['url'] ?? env('app.baseURL', 'https://api-staging.hopesparepart.com');
+    }
 }
 
