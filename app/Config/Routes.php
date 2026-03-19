@@ -266,6 +266,7 @@ $routes->get('api/invoice/(:num)', 'InvoiceController::view/$1');
 $routes->get('api/receipt/(:num)', 'InvoiceController::receipt/$1');
  // Tenant
 $routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
+$routes->post('api/v2/tenant', 'TenantControllerV2::create');
 $routes->post('api/v2/subscription/orders/(:num)/pay', 'SubscriptionControllerV2::payOrder/$1');
 
 // Wilayah Indonesia API (Public - No Auth Required)
