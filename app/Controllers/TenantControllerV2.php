@@ -118,7 +118,7 @@ class TenantControllerV2 extends ResourceController
                 throw new \Exception('Gagal membuat tenant');
             }
 
-            // 3. Insert Toko
+            // 3. Insert Toko (bank details deprecated/unused in this flow)
             $tokoModel = new \App\Models\TokoModel();
             $tokoData = [
                 'tenant_id' => $tenantId,
@@ -127,9 +127,6 @@ class TenantControllerV2 extends ResourceController
                 'phone_number' => $input['phone_number'] ?? '',
                 'email_toko' => $input['email'] ?? '',
                 'image_logo' => $input['logo_url'] ?? '',
-                'bank' => $input['bank'] ?? '',
-                'nama_pemilik' => $input['nama_pemilik_rekening'] ?? '',
-                'nomer_rekening' => $input['nomer_rekening'] ?? '',
                 'provinsi' => $input['provinsi'] ?? '',
                 'kota_kabupaten' => $input['kota_kabupaten'] ?? '',
                 'kecamatan' => $input['kecamatan'] ?? '',
