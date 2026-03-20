@@ -81,6 +81,9 @@ class TenantControllerV2 extends ResourceController
                 $input = $this->request->getJSON(true);
             }
 
+            // Remove bank-related fields from creation payload
+            unset($input['bank'], $input['nama_pemilik'], $input['nomer_rekening']);
+
             $picName = $input['pic_name'] ?? '';
             $username = $input['username'] ?? '';
 
@@ -104,18 +107,18 @@ class TenantControllerV2 extends ResourceController
             $code = $this->generateTenantCode();
 
             // 2. Insert Tenant
+            // -> URL / email fields are optional and may not exist in table schema, so avoid forcing them here
             $tenantData = [
                 'code' => $code,
                 'name' => $input['toko_name'] ?? '',
                 'logo_url' => $input['logo_url'] ?? '',
-                'url' => $input['url'] ?? '',
-                'email' => $input['email'] ?? '',
                 'status' => 'active',
             ];
 
             $tenantId = $this->tenantModel->insert($tenantData);
             if (!$tenantId) {
-                throw new \Exception('Gagal membuat tenant');
+                $dbError = $db->error();
+                throw new \Exception('Gagal membuat tenant' . ($dbError['message'] ? ': ' . $dbError['message'] : ''));
             }
 
             // 3. Insert Toko (bank details deprecated/unused in this flow)
@@ -136,7 +139,8 @@ class TenantControllerV2 extends ResourceController
             ];
             $tokoId = $tokoModel->insert($tokoData);
             if (!$tokoId) {
-                throw new \Exception('Gagal membuat toko');
+                $dbError = $db->error();
+                throw new \Exception('Gagal membuat toko' . ($dbError['message'] ? ': ' . $dbError['message'] : ''));
             }
 
             // 4. Insert User
@@ -162,7 +166,8 @@ class TenantControllerV2 extends ResourceController
             ];
             $userId = $userModel->insert($userData);
             if (!$userId) {
-                throw new \Exception('Gagal membuat user');
+                $dbError = $db->error();
+                throw new \Exception('Gagal membuat user' . ($dbError['message'] ? ': ' . $dbError['message'] : ''));
             }
 
             $db->transCommit();
