@@ -58,17 +58,15 @@ class TiktokController extends ResourceController
     public function callback($idToko = null)
     {
         $code = $this->request->getGet('code');
-        $shopId = $this->request->getGet('shop_id'); // Some versions send this
-        $cipher = $this->request->getGet('cipher'); // User mentioned tiktok-shop_chiper
-
-        // TikTok can send cipher in different param names depending on version
-        $cipher = $cipher ?? $this->request->getGet('shop_cipher');
 
         if (!$code) {
-            return "Error: Authorization code not found.";
+            return view('tiktok/verif', [
+                'status' => 'error',
+                'message' => 'Integrasi Gagal: Authorization code tidak ditemukan. Silakan coba lagi.',
+            ]);
         }
 
-        // Save progress to Toko first
+        // 1. Get Toko Data
         $toko = $this->tokoModel->find($idToko);
         if (!$toko) {
             return "Error: Toko with ID {$idToko} not found.";
@@ -77,7 +75,7 @@ class TiktokController extends ResourceController
         $appKey = env('TIKTOK_APP_KEY');
         $appSecret = env('TIKTOK_APP_SECRET');
 
-        // Exchange code for token
+        // Step 1: Exchange code for token
         $rawBody = [
             'app_key' => $appKey,
             'auth_code' => $code,
@@ -85,7 +83,7 @@ class TiktokController extends ResourceController
             'timestamp' => time(),
         ];
 
-        // sign TANPA app_secret di dalam body dulu
+        // Auth flow uses createSign
         $sign = $this->createSign($rawBody, $appSecret);
 
         $finalParams = array_merge($rawBody, [
@@ -95,28 +93,65 @@ class TiktokController extends ResourceController
 
         $tokenUrl = "https://auth.tiktok-shops.com/api/v2/token/get?" . http_build_query($finalParams);
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $tokenUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            "Content-Type: application/x-www-form-urlencoded",
+        $chToken = curl_init();
+        curl_setopt($chToken, CURLOPT_URL, $tokenUrl);
+        curl_setopt($chToken, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($chToken, CURLOPT_HTTPHEADER, ["Content-Type: application/x-www-form-urlencoded"]);
+        $responseTokenJson = curl_exec($chToken);
+        curl_close($chToken);
+
+        $responseToken = json_decode($responseTokenJson, true);
+        $accessToken = $responseToken['data']['access_token'] ?? null;
+        $refreshToken = $responseToken['data']['refresh_token'] ?? null;
+
+        if (!$accessToken) {
+            log_message('error', 'TikTok Token Error: ' . $responseTokenJson);
+            return view('tiktok/verif', [
+                'status' => 'error',
+                'message' => 'Integrasi Gagal: Gagal mendapatkan access token. Silakan coba lagi.',
+                'response' => $responseToken
+            ]);
+        }
+
+        // Step 2: Get Shop Cipher
+        $shopPath = "/authorization/202309/shops";
+        $shopParams = [
+            'app_key' => $appKey,
+            'timestamp' => time(),
+            'version' => '202309',
+        ];
+
+        // Sign according to generateSign2 logic (which handles path and body {})
+        // Passing null for body because this is a GET request
+        $shopSign = $this->generateSign2($shopPath, $shopParams, null, $appSecret);
+
+        $shopFinalParams = array_merge($shopParams, [
+            'access_token' => $accessToken,
+            'sign' => $shopSign
         ]);
-        $responseJson = curl_exec($ch);
-        curl_close($ch);
 
-        $responseData = json_decode($responseJson, true);
-        $accessToken = null;
-        $refreshToken = null;
+        $shopUrl = "https://open-api.tiktokglobalshop.com" . $shopPath . "?" . http_build_query($shopFinalParams);
 
-        if (isset($responseData['data']['access_token'])) {
-            $accessToken = $responseData['data']['access_token'];
-            $refreshToken = $responseData['data']['refresh_token'] ?? null;
+        $chShop = curl_init();
+        curl_setopt($chShop, CURLOPT_URL, $shopUrl);
+        curl_setopt($chShop, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($chShop, CURLOPT_HTTPHEADER, ["x-tts-access-token: " . $accessToken]);
+        $responseShopJson = curl_exec($chShop);
+        curl_close($chShop);
+
+        $responseShop = json_decode($responseShopJson, true);
+        $cipher = $responseShop['data']['shops'][0]['cipher'] ?? null;
+
+        if (!$cipher) {
+            log_message('error', 'TikTok Shops Chiper Error: ' . $responseShopJson);
+            return view('tiktok/verif', [
+                'status' => 'error',
+                'message' => 'Integrasi Gagal: Gagal mendapatkan shop cipher. Silakan coba lagi.',
+                'response' => $responseShop
+            ]);
         }
-        else {
-            // Log error or handle failure
-            log_message('error', 'TikTok Token Error: ' . ($responseJson ?: 'No response'));
-        }
 
+        // Step 3: Save to Database
         $this->tokoModel->update($idToko, [
             'tiktok_code' => $code,
             'tiktok_shop_cipher' => $cipher,
@@ -125,12 +160,11 @@ class TiktokController extends ResourceController
         ]);
 
         return view('tiktok/verif', [
-            'status' => $accessToken ? 'success' : 'partial',
-            'message' => $accessToken ? 'Integrasi TikTok Shop Berhasil!' : 'Berhasil mendapatkan code, namun gagal mendapatkan token.',
+            'status' => 'success',
+            'message' => 'Integrasi Tokopedia & TikTok Shop Berhasil!',
             'toko' => $toko,
             'code' => $code,
-            'cipher' => $cipher,
-            'response' => $responseData
+            'cipher' => $cipher
         ]);
     }
 
@@ -144,14 +178,15 @@ class TiktokController extends ResourceController
             $path = "/product/202502/products/search";
             $params = [
                 'page_size' => 10,
-                'version'   => '202502'
+                'version' => '202502'
             ];
-            
+
             // Empty body for search
             $response = $this->makeTiktokRequest($idToko, 'POST', $path, $params, []);
-            
+
             return $this->jsonResponse->oneResp('Sukses', $response, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -165,11 +200,12 @@ class TiktokController extends ResourceController
         try {
             $path = "/product/202309/products";
             $productData = $this->request->getJSON(true) ?: [];
-            
+
             $response = $this->makeTiktokRequest($idToko, 'POST', $path, [], $productData);
-            
+
             return $this->jsonResponse->oneResp('Sukses', $response, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -196,14 +232,14 @@ class TiktokController extends ResourceController
         $signature = $this->generateSign2($path, $params, $body, $appSecret);
 
         $params['sign'] = $signature;
-        
+
         $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($params);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
-        
+
         $headers = [
             "Content-Type: application/json",
             "x-tts-access-token: " . $accessToken
@@ -242,10 +278,13 @@ class TiktokController extends ResourceController
             $signString .= $key . $value;
         }
 
-        // 4. Always append the stringified body
-        // TikTok V2 signature requires {} for empty body
-        $jsonBody = empty($body) ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        $signString .= $jsonBody;
+        // 4. Always append the stringified body IF body is provided (usually for POST/PUT)
+        // TikTok V2 signature requires {} for empty object body in POST
+        // For GET requests, the body part should be omitted from the signature string
+        if ($body !== null) {
+            $jsonBody = empty($body) ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $signString .= $jsonBody;
+        }
 
         // 5. Wrap with app secret
         $finalString = $appSecret . $signString . $appSecret;

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Integrasi TikTok Shop - Success</title>
+    <title>Integrasi TikTok Shop - <?= (isset($status) && $status === 'success') ? 'Success' : 'Gagal' ?></title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -28,7 +28,7 @@
         .icon {
             font-size: 60px;
             margin-bottom: 20px;
-            color: #ff0050;
+            color: <?= (isset($status) && $status === 'success') ? '#ff0050' : '#e74c3c' ?>;
         }
 
         h1 {
@@ -41,17 +41,6 @@
             color: #666;
             margin-bottom: 30px;
             line-height: 1.6;
-        }
-
-        .details {
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 10px;
-            text-align: left;
-            margin-bottom: 20px;
-            font-family: monospace;
-            font-size: 13px;
-            word-break: break-all;
         }
 
         .button {
@@ -73,12 +62,12 @@
 
 <body>
     <div class="container">
-        <div class="icon">✓</div>
-        <h1>Integrasi Tokopedia & TikTok Shop Berhasil!</h1>
-        <p>Toko <strong>
-                <?= esc($toko['toko_name'])?>
-            </strong> telah berhasil terhubung dengan akun TikTok Shop Anda.</p>
-
+        <div class="icon"><?= (isset($status) && $status === 'success') ? '✓' : '✗' ?></div>
+        <h1><?= esc($message ?? 'Integrasi TikTok Shop') ?></h1>
+        
+        <?php if (isset($status) && $status === 'success' && isset($toko)): ?>
+            <p>Toko <strong><?= esc($toko['toko_name']) ?></strong> telah berhasil terhubung dengan akun TikTok Shop Anda.</p>
+        <?php endif; ?>
 
         <p>Silakan tutup jendela ini atau kembali ke panel admin Anda.</p>
 

@@ -10,7 +10,7 @@ $routes->options('api/(:any)', function () {
     return service('response')->setStatusCode(200);
 });
 
-$routes->post('api/login', 'UserController::login', ['filter' => 'tenant']);
+$routes->post('api/login', 'UserController::login');
 $routes->post('api/register-be', 'UserController::create_be', ['filter' => 'tenant']);
 $routes->post('api/pricelist', 'ProductController::getProductStockForPricelist', ['filter' => 'tenant']);
 $routes->post('api/login/customer', 'CustomerController::checkSpecialCustomer', ['filter' => 'tenant']);

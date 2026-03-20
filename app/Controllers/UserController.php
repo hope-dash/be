@@ -56,11 +56,13 @@ class UserController extends ResourceController
             ];
             if ($this->model->insert($data)) {
                 return $this->jsonResponse->oneResp("User Created Successfully");
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("Create Failed");
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -93,11 +95,13 @@ class UserController extends ResourceController
             ];
             if ($this->model->insert($data)) {
                 return $this->jsonResponse->oneResp("User Created Successfully");
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("Create Failed");
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -106,21 +110,45 @@ class UserController extends ResourceController
     {
         try {
             $data = $this->request->getJSON();
-            $query = $this->model->where("username", $data->umail)->orWhere("email", $data->umail)->where('deleted_at', NULL)->first();
+            if (empty($data)) {
+                $data = (object)$this->request->getPost();
+            }
+
+            if (!isset($data->umail) || !isset($data->password)) {
+                return $this->jsonResponse->error("Username/Email dan Password wajib diisi", 400);
+            }
+
+            // Join with tenants to get code for response
+            $query = $this->model
+                ->select($this->model->table . '.*, tenants.code as tenant_code')
+                ->join('tenants', 'tenants.id = ' . $this->model->table . '.tenant_id')
+                ->groupStart()
+                ->where($this->model->table . ".username", $data->umail)
+                ->orWhere($this->model->table . ".email", $data->umail)
+                ->groupEnd()
+                ->where($this->model->table . '.deleted_at', NULL)
+                ->first();
 
             if ($query && password_verify($data->password, $query['password'])) {
                 $userData = [
                     "user_id" => $query['user_id'],
+                    "tenant_id" => $query['tenant_id'],
+                    "tenant_code" => $query['tenant_code'],
                 ];
                 $token = $this->JWToken->generateToken($userData);
                 if ($token) {
-                    return $this->jsonResponse->oneResp("Login Berhasil", ["token" => $token]);
+                    return $this->jsonResponse->oneResp("Login Berhasil", [
+                        "token" => $token,
+                        "tenant_code" => $query['tenant_code'],
+                    ]);
                 }
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("Username atau Password Salah", 401);
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -151,7 +179,7 @@ class UserController extends ResourceController
             $validation->setRules($rules);
 
             // Konversi stdClass ke array
-            $dataArray = (array) $data;
+            $dataArray = (array)$data;
 
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
@@ -176,11 +204,13 @@ class UserController extends ResourceController
             $query = $this->model->update($id, $updateData);
             if ($query) {
                 return $this->jsonResponse->oneResp("Akun Berhasil Diperbaharui");
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("Tolong di Cek kembali");
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -196,11 +226,13 @@ class UserController extends ResourceController
             if ($query) {
                 $this->model->delete($id);
                 return $this->jsonResponse->oneResp("Data Deleted", "", 200);
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("User Not Found", 401);
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->respond([
                 "status" => "error",
                 "message" => $this->request->getVar("username")
@@ -224,11 +256,13 @@ class UserController extends ResourceController
                 }
 
                 return $this->jsonResponse->oneResp("", $query, 200);
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("User Not Found", 401);
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -281,8 +315,8 @@ class UserController extends ResourceController
             $sortBy = $this->request->getGet('sortBy') ?? 'user_id';
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaUser = $this->request->getGet('username') ?? '';
-            $limit = (int) $this->request->getGet('limit') ?: 10;
-            $page = (int) $this->request->getGet('page') ?: 1;
+            $limit = (int)$this->request->getGet('limit') ?: 10;
+            $page = (int)$this->request->getGet('page') ?: 1;
 
             $allowedSortBy = ['id', 'toko_name'];
             $allowedSortMethod = ['asc', 'desc'];
@@ -316,7 +350,8 @@ class UserController extends ResourceController
                 foreach ($user->access as $id) {
                     if ($id == "0") {
                         $tokoNames[] = "Admin";
-                    } else {
+                    }
+                    else {
                         $response = $this->tokoController->getDetailById($id);
                         if ($response->getStatusCode() === 200) {
                             $data = json_decode($response->getBody(), true);
@@ -330,7 +365,8 @@ class UserController extends ResourceController
             }
 
             return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -344,12 +380,13 @@ class UserController extends ResourceController
 
             $formattedResult = array_map(function ($row) {
                 return [
-                    'label' => $row->name,
-                    'value' => $row->user_id
+                'label' => $row->name,
+                'value' => $row->user_id
                 ];
             }, $result);
             return $this->jsonResponse->oneResp('', $formattedResult, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
