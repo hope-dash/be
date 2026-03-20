@@ -39,9 +39,9 @@ class SubscriptionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Sukses', [
                 'subscription' => [
-                    'id' => (int) $sub['id'],
-                    'tenant_id' => (int) $sub['tenant_id'],
-                    'package_id' => (int) $sub['package_id'],
+                    'id' => (int)$sub['id'],
+                    'tenant_id' => (int)$sub['tenant_id'],
+                    'package_id' => (int)$sub['package_id'],
                     'status' => $sub['status'],
                     'start_at' => $sub['start_at'],
                     'end_at' => $sub['end_at'],
@@ -49,12 +49,13 @@ class SubscriptionControllerV2 extends ResourceController
                 'package' => [
                     'code' => $sub['package_code'],
                     'name' => $sub['package_name'],
-                    'duration_months' => (int) $sub['duration_months'],
-                    'product_quota' => ($sub['product_quota_snapshot'] ?? $sub['product_quota']) === null ? null : (int) ($sub['product_quota_snapshot'] ?? $sub['product_quota']),
-                    'transaction_monthly_quota' => ($sub['transaction_monthly_quota_snapshot'] ?? $sub['transaction_monthly_quota']) === null ? null : (int) ($sub['transaction_monthly_quota_snapshot'] ?? $sub['transaction_monthly_quota']),
+                    'duration_months' => (int)$sub['duration_months'],
+                    'product_quota' => ($sub['product_quota_snapshot'] ?? $sub['product_quota']) === null ? null : (int)($sub['product_quota_snapshot'] ?? $sub['product_quota']),
+                    'transaction_monthly_quota' => ($sub['transaction_monthly_quota_snapshot'] ?? $sub['transaction_monthly_quota']) === null ? null : (int)($sub['transaction_monthly_quota_snapshot'] ?? $sub['transaction_monthly_quota']),
                 ],
             ], 200);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -76,12 +77,12 @@ class SubscriptionControllerV2 extends ResourceController
                 return $this->jsonResponse->error('Kuota tenant belum tersedia', 500);
             }
 
-            $productUsed = (int) ($quotaRow['product_used'] ?? 0);
-            $trxUsed = (int) ($quotaRow['transaction_monthly_used'] ?? 0);
+            $productUsed = (int)($quotaRow['product_used'] ?? 0);
+            $trxUsed = (int)($quotaRow['transaction_monthly_used'] ?? 0);
             $productLimitRaw = $sub['product_quota_snapshot'] ?? ($sub['product_quota'] ?? null);
             $trxLimitRaw = $sub['transaction_monthly_quota_snapshot'] ?? ($sub['transaction_monthly_quota'] ?? null);
-            $productLimit = $productLimitRaw === null ? null : (int) $productLimitRaw;
-            $trxLimit = $trxLimitRaw === null ? null : (int) $trxLimitRaw;
+            $productLimit = $productLimitRaw === null ? null : (int)$productLimitRaw;
+            $trxLimit = $trxLimitRaw === null ? null : (int)$trxLimitRaw;
 
             $start = $quotaRow['month_start'] . ' 00:00:00';
             $end = date('Y-m-t 23:59:59', strtotime($start));
@@ -99,7 +100,7 @@ class SubscriptionControllerV2 extends ResourceController
                 'package' => [
                     'code' => $sub['package_code'],
                     'name' => $sub['package_name'],
-                    'duration_months' => (int) $sub['duration_months'],
+                    'duration_months' => (int)$sub['duration_months'],
                 ],
                 'usage' => [
                     'products' => [
@@ -114,7 +115,8 @@ class SubscriptionControllerV2 extends ResourceController
                     ],
                 ],
             ], 200);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -138,13 +140,13 @@ class SubscriptionControllerV2 extends ResourceController
                 );
             }
 
-            $externalId = trim((string) ($data['transaction_id'] ?? $data['external_transaction_id'] ?? ''));
+            $externalId = trim((string)($data['transaction_id'] ?? $data['external_transaction_id'] ?? ''));
             if ($externalId === '') {
                 return $this->jsonResponse->error('transaction_id wajib diisi', 400);
             }
 
-            $packageId = (int) ($data['package_id'] ?? 0);
-            $packageCode = trim((string) ($data['package_code'] ?? ''));
+            $packageId = (int)($data['package_id'] ?? 0);
+            $packageCode = trim((string)($data['package_code'] ?? ''));
 
             if ($packageId <= 0 && $packageCode === '') {
                 return $this->jsonResponse->error('package_id atau package_code wajib diisi', 400);
@@ -153,7 +155,8 @@ class SubscriptionControllerV2 extends ResourceController
             $packageBuilder = $this->db->table('subscription_packages')->where('is_active', 1);
             if ($packageId > 0) {
                 $packageBuilder->where('id', $packageId);
-            } else {
+            }
+            else {
                 $packageBuilder->where('code', $packageCode);
             }
             $package = $packageBuilder->get()->getRowArray();
@@ -168,19 +171,20 @@ class SubscriptionControllerV2 extends ResourceController
 
             $orderData = [
                 'tenant_id' => $tenantId,
-                'package_id' => (int) $package['id'],
+                'package_id' => (int)$package['id'],
                 'external_transaction_id' => $externalId,
                 'status' => 'waiting_payment',
-                'amount' => (float) $package['price'],
+                'amount' => (float)$package['price'],
                 'currency' => $package['currency'] ?? 'IDR',
             ];
 
             $this->orderModel->insert($orderData);
-            $orderId = (int) $this->orderModel->getInsertID();
+            $orderId = (int)$this->orderModel->getInsertID();
 
             $order = $this->orderModel->find($orderId);
             return $this->jsonResponse->oneResp('Order created', ['order' => $order], 201);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -188,7 +192,7 @@ class SubscriptionControllerV2 extends ResourceController
     // POST /api/v2/subscription/orders/{id}/cancel
     public function cancelOrder($id = null)
     {
-        $id = (int) ($id ?? 0);
+        $id = (int)($id ?? 0);
         if ($id <= 0) {
             return $this->jsonResponse->error('ID wajib diisi', 400);
         }
@@ -200,7 +204,7 @@ class SubscriptionControllerV2 extends ResourceController
                 return $this->jsonResponse->error('Order tidak ditemukan', 404);
             }
 
-            if ((int) ($order['tenant_id'] ?? 0) !== $tenantId) {
+            if ((int)($order['tenant_id'] ?? 0) !== $tenantId) {
                 return $this->jsonResponse->error('Forbidden', 403);
             }
 
@@ -210,7 +214,8 @@ class SubscriptionControllerV2 extends ResourceController
 
             $this->orderModel->update($id, ['status' => 'canceled']);
             return $this->jsonResponse->oneResp('Order canceled', ['order' => $this->orderModel->find($id)], 200);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -220,9 +225,9 @@ class SubscriptionControllerV2 extends ResourceController
     {
         try {
             $tenantId = TenantContext::id();
-            $tenantCode = TenantContext::code() ?: (string) $tenantId;
+            $tenantCode = TenantContext::code() ?: (string)$tenantId;
 
-            $externalId = trim((string) ($this->request->getPost('transaction_id') ?? ''));
+            $externalId = trim((string)($this->request->getPost('transaction_id') ?? ''));
             if ($externalId === '') {
                 return $this->jsonResponse->error('transaction_id wajib diisi', 400);
             }
@@ -265,9 +270,9 @@ class SubscriptionControllerV2 extends ResourceController
                 <h2>Bukti Pembayaran Subscription</h2>
                 <div class="info-box">
                     <p><strong>Tenant:</strong> ' . htmlspecialchars($tenantCode) . '</p>
-                    <p><strong>Order ID:</strong> ' . (int) $order['id'] . '</p>
+                    <p><strong>Order ID:</strong> ' . (int)$order['id'] . '</p>
                     <p><strong>Transaction ID:</strong> ' . htmlspecialchars($externalId) . '</p>
-                    <p><strong>Amount:</strong> ' . htmlspecialchars((string) ($order['amount'] ?? '')) . ' ' . htmlspecialchars((string) ($order['currency'] ?? 'IDR')) . '</p>
+                    <p><strong>Amount:</strong> ' . htmlspecialchars((string)($order['amount'] ?? '')) . ' ' . htmlspecialchars((string)($order['currency'] ?? 'IDR')) . '</p>
                 </div>
                 <p>Lampiran: bukti pembayaran.</p>
             ';
@@ -280,11 +285,12 @@ class SubscriptionControllerV2 extends ResourceController
             }
 
             return $this->jsonResponse->oneResp('Bukti pembayaran terkirim ke admin', [
-                'order_id' => (int) $order['id'],
+                'order_id' => (int)$order['id'],
                 'transaction_id' => $externalId,
                 'filename' => $filename,
             ], 200);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -292,7 +298,7 @@ class SubscriptionControllerV2 extends ResourceController
     // POST /api/v2/subscription/orders/{id}/pay
     public function payOrder($id = null)
     {
-        $id = (int) ($id ?? 0);
+        $id = (int)($id ?? 0);
         if ($id <= 0) {
             return $this->jsonResponse->error('ID wajib diisi', 400);
         }
@@ -307,7 +313,7 @@ class SubscriptionControllerV2 extends ResourceController
                 return $this->jsonResponse->error('Order tidak ditemukan', 404);
             }
 
-            if ((int) ($order['tenant_id'] ?? 0) !== $tenantId) {
+            if ((int)($order['tenant_id'] ?? 0) !== $tenantId) {
                 return $this->jsonResponse->error('Forbidden', 403);
             }
 
@@ -321,18 +327,18 @@ class SubscriptionControllerV2 extends ResourceController
                 'paid_at' => $paidAt,
             ]);
 
-            $result = $service->applyPaidPackagePurchase($tenantId, (int) $order['package_id']);
+            $result = $service->applyPaidPackagePurchase($tenantId, (int)$order['package_id']);
             $quota = $service->syncCurrentTenantQuota($tenantId);
             $activeSub = $service->getActiveSubscriptionWithPackage($tenantId);
             $effective = null;
             if ($activeSub) {
                 $effective = [
                     'product_quota' => ($activeSub['product_quota_snapshot'] ?? ($activeSub['product_quota'] ?? null)) === null
-                        ? null
-                        : (int) ($activeSub['product_quota_snapshot'] ?? $activeSub['product_quota']),
+                    ? null
+                    : (int)($activeSub['product_quota_snapshot'] ?? $activeSub['product_quota']),
                     'transaction_monthly_quota' => ($activeSub['transaction_monthly_quota_snapshot'] ?? ($activeSub['transaction_monthly_quota'] ?? null)) === null
-                        ? null
-                        : (int) ($activeSub['transaction_monthly_quota_snapshot'] ?? $activeSub['transaction_monthly_quota']),
+                    ? null
+                    : (int)($activeSub['transaction_monthly_quota_snapshot'] ?? $activeSub['transaction_monthly_quota']),
                     'start_at' => $activeSub['start_at'] ?? null,
                     'end_at' => $activeSub['end_at'] ?? null,
                 ];
@@ -350,7 +356,8 @@ class SubscriptionControllerV2 extends ResourceController
                 'tenant_quota' => $quota,
                 'effective_limits' => $effective,
             ], 200);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -359,15 +366,15 @@ class SubscriptionControllerV2 extends ResourceController
     // POST /api/v2/subscription/orders/{id}/pay (PUBLIC - no JWT / X-Tenant)
     public function publicPayOrder($id = null)
     {
-        $id = (int) ($id ?? 0);
+        $id = (int)($id ?? 0);
         if ($id <= 0) {
             return $this->jsonResponse->error('ID wajib diisi', 400);
         }
 
         // Optional hardening: set subscription.webhookKey in .env to require this key.
-        $requiredKey = (string) (env('subscription.webhookKey') ?? '');
+        $requiredKey = (string)(env('subscription.webhookKey') ?? '');
         if ($requiredKey !== '') {
-            $provided = trim((string) ($this->request->getHeaderLine('X-Webhook-Key') ?: $this->request->getGet('key')));
+            $provided = trim((string)($this->request->getHeaderLine('X-Webhook-Key') ?: $this->request->getGet('key')));
             if ($provided === '' || !hash_equals($requiredKey, $provided)) {
                 return $this->jsonResponse->error('Forbidden', 403);
             }
@@ -392,8 +399,8 @@ class SubscriptionControllerV2 extends ResourceController
                 'paid_at' => $paidAt,
             ]);
 
-            $tenantId = (int) ($order['tenant_id'] ?? 0);
-            $packageId = (int) ($order['package_id'] ?? 0);
+            $tenantId = (int)($order['tenant_id'] ?? 0);
+            $packageId = (int)($order['package_id'] ?? 0);
             if ($tenantId <= 0 || $packageId <= 0) {
                 throw new \Exception('Order data invalid');
             }
@@ -405,11 +412,11 @@ class SubscriptionControllerV2 extends ResourceController
             if ($activeSub) {
                 $effective = [
                     'product_quota' => ($activeSub['product_quota_snapshot'] ?? ($activeSub['product_quota'] ?? null)) === null
-                        ? null
-                        : (int) ($activeSub['product_quota_snapshot'] ?? $activeSub['product_quota']),
+                    ? null
+                    : (int)($activeSub['product_quota_snapshot'] ?? $activeSub['product_quota']),
                     'transaction_monthly_quota' => ($activeSub['transaction_monthly_quota_snapshot'] ?? ($activeSub['transaction_monthly_quota'] ?? null)) === null
-                        ? null
-                        : (int) ($activeSub['transaction_monthly_quota_snapshot'] ?? $activeSub['transaction_monthly_quota']),
+                    ? null
+                    : (int)($activeSub['transaction_monthly_quota_snapshot'] ?? $activeSub['transaction_monthly_quota']),
                     'start_at' => $activeSub['start_at'] ?? null,
                     'end_at' => $activeSub['end_at'] ?? null,
                 ];
@@ -427,7 +434,8 @@ class SubscriptionControllerV2 extends ResourceController
                 'tenant_quota' => $quota,
                 'effective_limits' => $effective,
             ], 200);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -437,25 +445,36 @@ class SubscriptionControllerV2 extends ResourceController
     public function packages()
     {
         try {
-            $packages = $this->db->table('subscription_packages')
-                ->select('id, code, name, price, currency, duration_months, product_quota, transaction_monthly_quota, is_active, created_at, updated_at')
-                ->where('is_active', 1)
-                ->orderBy('price', 'ASC')
+            $type = $this->request->getGet('type');
+
+            $builder = $this->db->table('subscription_packages')
+                ->select('id, code, name, type, wording, description, price, currency, duration_months, product_quota, transaction_monthly_quota, is_active, created_at, updated_at')
+                ->where('is_active', 1);
+
+            if ($type) {
+                $types = explode(',', $type);
+                $types = array_map('trim', $types);
+                $builder->whereIn('type', $types);
+            }
+
+            $packages = $builder->orderBy('price', 'ASC')
                 ->get()
                 ->getResultArray();
 
             foreach ($packages as &$p) {
-                $p['id'] = (int) $p['id'];
-                $p['duration_months'] = (int) $p['duration_months'];
-                $p['is_active'] = (int) $p['is_active'];
-                $p['product_quota'] = $p['product_quota'] === null ? null : (int) $p['product_quota'];
-                $p['transaction_monthly_quota'] = $p['transaction_monthly_quota'] === null ? null : (int) $p['transaction_monthly_quota'];
-                $p['price'] = (float) $p['price'];
+                $p['id'] = (int)$p['id'];
+                $p['duration_months'] = (int)$p['duration_months'];
+                $p['is_active'] = (int)$p['is_active'];
+                $p['product_quota'] = $p['product_quota'] === null ? null : (int)$p['product_quota'];
+                $p['transaction_monthly_quota'] = $p['transaction_monthly_quota'] === null ? null : (int)$p['transaction_monthly_quota'];
+                $p['price'] = (float)$p['price'];
+                $p['description'] = json_decode($p['description'] ?? '[]', true);
             }
             unset($p);
 
-            return $this->jsonResponse->oneResp('Sukses', ['packages' => $packages], 200);
-        } catch (\Throwable $e) {
+            return $this->jsonResponse->oneResp('Sukses', $packages, 200);
+        }
+        catch (\Throwable $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
