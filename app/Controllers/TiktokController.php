@@ -224,7 +224,6 @@ class TiktokController extends ResourceController
         $appSecret = env('TIKTOK_APP_SECRET');
         $accessToken = $toko['tiktok_access_token'];
         $shopCipher = $toko['tiktok_shop_cipher'];
-
         $params['app_key'] = $appKey;
         $params['shop_cipher'] = $shopCipher;
         $params['timestamp'] = time();
