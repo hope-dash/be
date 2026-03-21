@@ -41,6 +41,7 @@ class MigrateStockToBelanja extends BaseCommand
                 WHERE t.status = 'WAITING_PAYMENT'
                 GROUP BY sp.kode_barang
             ) ps ON ps.kode_barang = p.id_barang
+            WHERE p.deleted_at IS NULL
         ";
 
         try {

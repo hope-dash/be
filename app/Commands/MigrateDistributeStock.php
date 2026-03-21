@@ -20,11 +20,16 @@ class MigrateDistributeStock extends BaseCommand
         CLI::write("Stage 1: Calculation...", 'yellow');
         
         // Fetch distribution from OLD DB
-        $sqlStock = "SELECT id_barang, id_toko, stock as normal, barang_cacat as cacat FROM stock";
+        $sqlStock = "SELECT s.id_barang, s.id_toko, s.stock as normal, s.barang_cacat as cacat 
+                     FROM stock s 
+                     JOIN product p ON p.id_barang = s.id_barang 
+                     WHERE p.deleted_at IS NULL";
         $sqlPending = "SELECT sp.kode_barang as id_barang, t.id_toko, SUM(sp.jumlah) as pending 
                        FROM sales_product sp 
                        JOIN transaction t ON t.id = sp.id_transaction 
+                       JOIN product p ON p.id_barang = sp.kode_barang
                        WHERE t.status = 'WAITING_PAYMENT' 
+                       AND p.deleted_at IS NULL
                        GROUP BY sp.kode_barang, t.id_toko";
         $sqlProducts = "SELECT id_barang, harga_modal, harga_jual FROM product WHERE deleted_at IS NULL";
 
