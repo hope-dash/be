@@ -143,6 +143,29 @@ class TenantControllerV2 extends ResourceController
                 throw new \Exception('Gagal membuat toko' . ($dbError['message'] ? ': ' . $dbError['message'] : ''));
             }
 
+            // 3.5 Automatically generate accounts for this new toko
+            $accountModel = new \App\Models\AccountModel();
+            $baseAccounts = $accountModel->where('id_toko', null)->findAll();
+            $tokoName = $input['toko_name'] ?? 'Toko';
+            foreach ($baseAccounts as $acc) {
+                $baseCode = $acc['base_code'] ?? $acc['code'];
+                $newCode = substr($baseCode, 0, 2) . $tokoId . substr($baseCode, 3);
+                $newName = $acc['name'] . ' ' . $tokoName;
+
+                $accountModel->insert([
+                    'tenant_id' => $tenantId,
+                    'id_toko' => $tokoId,
+                    'base_code' => $baseCode,
+                    'code' => $newCode,
+                    'name' => $newName,
+                    'type' => $acc['type'],
+                    'normal_balance' => $acc['normal_balance'],
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+
+
             // 4. Insert User
             $userModel = new \App\Models\UserModel();
             $userData = [

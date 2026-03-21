@@ -941,8 +941,11 @@ class ProductController extends ResourceController
 
             // === Filter ===
             if (!empty($namaProduct)) {
+                $db = \Config\Database::connect();
+                $escapedVal = $db->escapeLikeString($namaProduct);
+                
                 $builder->groupStart()
-                    ->where("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, '')) LIKE ?", ["%$namaProduct%"])
+                    ->where("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, '')) LIKE '%{$escapedVal}%'")
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
@@ -1239,8 +1242,10 @@ class ProductController extends ResourceController
 
             // Apply filters
             if (!empty($namaProduct)) {
+                $currDb = \Config\Database::connect();
+                $escapedVal = $currDb->escapeLikeString($namaProduct);
                 $builder->groupStart()
-                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->where("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri) LIKE '%{$escapedVal}%'")
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
@@ -1348,8 +1353,10 @@ class ProductController extends ResourceController
 
             // Filter teks
             if (!empty($namaProduct)) {
+                $currDb = \Config\Database::connect();
+                $escapedVal = $currDb->escapeLikeString($namaProduct);
                 $productBuilder->groupStart()
-                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->where("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri) LIKE '%{$escapedVal}%'")
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
@@ -1543,8 +1550,10 @@ class ProductController extends ResourceController
 
             // Filter teks
             if (!empty($namaProduct)) {
+                $currDb = \Config\Database::connect();
+                $escapedVal = $currDb->escapeLikeString($namaProduct);
                 $productBuilder->groupStart()
-                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->where("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri) LIKE '%{$escapedVal}%'")
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
@@ -1730,8 +1739,10 @@ class ProductController extends ResourceController
 
             // === Filter nama produk (id_barang atau nama lengkap) ===
             if (!empty($namaProduct)) {
+                $currDb = \Config\Database::connect();
+                $escapedVal = $currDb->escapeLikeString($namaProduct);
                 $builder->groupStart()
-                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->where("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri) LIKE '%{$escapedVal}%'")
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
