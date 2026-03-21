@@ -25,6 +25,7 @@ class Database extends Config
      * @var array<string, mixed>
      */
     public array $default;
+    public array $old;
 
     //    /**
     //     * Sample database connection for SQLite3.
@@ -192,6 +193,33 @@ class Database extends Config
             'strictOn' => false,
             'failover' => [],
             'port' => (int) (getenv('database.default.port') ?: 8889), // ✅ INI YANG DIUBAH!
+            'numberNative' => false,
+            'foundRows' => false,
+            'dateFormat' => [
+                'date' => 'Y-m-d',
+                'datetime' => 'Y-m-d H:i:s',
+                'time' => 'H:i:s',
+            ],
+        ];
+
+        $this->old = [
+            'DSN' => '',
+            'hostname' => getenv('database.old.hostname') ?: '127.0.0.1',
+            'username' => getenv('database.old.username') ?: 'root',
+            'password' => getenv('database.old.password') ?: 'root',
+            'database' => getenv('database.old.database') ?: 'hope',
+            'DBDriver' => 'MySQLi',
+            'DBPrefix' => '',
+            'pConnect' => false,
+            'DBDebug' => true,
+            'charset' => 'utf8mb4',
+            'DBCollat' => 'utf8mb4_general_ci',
+            'swapPre' => '',
+            'encrypt' => false,
+            'compress' => false,
+            'strictOn' => false,
+            'failover' => [],
+            'port' => (int) (getenv('database.old.port') ?: 3306),
             'numberNative' => false,
             'foundRows' => false,
             'dateFormat' => [
