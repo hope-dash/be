@@ -192,10 +192,11 @@ class SubscriptionControllerV2 extends ResourceController
                 ->get()
                 ->getRowArray();
 
+
             if ($tenant && $user && !empty($user['email'])) {
                 $totalAmount = number_format($order['amount'], 0, ',', '.');
                 $packageName = $package['name'] ?? 'Subscription Package';
-                
+
                 $orderContent = '
                     <h2>Pesanan Subscription Berhasil Dibuat</h2>
                     <p>Halo, ' . htmlspecialchars($tenant['name']) . '.</p>
@@ -212,7 +213,7 @@ class SubscriptionControllerV2 extends ResourceController
                     
                     <p>Jika Anda memiliki pertanyaan, silakan hubungi tim support kami.</p>
                 ';
-                
+
                 $orderHtml = get_email_template("Informasi Pesanan & Pembayaran - $appName", $orderContent, $appName);
                 send_system_email($user['email'], "Pesanan Subscription #" . $order['external_transaction_id'], $orderHtml);
             }
@@ -514,6 +515,7 @@ class SubscriptionControllerV2 extends ResourceController
                 'subscription' => $result,
                 'tenant_quota' => $quota,
                 'effective_limits' => $effective,
+                'user' => $user,
             ], 200);
         }
         catch (\Throwable $e) {

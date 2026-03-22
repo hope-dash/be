@@ -28,7 +28,7 @@ if (!function_exists('send_email')) {
 
         $email->initialize($config);
 
-        $email->setFrom(\App\Libraries\TenantContext::email(), \App\Libraries\TenantContext::name());
+        $email->setFrom(env('email.SMTPUser'), \App\Libraries\TenantContext::name());
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);
@@ -45,8 +45,9 @@ if (!function_exists('send_email')) {
 if (!function_exists('send_system_email')) {
     /**
      * Send email using Super Admin sender (from ENV)
+     * Optional $fromEmail and $fromName can be used to mask the sender (e.g. as a Tenant)
      */
-    function send_system_email($to, $subject, $message)
+    function send_system_email($to, $subject, $message, $fromEmail = null, $fromName = null)
     {
         $email = \Config\Services::email();
 
@@ -65,8 +66,8 @@ if (!function_exists('send_system_email')) {
 
         $email->initialize($config);
 
-        $fromEmail = env('APP_EMAIL', 'admin@hopesparepart.com');
-        $fromName = env('APP_NAME', 'Hope Sparepart');
+        $fromEmail = env('email.SMTPUser');
+        $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
 
         $email->setFrom($fromEmail, $fromName);
         $email->setTo($to);
@@ -111,7 +112,7 @@ if (!function_exists('send_email_with_attachments')) {
 
         $email->initialize($config);
 
-        $email->setFrom(\App\Libraries\TenantContext::email(), \App\Libraries\TenantContext::name());
+        $email->setFrom(env('email.SMTPUser'), \App\Libraries\TenantContext::name());
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);
@@ -134,8 +135,9 @@ if (!function_exists('send_email_with_attachments')) {
 if (!function_exists('send_system_email_with_attachments')) {
     /**
      * Send email with attachments using Super Admin sender (from ENV)
+     * Optional $fromEmail and $fromName can be used to mask the sender (e.g. as a Tenant)
      */
-    function send_system_email_with_attachments($to, $subject, $message, array $attachments = [])
+    function send_system_email_with_attachments($to, $subject, $message, array $attachments = [], $fromEmail = null, $fromName = null)
     {
         $email = \Config\Services::email();
 
@@ -154,8 +156,8 @@ if (!function_exists('send_system_email_with_attachments')) {
 
         $email->initialize($config);
 
-        $fromEmail = env('APP_EMAIL', 'admin@hopesparepart.com');
-        $fromName = env('APP_NAME', 'Hope Sparepart');
+        $fromEmail = env('email.SMTPUser');
+        $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
 
         $email->setFrom($fromEmail, $fromName);
         $email->setTo($to);
