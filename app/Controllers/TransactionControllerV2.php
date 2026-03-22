@@ -303,6 +303,7 @@ class TransactionControllerV2 extends ResourceController
                 $totalAfterDiscount = $qty * $price - $discountValue;
 
                 $salesProductData[] = [
+                    'tenant_id' => $tenantId,
                     'id_transaction' => $trxId,
                     'kode_barang' => $p['id_barang'],
                     'jumlah' => $qty,

@@ -16,6 +16,7 @@ class TenantScopedModel extends Model
 {
     protected bool $useTenantScope = true;
     protected $beforeInsert = ['applyTenantId'];
+    protected $beforeInsertBatch = ['applyTenantId'];
     protected $beforeUpdate = ['preventTenantChange'];
 
     public function builder($table = null)
@@ -46,16 +47,18 @@ class TenantScopedModel extends Model
         // insert()
         if (is_array($data['data']) && (empty($data['data']) || array_is_list($data['data']) === false)) {
             $data['data']['tenant_id'] = $data['data']['tenant_id'] ?? TenantContext::id();
+            log_message('debug', '[TenantScopedModel] Single insert on table ' . $this->table . ' with tenant_id: ' . ($data['data']['tenant_id'] ?? 'NULL'));
             return $data;
         }
 
-        // insertBatch()
-        if (is_array($data['data']) && array_is_list($data['data'])) {
+        // insertBatch() - check if it's a numeric list of arrays
+        if (is_array($data['data']) && !empty($data['data']) && isset($data['data'][0]) && is_array($data['data'][0])) {
             foreach ($data['data'] as &$row) {
                 if (is_array($row)) {
                     $row['tenant_id'] = $row['tenant_id'] ?? TenantContext::id();
                 }
             }
+            log_message('debug', '[TenantScopedModel] Batch insert on table ' . $this->table . ' with tenant_id: ' . TenantContext::id());
             unset($row);
         }
 
