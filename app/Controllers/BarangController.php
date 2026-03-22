@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Libraries\TenantContext;
 use App\Models\ModelBarangModel;
 use App\Models\SeriModel;
 use CodeIgniter\RESTful\ResourceController;
@@ -35,19 +36,30 @@ class BarangController extends ResourceController
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
 
-        // Check uniqueness of kode_awal (must be unique globally, even if deleted)
-        $existingKode = $this->modelBarangModel->withDeleted()->where('kode_awal', $data->kode_awal)->first();
+        $tenantId = TenantContext::id();
+
+        // Check uniqueness of kode_awal (must be unique within the same tenant, even if deleted)
+        $existingKode = $this->modelBarangModel->withDeleted()
+            ->where('tenant_id', $tenantId)
+            ->where('kode_awal', $data->kode_awal)
+            ->first();
+            
         if ($existingKode) {
-            return $this->jsonResponse->error("Kode Awal '" . $data->kode_awal . "' sudah pernah digunakan (meskipun sudah dihapus) dan tidak boleh diulang.", 400);
+            return $this->jsonResponse->error("Kode Awal '" . $data->kode_awal . "' sudah pernah digunakan di tenant ini (meskipun sudah dihapus) dan tidak boleh diulang.", 400);
         }
 
-        // Check uniqueness of nama_model (only active records are checked)
-        $existingModel = $this->modelBarangModel->where('nama_model', $data->nama_model)->first();
+        // Check uniqueness of nama_model (only active records for this tenant are checked)
+        $existingModel = $this->modelBarangModel
+            ->where('tenant_id', $tenantId)
+            ->where('nama_model', $data->nama_model)
+            ->first();
+            
         if ($existingModel) {
-            return $this->jsonResponse->error("Nama Model '" . $data->nama_model . "' sudah ada yang aktif. Gunakan nama lain atau hapus model yang lama.", 400);
+            return $this->jsonResponse->error("Nama Model '" . $data->nama_model . "' sudah ada yang aktif di tenant ini. Gunakan nama lain atau hapus model yang lama.", 400);
         }
 
         $data->created_by = $token['user_id'];
+        $data->tenant_id = $tenantId; // Explicitly ensure tenant_id is set
         $this->modelBarangModel->insert($data);
 
         return $this->jsonResponse->oneResp('Add ' . $data->nama_model . ' successfully', ['id' => $this->modelBarangModel->insertID()], 201);

@@ -560,7 +560,8 @@ class TransactionController extends BaseController
             // ==========================================
             $builder = $db->table('transaction t')
                 ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.actual_total, t.po, t.total_payment, t.status, t.delivery_status, t.id_toko, t.date_time, toko.toko_name')
-                ->join('toko', 't.id_toko = toko.id', 'left');
+                ->join('toko', 't.id_toko = toko.id', 'left')
+                ->where('t.tenant_id', \App\Libraries\TenantContext::id());
 
             // Apply Basic Filters
             if ($status) {
@@ -732,7 +733,8 @@ class TransactionController extends BaseController
                 ->join('transaction_meta tm_pengiriman', 't.id = tm_pengiriman.transaction_id AND tm_pengiriman.key = "pengiriman"', 'left')
                 ->join('transaction_meta tm_resi', 't.id = tm_resi.transaction_id AND tm_resi.key = "resi"', 'left')
                 ->join('transaction_meta tm_source', 't.id = tm_source.transaction_id AND tm_source.key = "source"', 'left')
-                ->join('toko', 't.id_toko = toko.id', 'left');
+                ->join('toko', 't.id_toko = toko.id', 'left')
+                ->where('t.tenant_id', \App\Libraries\TenantContext::id());
 
             // Apply Filters
             if ($status) {
@@ -858,6 +860,7 @@ class TransactionController extends BaseController
             ->join('customer c', 'tm_cust.value = c.id', 'left')
             ->join('transaction_meta tm', 't.id = tm.transaction_id', 'left')
             ->where('t.id', $id)
+            ->where('t.tenant_id', \App\Libraries\TenantContext::id())
             ->groupBy('t.id, tk.id, c.id');
 
         $transaction = $builder->get()->getRowArray();
@@ -1028,6 +1031,7 @@ class TransactionController extends BaseController
 
         $builder = $this->db->table('sales_product sp')
             ->join('transaction t', 'sp.id_transaction = t.id', 'left')
+            ->where('t.tenant_id', \App\Libraries\TenantContext::id())
             ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
             ->join('seri s', 'p.id_seri_barang = s.id', 'left')
@@ -1122,6 +1126,7 @@ class TransactionController extends BaseController
 
 
         $builder = $db->table('transaction');
+        $builder->where('transaction.tenant_id', \App\Libraries\TenantContext::id());
         $builder->select('
             SUM(total_payment) AS total_amount,
             SUM(actual_total) AS total_actual,
@@ -1147,6 +1152,7 @@ class TransactionController extends BaseController
     {
         $query = $this->db->table('transaction')
             ->select('SUM(amount) - SUM(total_payment) AS transaction_gantung')
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
             ->where('status', 'PARTIALLY_PAID');
 
         if (!empty($role) && !$id_toko) {
@@ -1162,6 +1168,7 @@ class TransactionController extends BaseController
     {
         $query = $this->db->table('transaction')
             ->select('SUM(amount) AS transaksi_waiting_payment')
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
             ->where('status', 'WAITING_PAYMENT');
 
         if (!empty($role) && !$id_toko) {
@@ -1256,7 +1263,8 @@ class TransactionController extends BaseController
             ->join('transaction', 'sp.id_transaction = transaction.id')
             ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
-            ->join('seri s', 'p.id_seri_barang = s.id', 'left');
+            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+            ->where('transaction.tenant_id', \App\Libraries\TenantContext::id());
 
         if (is_string($role)) {
             $role = array_map('intval', explode(',', $role));
@@ -1353,7 +1361,8 @@ class TransactionController extends BaseController
             ->join('product p', 'sl.id_barang = p.id_barang', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
             ->join('seri s', 'p.id_seri_barang = s.id', 'left')
-            ->join('toko t', 'sl.id_toko = t.id', 'left');
+            ->join('toko t', 'sl.id_toko = t.id', 'left')
+            ->where('sl.tenant_id', \App\Libraries\TenantContext::id());
 
         if ($idToko) {
             $builder->where('sl.id_toko', $idToko);
@@ -1390,6 +1399,7 @@ class TransactionController extends BaseController
         try {
             $query = $this->db->table('cashflow')
                 ->select('type, SUM(credit) AS total_credit')
+                ->where('tenant_id', \App\Libraries\TenantContext::id())
                 ->where('credit >', 0)
                 ->groupBy('type');
 
@@ -1456,6 +1466,7 @@ class TransactionController extends BaseController
                 ->select('c.id AS customer_id, c.nama_customer, COUNT(DISTINCT t.id) AS total_transactions, SUM(t.amount) AS total_amount_spent')
                 ->join('transaction_meta tm', 't.id = tm.transaction_id AND tm.key = "customer_id" AND tm.value IS NOT NULL AND tm.value != ""', 'inner')
                 ->join('customer c', 'c.id = tm.value', 'left')
+                ->where('t.tenant_id', \App\Libraries\TenantContext::id())
                 ->whereIn('t.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR'])
                 ->groupBy('c.id, c.nama_customer')
                 ->orderBy('total_transactions', 'DESC')
@@ -1527,6 +1538,7 @@ class TransactionController extends BaseController
                 ->join('product', 'sales_product.kode_barang = product.id_barang')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id')
                 ->join('seri', 'product.id_seri_barang = seri.id', 'left')
+                ->where('transaction.tenant_id', \App\Libraries\TenantContext::id())
                 ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR'])
                 ->groupBy(['sales_product.kode_barang', 'product.nama_barang', 'model_barang.nama_model', 'seri.seri'])
                 ->orderBy('total_sold', 'DESC');
@@ -1606,6 +1618,7 @@ class TransactionController extends BaseController
                     'CONCAT(product.nama_barang, " ", model_barang.nama_model, " ", COALESCE(seri.seri, "")) AS nama_lengkap_barang'
                 ])
                 ->join('transaction', 'transaction.id = sales_product.id_transaction', 'left')
+                ->where('transaction.tenant_id', \App\Libraries\TenantContext::id())
                 ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'WAITING_PAYMENT', 'RETUR'])
                 ->join('product', 'product.id_barang = sales_product.kode_barang', 'left')
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
@@ -1657,6 +1670,7 @@ class TransactionController extends BaseController
                 ->select("DATE(date_time) AS tanggal, 
                       COUNT(id) AS sales, 
                       SUM(CASE WHEN status IN ('SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID') THEN amount ELSE 0 END) AS revenue")
+                ->where('tenant_id', \App\Libraries\TenantContext::id())
                 ->groupBy('tanggal')
                 ->orderBy('tanggal', 'ASC');
 
@@ -1729,6 +1743,7 @@ class TransactionController extends BaseController
 
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
             ->whereIn('status', ['CANCEL', 'NEED_REFUNDED'])
             ->get()
             ->getRowArray();
@@ -1833,6 +1848,7 @@ class TransactionController extends BaseController
             // Retrieve the transaction
             $transaction = $db->table('transaction')
                 ->where('id', $transactionId)
+                ->where('tenant_id', \App\Libraries\TenantContext::id())
                 ->whereIn('status', ['SUCCESS', 'PAID', 'WAITING_PAYMENT', 'PARTIALLY_PAID'])
                 ->get()
                 ->getRowArray();
@@ -1967,6 +1983,7 @@ class TransactionController extends BaseController
 
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
             ->where('status', 'WAITING_PAYMENT')
             ->get()
             ->getRowArray();
@@ -2080,6 +2097,7 @@ class TransactionController extends BaseController
 
         $transaction = $db->table('transaction')
             ->where('id', $transactionId)
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
             ->whereIn('status', ['WAITING_PAYMENT', 'PARTIALLY_PAID'])
             ->get()
             ->getRowArray();
@@ -2292,6 +2310,7 @@ class TransactionController extends BaseController
             // Get transaction data
             $transaction = $db->table('transaction')
                 ->where('id', $transactionId)
+                ->where('tenant_id', \App\Libraries\TenantContext::id())
                 ->whereIn('status', ['SUCCESS'])
                 ->get()
                 ->getRowArray();
@@ -2955,6 +2974,7 @@ class TransactionController extends BaseController
             ->join('customer c', 'tm_cust.value = c.id', 'left')
             ->join('transaction_meta tm_name', 't.id = tm_name.transaction_id AND tm_name.key = "customer_name"', 'left')
             ->join('toko', 't.id_toko = toko.id', 'left')
+            ->where('t.tenant_id', \App\Libraries\TenantContext::id())
             ->where('tm.key', 'jatuh_tempo')
             ->where('tm.value >=', $today)
             ->where('tm.value <=', $futureDate)
@@ -2986,6 +3006,7 @@ class TransactionController extends BaseController
         // Cek apakah transaksi ada dan statusnya PAID
         $builder = $db->table('transaction');
         $transaction = $builder->where('id', $transactionId)
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
             ->whereIn('status', ['PAID', 'PACKING', 'IN_DELIVERY', 'RETUR'])
             ->get()->getRowArray();
 

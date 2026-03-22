@@ -761,6 +761,7 @@ class ProductController extends ResourceController
         ')
             ->join('toko', 'toko.id = stock.id_toko', 'left')
             ->where('stock.id_barang', $p['id_barang'])
+            ->where('stock.tenant_id', \App\Libraries\TenantContext::id())
             ->get()
             ->getResultArray()
         );
@@ -781,6 +782,7 @@ class ProductController extends ResourceController
             ? $this->db->table('suplier')
             ->select('id, suplier_name as name')
             ->where('id', $p['suplier'])
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
             ->get()
             ->getRowArray()
             : [];
@@ -807,7 +809,8 @@ class ProductController extends ResourceController
     public function getListSeribySearchProduct()
     {
         $namaProduct = $this->request->getGet('namaProduct') ?? '';
-        $cacheKey = 'seri_by_search_' . md5($namaProduct);
+        $tenantId = \App\Libraries\TenantContext::id();
+        $cacheKey = 'seri_by_search_' . $tenantId . '_' . md5($namaProduct);
 
         try {
             $cached = cache()->get($cacheKey);
@@ -937,6 +940,7 @@ class ProductController extends ResourceController
             ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.tenant_id', \App\Libraries\TenantContext::id())
                 ->where('product.deleted_at IS NULL');
 
             // === Filter ===
@@ -1003,6 +1007,7 @@ class ProductController extends ResourceController
                 $supList = $this->db->table('suplier')
                     ->select('id, suplier_name')
                     ->whereIn('id', $allSuplierIds)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->get()
                     ->getResultArray();
                 foreach ($supList as $sup) {
@@ -1021,7 +1026,12 @@ class ProductController extends ResourceController
 
                 $tokoIds = array_unique(array_column($stocks, 'id_toko'));
                 if (!empty($tokoIds)) {
-                    $tokoList = $this->db->table('toko')->select('id, toko_name')->whereIn('id', $tokoIds)->get()->getResultArray();
+                    $tokoList = $this->db->table('toko')
+                        ->select('id, toko_name')
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
+                        ->whereIn('id', $tokoIds)
+                        ->get()
+                        ->getResultArray();
                     $tokoMap = array_column($tokoList, 'toko_name', 'id');
                 }
 
@@ -1044,6 +1054,7 @@ class ProductController extends ResourceController
                     ')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $productCodes)
+                    ->where('t.tenant_id', \App\Libraries\TenantContext::id())
                     ->groupBy('sp.kode_barang, t.id_toko')
                     ->get()->getResultArray();
 
@@ -1069,6 +1080,7 @@ class ProductController extends ResourceController
                     ->join('pembelian p', 'p.id = pd.pembelian_id')
                     ->whereIn('pd.kode_barang', $productCodes)
                     ->whereIn('p.status', ['APPROVED', 'NEED_REVIEW', 'WAITING', 'PENDING', 'ON_PROGRESS'])
+                    ->where('p.tenant_id', \App\Libraries\TenantContext::id())
                     ->where('p.deleted_at IS NULL')
                     ->groupBy('pd.kode_barang')
                     ->get()->getResultArray();
@@ -1237,6 +1249,7 @@ class ProductController extends ResourceController
                 ->join('toko', 'toko.id = stock.id_toko', 'left')
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.tenant_id', \App\Libraries\TenantContext::id())
                 ->select($selectFields);
 
 
@@ -1308,7 +1321,8 @@ class ProductController extends ResourceController
             $offset = ($page - 1) * $limit;
 
             // Cache key
-            $cacheKeyData = compact('sortBy', 'sortMethod', 'namaProduct', 'id_toko', 'customer_id', 'seri', 'model', 'limit', 'page');
+            $tenantId = \App\Libraries\TenantContext::id();
+            $cacheKeyData = compact('tenantId', 'sortBy', 'sortMethod', 'namaProduct', 'id_toko', 'customer_id', 'seri', 'model', 'limit', 'page');
             $cacheKey = 'getProductStockForPricelist_' . md5(json_encode($cacheKeyData));
             $cache = \Config\Services::cache();
 
@@ -1322,6 +1336,7 @@ class ProductController extends ResourceController
                 $customer = $this->db->table('customer')
                     ->select('type')
                     ->where('id', (int)$customer_id)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('deleted_at', null)
                     ->get()
                     ->getRow();
@@ -1349,7 +1364,8 @@ class ProductController extends ResourceController
                 'seri.seri as seri',
             ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.tenant_id', \App\Libraries\TenantContext::id());
 
             // Filter teks
             if (!empty($namaProduct)) {
@@ -1371,6 +1387,7 @@ class ProductController extends ResourceController
                     return $sub->select('id_barang')
                     ->from('stock')
                     ->where('id_toko', (int)$id_toko)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('stock >', 0);
                 });
             }
@@ -1378,6 +1395,7 @@ class ProductController extends ResourceController
                 $productBuilder->whereIn('product.id_barang', function ($sub) {
                     return $sub->select('id_barang')
                     ->from('stock')
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('stock >', 0);
                 });
             }
@@ -1406,6 +1424,7 @@ class ProductController extends ResourceController
                 $stockQuery = $this->db->table('stock')
                     ->select('id_barang, id_toko, stock, barang_cacat, dropship')
                     ->whereIn('id_barang', $productCodes)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('stock >', 0);
 
                 if (!empty($id_toko) && is_numeric($id_toko)) {
@@ -1418,6 +1437,7 @@ class ProductController extends ResourceController
                 if (!empty($tokoIds)) {
                     $tokoList = $this->db->table('toko')
                         ->select('id, toko_name')
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
                         ->whereIn('id', $tokoIds)
                         ->get()
                         ->getResultArray();
@@ -1523,7 +1543,8 @@ class ProductController extends ResourceController
             }
 
             // Cache key (include customer discount in cache key)
-            $cacheKeyData = compact('sortBy', 'sortMethod', 'namaProduct', 'id_toko', 'seri', 'model', 'limit', 'page', 'discountType', 'discountValue');
+            $tenantId = \App\Libraries\TenantContext::id();
+            $cacheKeyData = compact('tenantId', 'sortBy', 'sortMethod', 'namaProduct', 'id_toko', 'seri', 'model', 'limit', 'page', 'discountType', 'discountValue');
             $cacheKey = 'getProductStockForPricelistV2_' . md5(json_encode($cacheKeyData));
             $cache = \Config\Services::cache();
 
@@ -1546,7 +1567,8 @@ class ProductController extends ResourceController
                 'seri.seri as seri',
             ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.tenant_id', \App\Libraries\TenantContext::id());
 
             // Filter teks
             if (!empty($namaProduct)) {
@@ -1568,6 +1590,7 @@ class ProductController extends ResourceController
                     return $sub->select('id_barang')
                     ->from('stock')
                     ->where('id_toko', (int)$id_toko)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('stock >', 0);
                 });
             }
@@ -1575,6 +1598,7 @@ class ProductController extends ResourceController
                 $productBuilder->whereIn('product.id_barang', function ($sub) {
                     return $sub->select('id_barang')
                     ->from('stock')
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('stock >', 0);
                 });
             }
@@ -1603,6 +1627,7 @@ class ProductController extends ResourceController
                 $stockQuery = $this->db->table('stock')
                     ->select('id_barang, id_toko, stock, barang_cacat, dropship')
                     ->whereIn('id_barang', $productCodes)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('stock >', 0);
 
                 if (!empty($id_toko) && is_numeric($id_toko)) {
@@ -1615,6 +1640,7 @@ class ProductController extends ResourceController
                 if (!empty($tokoIds)) {
                     $tokoList = $this->db->table('toko')
                         ->select('id, toko_name')
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
                         ->whereIn('id', $tokoIds)
                         ->get()
                         ->getResultArray();
@@ -1735,7 +1761,8 @@ class ProductController extends ResourceController
                 'seri.seri',
             ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.tenant_id', \App\Libraries\TenantContext::id());
 
             // === Filter nama produk (id_barang atau nama lengkap) ===
             if (!empty($namaProduct)) {
@@ -1804,6 +1831,7 @@ class ProductController extends ResourceController
                     ->select('sp.kode_barang, t.id_toko, SUM(sp.jumlah) as total_pending')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $productCodes)
+                    ->where('t.tenant_id', \App\Libraries\TenantContext::id())
                     ->where('t.status', 'WAITING_PAYMENT')
                     ->groupBy('sp.kode_barang, t.id_toko')
                     ->get()
@@ -1891,7 +1919,8 @@ class ProductController extends ResourceController
                 'product.harga_modal',
             ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('product.tenant_id', \App\Libraries\TenantContext::id());
 
             // Apply filter yang sama untuk global summary
             if (!empty($namaProduct)) {
@@ -1929,6 +1958,7 @@ class ProductController extends ResourceController
                     ->select('sp.kode_barang, SUM(sp.jumlah) as total_pending')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $allProductCodes)
+                    ->where('t.tenant_id', \App\Libraries\TenantContext::id())
                     ->where('t.status', 'WAITING_PAYMENT')
                     ->groupBy('sp.kode_barang')
                     ->get()
@@ -2056,7 +2086,10 @@ class ProductController extends ResourceController
         }
 
         // Mapping toko
-        $storeQuery = $this->db->table('toko')->whereIn('toko_name', array_keys($storeNames))->get();
+        $storeQuery = $this->db->table('toko')
+            ->whereIn('toko_name', array_keys($storeNames))
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
+            ->get();
         $storeMap = [];
         foreach ($storeQuery->getResultArray() as $store) {
             $storeMap[$store['toko_name']] = $store['id'];
@@ -2069,7 +2102,13 @@ class ProductController extends ResourceController
         $productMap = [];
         $stockToInsert = [];
 
-        $lastProduct = $this->db->table('product')->select('id')->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
+        $lastProduct = $this->db->table('product')
+            ->select('id')
+            ->where('tenant_id', \App\Libraries\TenantContext::id())
+            ->orderBy('id', 'DESC')
+            ->limit(1)
+            ->get()
+            ->getRowArray();
         $lastId = $lastProduct ? (int)preg_replace('/[^0-9]/', '', $lastProduct['id']) : 0;
 
         foreach ($excelData as $row) {
@@ -2080,7 +2119,11 @@ class ProductController extends ResourceController
 
             // Cek kategori
             if (!isset($categoryMap[$categoryName])) {
-                $category = $this->db->table('model_barang')->where('LOWER(TRIM(nama_model))', strtolower($categoryName))->get()->getRowArray();
+                $category = $this->db->table('model_barang')
+                    ->where('LOWER(TRIM(nama_model))', strtolower($categoryName))
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
+                    ->get()
+                    ->getRowArray();
                 if ($category) {
                     $categoryMap[$categoryName] = $category['id'];
                 }
@@ -2093,12 +2136,17 @@ class ProductController extends ResourceController
             // Cek seri
             $seriesName = trim($row['C'] ?? '');
             if (!isset($seriesMap[$seriesName]) && !empty($seriesName)) {
-                $series = $this->db->table('seri')->where('seri', $seriesName)->get()->getRowArray();
+                $series = $this->db->table('seri')
+                    ->where('seri', $seriesName)
+                    ->get()->getRowArray();
                 if ($series) {
                     $seriesMap[$seriesName] = $series['id'];
                 }
                 else {
-                    $this->db->table('seri')->insert(['seri' => $seriesName]);
+                    $this->db->table('seri')->insert([
+                        'tenant_id' => \App\Libraries\TenantContext::id(),
+                        'seri' => $seriesName
+                    ]);
                     $seriesMap[$seriesName] = $this->db->insertID();
                 }
             }
@@ -2108,12 +2156,18 @@ class ProductController extends ResourceController
             $suplierIds = [];
             foreach ($supplierList as $supplier) {
                 if (!isset($supplierMap[$supplier])) {
-                    $existingSupplier = $this->db->table('suplier')->where('suplier_name', $supplier)->get()->getRowArray();
+                    $existingSupplier = $this->db->table('suplier')
+                        ->where('suplier_name', $supplier)
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
+                        ->get()->getRowArray();
                     if ($existingSupplier) {
                         $supplierMap[$supplier] = $existingSupplier['id'];
                     }
                     else {
-                        $this->db->table('suplier')->insert(['suplier_name' => $supplier]);
+                        $this->db->table('suplier')->insert([
+                            'tenant_id' => \App\Libraries\TenantContext::id(),
+                            'suplier_name' => $supplier
+                        ]);
                         $supplierMap[$supplier] = $this->db->insertID();
                     }
                 }
@@ -2123,7 +2177,8 @@ class ProductController extends ResourceController
             $id_barang = $category['kode_awal'] . str_pad($lastId, 3, '0', STR_PAD_LEFT);
 
             // Data produk
-            $productMap[trim($row['A'])] = [
+            $productData = [
+                'tenant_id' => \App\Libraries\TenantContext::id(),
                 'id_barang' => $id_barang,
                 'nama_barang' => trim($row['A']),
                 'id_seri_barang' => $seriesMap[$seriesName] ?? null,
@@ -2136,7 +2191,7 @@ class ProductController extends ResourceController
                 'berat' => isset($row['I']) ? (float)$row['I'] : 0, // Assuming column I is Berat
                 'created_by' => $token['user_id'],
             ];
-            $dataToInsert[] = $productMap[trim($row['A'])];
+            $dataToInsert[] = $productData;
 
             foreach ($storeNames as $storeName => $columnName) {
                 if (isset($storeMap[$storeName])) {
@@ -2144,6 +2199,7 @@ class ProductController extends ResourceController
                     $stock = array_key_exists(chr(ord($columnName) - 1), $row) && is_numeric($row[chr(ord($columnName) - 1)]) ? (int)$row[chr(ord($columnName) - 1)] : 0;
 
                     $stockToInsert[] = [
+                        'tenant_id' => \App\Libraries\TenantContext::id(),
                         'id_barang' => $id_barang,
                         'id_toko' => $storeMap[$storeName],
                         'stock' => $stock,
