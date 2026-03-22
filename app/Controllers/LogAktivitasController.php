@@ -5,6 +5,8 @@ namespace App\Controllers;
 use App\Models\JsonResponse;
 use CodeIgniter\RESTful\ResourceController;
 
+use App\Libraries\TenantContext;
+
 class LogAktivitasController extends ResourceController
 {
     protected $modelName = 'App\Models\LogAktivitasModel';
@@ -23,7 +25,8 @@ class LogAktivitasController extends ResourceController
         $db = \Config\Database::connect();
         $builder = $db->table('log_aktivitas')
             ->select('log_aktivitas.*, users.name as user_name')
-            ->join('users', 'users.user_id = log_aktivitas.user_id', 'left');
+            ->join('users', 'users.user_id = log_aktivitas.user_id', 'left')
+            ->where('log_aktivitas.tenant_id', TenantContext::id());
 
         // Ambil filter dari query params
         $targetTable = $this->request->getGet('target_table');
