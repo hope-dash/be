@@ -183,23 +183,38 @@ class SubscriptionControllerV2 extends ResourceController
 
             $order = $this->orderModel->find($orderId);
 
-            // Send Welcome Email to Tenants
+            // Send Order & Payment Information to Tenant
             $appName = env('APP_NAME', 'UMKM HEBAT');
-            $appLink = env('APP_LINK', 'https://umkmhebat.id');
             $tenant = $this->db->table('tenants')->where('id', $tenantId)->get()->getRowArray();
-            if ($tenant && !empty($tenant['email'])) {
-                $welcomeContent = '
-                    <h2>Selamat Datang di ' . htmlspecialchars($appName) . '!</h2>
+            $user = $this->db->table('users')
+                ->where('tenant_id', $tenantId)
+                ->orderBy('created_at', 'ASC')
+                ->get()
+                ->getRowArray();
+
+            if ($tenant && $user && !empty($user['email'])) {
+                $totalAmount = number_format($order['amount'], 0, ',', '.');
+                $packageName = $package['name'] ?? 'Subscription Package';
+                
+                $orderContent = '
+                    <h2>Pesanan Subscription Berhasil Dibuat</h2>
                     <p>Halo, ' . htmlspecialchars($tenant['name']) . '.</p>
-                    <p>Terima kasih telah melakukan pemesanan paket subscription di platform kami.</p>
-                    <p>Untuk mengakses akun kamu, silakan klik link di bawah ini:</p>
-                    <center>
-                        <a href="' . $appLink . '" class="button">Buka Aplikasi</a>
-                    </center>
-                    <p>Jika ada pertanyaan, silakan hubungi tim support kami.</p>
+                    <p>Terima kasih telah melakukan pemesanan di <strong>' . htmlspecialchars($appName) . '</strong>. Berikut adalah rincian pesanan Anda:</p>
+                    
+                    <div class="info-box">
+                        <p><strong>Paket:</strong> ' . htmlspecialchars($packageName) . '</p>
+                        <p><strong>Total Tagihan:</strong> ' . htmlspecialchars($order['currency']) . ' ' . $totalAmount . '</p>
+                        <p><strong>ID Transaksi:</strong> ' . htmlspecialchars($order['external_transaction_id']) . '</p>
+                        <p><strong>Status:</strong> <span style="color: #d97706; font-weight: bold;">MENUNGGU PEMBAYARAN</span></p>
+                    </div>
+                    
+                    <p>Silakan lakukan pembayaran sesuai dengan tagihan di atas. Setelah melakukan pembayaran, Anda wajib mengunggah bukti pembayaran melalui dashboard aplikasi agar pesanan Anda dapat segera kami proses.</p>
+                    
+                    <p>Jika Anda memiliki pertanyaan, silakan hubungi tim support kami.</p>
                 ';
-                $welcomeHtml = get_email_template("Welcome to $appName", $welcomeContent, $appName);
-                send_system_email($tenant['email'], "Welcome to $appName", $welcomeHtml);
+                
+                $orderHtml = get_email_template("Informasi Pesanan & Pembayaran - $appName", $orderContent, $appName);
+                send_system_email($user['email'], "Pesanan Subscription #" . $order['external_transaction_id'], $orderHtml);
             }
 
             return $this->jsonResponse->oneResp('Order created', ['order' => $order], 201);
@@ -376,9 +391,15 @@ class SubscriptionControllerV2 extends ResourceController
             $updatedOrder = $this->orderModel->find($id);
 
             // Send Confirmation Email to Tenant
-            $appName = env('APP_NAME', 'Hope Sparepart');
+            $appName = env('APP_NAME', 'UMKM HEBAT');
             $tenant = $this->db->table('tenants')->where('id', $tenantId)->get()->getRowArray();
-            if ($tenant && !empty($tenant['email'])) {
+            $user = $this->db->table('users')
+                ->where('tenant_id', $tenantId)
+                ->orderBy('created_at', 'ASC')
+                ->get()
+                ->getRowArray();
+
+            if ($tenant && $user && !empty($user['email'])) {
                 $confirmContent = '
                     <h2>Pembayaran Diterima</h2>
                     <p>Halo, ' . htmlspecialchars($tenant['name']) . '.</p>
@@ -386,7 +407,7 @@ class SubscriptionControllerV2 extends ResourceController
                     <p>Terima kasih telah berlangganan!</p>
                 ';
                 $confirmHtml = get_email_template('Pembayaran Diterima', $confirmContent, $appName);
-                send_system_email($tenant['email'], 'Informasi Pembayaran Subscription', $confirmHtml);
+                send_system_email($user['email'], 'Informasi Pembayaran Subscription', $confirmHtml);
             }
 
             return $this->jsonResponse->oneResp('Payment success', [
@@ -469,9 +490,15 @@ class SubscriptionControllerV2 extends ResourceController
             $updatedOrder = $this->orderModel->find($id);
 
             // Send Confirmation Email to Tenant (Public Webhook)
-            $appName = env('APP_NAME', 'Hope Sparepart');
+            $appName = env('APP_NAME', 'UMKM HEBAT');
             $tenant = $this->db->table('tenants')->where('id', $tenantId)->get()->getRowArray();
-            if ($tenant && !empty($tenant['email'])) {
+            $user = $this->db->table('users')
+                ->where('tenant_id', $tenantId)
+                ->orderBy('created_at', 'ASC')
+                ->get()
+                ->getRowArray();
+
+            if ($tenant && $user && !empty($user['email'])) {
                 $confirmContent = '
                     <h2>Pembayaran Diterima</h2>
                     <p>Halo, ' . htmlspecialchars($tenant['name']) . '.</p>
@@ -479,7 +506,7 @@ class SubscriptionControllerV2 extends ResourceController
                     <p>Terima kasih telah berlangganan!</p>
                 ';
                 $confirmHtml = get_email_template('Pembayaran Diterima', $confirmContent, $appName);
-                send_system_email($tenant['email'], 'Informasi Pembayaran Subscription', $confirmHtml);
+                send_system_email($user['email'], 'Informasi Pembayaran Subscription', $confirmHtml);
             }
 
             return $this->jsonResponse->oneResp('Payment success', [
