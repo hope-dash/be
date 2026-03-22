@@ -53,7 +53,10 @@ class MigrateDistributeStock extends BaseCommand
             $normalMap[$kode][$tokoId] = ($normalMap[$kode][$tokoId] ?? 0) + (int)$row['pending'];
         }
         foreach ($products as $p) {
-            $productMaster[$p['id_barang']] = ['harga_modal' => (float)$p['harga_modal'], 'harga_jual' => (float)$p['harga_jual']];
+            $productMaster[$p['id_barang']] = [
+                'harga_modal' => round((float)$p['harga_modal']),
+                'harga_jual' => round((float)$p['harga_jual'])
+            ];
         }
 
         // We combine all products from both maps

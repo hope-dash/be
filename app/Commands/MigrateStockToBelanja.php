@@ -70,7 +70,7 @@ class MigrateStockToBelanja extends BaseCommand
                     'kode_barang' => $row['id_barang'],
                     'jumlah' => $totalStock,
                     'harga_satuan' => $hargaModal,
-                    'harga_jual' => (float)$row['harga_jual'],
+                    'harga_jual' => round((float)$row['harga_jual']),
                     'ongkir' => 0,
                     'total_harga' => $totalHarga,
                 ];

@@ -65,10 +65,10 @@ class MigrateTransactions extends BaseCommand
             $newTr = [
                 'tenant_id' => 1,
                 'id_toko' => $row['id_toko'],
-                'amount' => (float)$row['amount'],
-                'actual_total' => (float)$row['actual_total'],
-                'total_payment' => (float)$row['total_payment'],
-                'total_modal' => (float)($row['total_modal'] ?? 0),
+                'amount' => round((float)$row['amount']),
+                'actual_total' => round((float)$row['actual_total']),
+                'total_payment' => round((float)$row['total_payment']),
+                'total_modal' => round((float)($row['total_modal'] ?? 0)),
                 'invoice' => $row['invoice'],
                 'po' => $row['PO'] ?? 0,
                 'status' => 'WAITING_PAYMENT',
@@ -98,7 +98,7 @@ class MigrateTransactions extends BaseCommand
             foreach ($items as $item) {
                 $sku = $item['kode_barang'];
                 $qty = (int)$item['jumlah'];
-                $valTotalModal = (float)$item['total_modal'];
+                $valTotalModal = round((float)$item['total_modal']);
                 $cogsTotal += $valTotalModal;
 
                 $dbNew->table('sales_product')->insert([
@@ -106,13 +106,13 @@ class MigrateTransactions extends BaseCommand
                     'tenant_id' => 1,
                     'kode_barang' => $sku,
                     'jumlah' => $qty,
-                    'harga_system' => (float)$item['harga_system'],
-                    'harga_jual' => (float)$item['harga_jual'],
-                    'total' => (float)$item['total'],
-                    'modal_system' => (float)$item['modal_system'],
+                    'harga_system' => round((float)$item['harga_system']),
+                    'harga_jual' => round((float)$item['harga_jual']),
+                    'total' => round((float)$item['total']),
+                    'modal_system' => round((float)$item['modal_system']),
                     'total_modal' => $valTotalModal,
-                    'actual_per_piece' => (float)$item['actual_per_piece'],
-                    'actual_total' => (float)$item['actual_total'],
+                    'actual_per_piece' => round((float)$item['actual_per_piece']),
+                    'actual_total' => round((float)$item['actual_total']),
                     'discount_type' => 'FIXED',
                     'discount_amount' => 0,
                 ]);
