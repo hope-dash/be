@@ -78,6 +78,18 @@ class ProcessEmailQueueCommand extends BaseCommand
         foreach ($emails as $email) {
             CLI::write("Processing email ID: {$email['id']} to {$email['recipient']}...", 'cyan');
 
+            // Set tenant context for each email (needed by email_helper)
+            if (isset($email['tenant_id'])) {
+                $tenantModel = new \App\Models\TenantModel();
+                $tenant = $tenantModel->find($email['tenant_id']);
+                if ($tenant) {
+                    CLI::write("Setting tenant context to: " . ($tenant['name'] ?? 'N/A') . " (ID: " . $email['tenant_id'] . ")", 'yellow');
+                    \App\Libraries\TenantContext::set($tenant);
+                } else {
+                    CLI::error("Tenant not found for ID: " . $email['tenant_id']);
+                }
+            }
+
             // Mark as processing
             $queueModel->update($email['id'], ['status' => 'PROCESSING']);
 

@@ -54,7 +54,12 @@ class CronController extends Controller
             if (isset($email['tenant_id'])) {
                 $tenantModel = new \App\Models\TenantModel();
                 $tenant = $tenantModel->find($email['tenant_id']);
-                \App\Libraries\TenantContext::set($tenant);
+                if ($tenant) {
+                    log_message('debug', '[Cron] Setting tenant context to: ' . ($tenant['name'] ?? 'N/A') . ' (ID: ' . $email['tenant_id'] . ')');
+                    \App\Libraries\TenantContext::set($tenant);
+                } else {
+                    log_message('error', '[Cron] Tenant not found for ID: ' . $email['tenant_id']);
+                }
             }
 
             $success = send_email($email['recipient'], $email['subject'], $email['message']);

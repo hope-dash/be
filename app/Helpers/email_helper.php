@@ -28,10 +28,16 @@ if (!function_exists('send_email')) {
 
         $email->initialize($config);
 
-        $email->setFrom(env('email.SMTPUser'), \App\Libraries\TenantContext::name());
+        $senderEmail = env('email.SMTPUser');
+        $senderName = \App\Libraries\TenantContext::name();
+
+        $email->setFrom($senderEmail, $senderName);
+        $email->setReplyTo(\App\Libraries\TenantContext::email(), $senderName);
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);
+
+        log_message('debug', '[send_email] From: ' . $senderEmail . ' Name: "' . $senderName . '" To: ' . $to);
 
         if ($email->send()) {
             return true;
@@ -262,6 +268,7 @@ if (!function_exists('get_email_template')) {
         </div>
         <div class="footer">
             <p>&copy; ' . date('Y') . ' ' . $displayTitle . '. All rights reserved.</p>
+            <p style="font-size: 10px; color: #999;">Sent via ' . \App\Libraries\TenantContext::name() . ' (ID: ' . \App\Libraries\TenantContext::id() . ')</p>
         </div>
     </div>
 </body>
@@ -437,14 +444,14 @@ if (!function_exists('send_payment_confirmed_email')) {
 
         $content = '
             <h2>Pembayaran Diterima!</h2>
-            <p>Halo, ' . htmlspecialchars($name) . '. Pembayaran Anda untuk pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah berhasil diverifikasi.</p>
+            <p>Halo, ' . htmlspecialchars($name) . '. Pembayaran Anda untuk pesanan <strong>' . htmlspecialchars($invoice) . '</strong> di <strong>' . \App\Libraries\TenantContext::name() . '</strong> telah berhasil diverifikasi.</p>
             <p>Saat ini tim kami sedang menyiapkan dan mengemas produk pesanan Anda dengan teliti.</p>
             <p>Kami akan memberikan update selanjutnya segera setelah paket siap dikirim atau diambil.</p>
             <p>Terima kasih telah bersabar!</p>
         ';
 
         $html = get_email_template('Pembayaran Terverifikasi - ' . $invoice, $content);
-        return enqueue_email($email, 'Pembayaran Diverifikasi & Pesanan Sedang Disiapkan #' . $invoice, $html);
+        return enqueue_email($email, 'Pembayaran Diverifikasi & Pesanan Sedang Disiapkan #' . $invoice . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
 
@@ -463,7 +470,7 @@ if (!function_exists('send_payment_rejected_email')) {
 
         $content = '
             <h2>Pembayaran Ditolak</h2>
-            <p>Halo, ' . htmlspecialchars($name) . '. Mohon maaf, pembayaran Anda untuk pesanan <strong>' . htmlspecialchars($invoice) . '</strong> belum dapat kami verifikasi.</p>
+            <p>Halo, ' . htmlspecialchars($name) . '. Mohon maaf, pembayaran Anda untuk pesanan <strong>' . htmlspecialchars($invoice) . '</strong> di <strong>' . \App\Libraries\TenantContext::name() . '</strong> belum dapat kami verifikasi.</p>
             
             <div class="info-box">
                 <p><strong>Alasan Penolakan:</strong> ' . htmlspecialchars($reason ?: 'Bukti pembayaran tidak sesuai atau tidak terbaca.') . '</p>
@@ -475,7 +482,7 @@ if (!function_exists('send_payment_rejected_email')) {
         ';
 
         $html = get_email_template('Pembayaran Ditolak - ' . $invoice, $content);
-        return enqueue_email($email, 'Update Status Pembayaran Pesanan #' . $invoice, $html);
+        return enqueue_email($email, 'Update Status Pembayaran Pesanan #' . $invoice . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
 
@@ -494,12 +501,12 @@ if (!function_exists('send_order_ready_email')) {
 
         $content = '
             <h2>Pesanan Anda Sudah Siap!</h2>
-            <p>Halo, ' . htmlspecialchars($name) . '. Kabar baik! Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah selesai kami kemas dan siap untuk tahap selanjutnya.</p>
+            <p>Halo, ' . htmlspecialchars($name) . '. Kabar baik! Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> di <strong>' . \App\Libraries\TenantContext::name() . '</strong> telah selesai kami kemas dan siap untuk tahap selanjutnya.</p>
             <p>Jika Anda memilih pengiriman via kurir, paket akan segera diserahkan ke pihak ekspedisi. Jika Anda memilih ambil di tempat, Anda sudah bisa datang ke toko kami sesuai jam operasional.</p>
         ';
 
         $html = get_email_template('Pesanan Siap - ' . $invoice, $content);
-        return enqueue_email($email, 'Pesanan Anda Siap Dikirim/Diambil #' . $invoice, $html);
+        return enqueue_email($email, 'Pesanan Anda Siap Dikirim/Diambil #' . $invoice . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
 
@@ -518,7 +525,7 @@ if (!function_exists('send_order_shipped_email')) {
 
         $content = '
             <h2>Pesanan Dalam Perjalanan!</h2>
-            <p>Halo, ' . htmlspecialchars($name) . '. Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah kami serahkan ke kurir.</p>
+            <p>Halo, ' . htmlspecialchars($name) . '. Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> di <strong>' . \App\Libraries\TenantContext::name() . '</strong> telah kami serahkan ke kurir.</p>
             <div class="info-box">
                 <p><strong>Kurir:</strong> ' . htmlspecialchars($courierName ?: '-') . '</p>
                 <p><strong>Nomor Resi:</strong> ' . htmlspecialchars($receiptNumber ?: '-') . '</p>
@@ -528,7 +535,7 @@ if (!function_exists('send_order_shipped_email')) {
         ';
 
         $html = get_email_template('Pesanan Dikirim - ' . $invoice, $content);
-        return enqueue_email($email, 'Pesanan Anda Sudah Dikirim #' . $invoice, $html);
+        return enqueue_email($email, 'Pesanan Anda Sudah Dikirim #' . $invoice . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
 
@@ -547,13 +554,13 @@ if (!function_exists('send_order_delivered_email')) {
 
         $content = '
             <h2>Pesanan Telah Diterima!</h2>
-            <p>Halo, ' . htmlspecialchars($name) . '. Kabar baik! Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> telah berhasil diterima atau diambil.</p>
+            <p>Halo, ' . htmlspecialchars($name) . '. Kabar baik! Pesanan <strong>' . htmlspecialchars($invoice) . '</strong> di <strong>' . \App\Libraries\TenantContext::name() . '</strong> telah berhasil diterima atau diambil.</p>
             <p>Terima kasih telah berbelanja di ' . \App\Libraries\TenantContext::name() . '. Kami berharap produk yang Anda terima sesuai dengan keinginan Anda.</p>
             <p>Jika Anda puas dengan pelayanan kami, mohon berikan ulasan positif Anda. Sampai jumpa di pesanan berikutnya!</p>
         ';
 
         $html = get_email_template('Pesanan Diterima - ' . $invoice, $content);
-        return enqueue_email($email, 'Pesanan Anda Telah Diterima #' . $invoice, $html);
+        return enqueue_email($email, 'Pesanan Anda Telah Diterima #' . $invoice . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
 
@@ -584,7 +591,7 @@ if (!function_exists('send_invoice_adjusted_email')) {
 
         $content = '
             <h2>Pembaruan Invoice</h2>
-            <p>Halo, ' . htmlspecialchars($name) . '. Terdapat penyesuaian biaya pada pesanan Anda dengan nomor invoice <strong>' . htmlspecialchars($invoice) . '</strong>.</p>
+            <p>Halo, ' . htmlspecialchars($name) . '. Terdapat penyesuaian biaya pada pesanan Anda di <strong>' . \App\Libraries\TenantContext::name() . '</strong> dengan nomor invoice <strong>' . htmlspecialchars($invoice) . '</strong>.</p>
             
             <div class="info-box">
                 <p><strong>Komponen:</strong> ' . htmlspecialchars($componentName) . '</p>
@@ -604,6 +611,6 @@ if (!function_exists('send_invoice_adjusted_email')) {
         ';
 
         $html = get_email_template('Pembaruan Invoice - ' . $invoice, $content);
-        return enqueue_email($email, 'Pembaruan Tagihan Pesanan #' . $invoice, $html);
+        return enqueue_email($email, 'Pembaruan Tagihan Pesanan #' . $invoice . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }

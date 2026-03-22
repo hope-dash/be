@@ -37,7 +37,7 @@ final class TenantContext
 
     public static function name(): string
     {
-        return self::$tenant['name'] ?? env('email.fromName', 'Hope Sparepart');
+        return self::$tenant['name'] ?? env('email.fromName', 'System Administrator');
     }
 
     public static function email(): string
