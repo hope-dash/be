@@ -18,7 +18,7 @@ $routes->post('api/login', 'UserController::login');
 $routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
 $routes->post('api/v2/tenant', 'TenantControllerV2::create');
 $routes->get('api/v2/subscription/packages', 'SubscriptionControllerV2::packages');
-$routes->post('api/v2/subscription/orders/(:num)/pay', 'SubscriptionControllerV2::publicPayOrder/$1');
+$routes->match(['GET', 'POST'], 'api/v2/subscription/orders/(:num)/pay', 'SubscriptionControllerV2::publicPayOrder/$1');
 
 // TikTok Shop Callback
 $routes->get('tiktok_verif/(:num)', 'TiktokController::callback/$1');

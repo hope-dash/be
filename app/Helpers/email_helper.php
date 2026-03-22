@@ -42,6 +42,46 @@ if (!function_exists('send_email')) {
     }
 }
 
+if (!function_exists('send_system_email')) {
+    /**
+     * Send email using Super Admin sender (from ENV)
+     */
+    function send_system_email($to, $subject, $message)
+    {
+        $email = \Config\Services::email();
+
+        $config = [
+            'protocol' => 'smtp',
+            'SMTPHost' => env('email.SMTPHost'),
+            'SMTPUser' => env('email.SMTPUser'),
+            'SMTPPass' => env('email.SMTPPass'),
+            'SMTPPort' => (int) env('email.SMTPPort'),
+            'SMTPCrypto' => env('email.SMTPCrypto'),
+            'mailType' => 'html',
+            'charset' => 'utf-8',
+            'newline' => "\r\n",
+            'wordWrap' => true,
+        ];
+
+        $email->initialize($config);
+
+        $fromEmail = env('APP_EMAIL', 'admin@hopesparepart.com');
+        $fromName = env('APP_NAME', 'Hope Sparepart');
+
+        $email->setFrom($fromEmail, $fromName);
+        $email->setTo($to);
+        $email->setSubject($subject);
+        $email->setMessage($message);
+
+        if ($email->send()) {
+            return true;
+        } else {
+            log_message('error', 'System Email sending failed: ' . $email->printDebugger(['headers']));
+            return false;
+        }
+    }
+}
+
 if (!function_exists('send_email_with_attachments')) {
     /**
      * Send email with file attachments (local filesystem paths).
@@ -91,6 +131,52 @@ if (!function_exists('send_email_with_attachments')) {
     }
 }
 
+if (!function_exists('send_system_email_with_attachments')) {
+    /**
+     * Send email with attachments using Super Admin sender (from ENV)
+     */
+    function send_system_email_with_attachments($to, $subject, $message, array $attachments = [])
+    {
+        $email = \Config\Services::email();
+
+        $config = [
+            'protocol' => 'smtp',
+            'SMTPHost' => env('email.SMTPHost'),
+            'SMTPUser' => env('email.SMTPUser'),
+            'SMTPPass' => env('email.SMTPPass'),
+            'SMTPPort' => (int) env('email.SMTPPort'),
+            'SMTPCrypto' => env('email.SMTPCrypto'),
+            'mailType' => 'html',
+            'charset' => 'utf-8',
+            'newline' => "\r\n",
+            'wordWrap' => true,
+        ];
+
+        $email->initialize($config);
+
+        $fromEmail = env('APP_EMAIL', 'admin@hopesparepart.com');
+        $fromName = env('APP_NAME', 'Hope Sparepart');
+
+        $email->setFrom($fromEmail, $fromName);
+        $email->setTo($to);
+        $email->setSubject($subject);
+        $email->setMessage($message);
+
+        foreach ($attachments as $path) {
+            if (is_string($path) && $path !== '' && file_exists($path)) {
+                $email->attach($path);
+            }
+        }
+
+        if ($email->send()) {
+            return true;
+        }
+
+        log_message('error', 'System Email sending failed: ' . $email->printDebugger(['headers']));
+        return false;
+    }
+}
+
 if (!function_exists('get_email_template')) {
     /**
      * Get email template HTML
@@ -99,8 +185,9 @@ if (!function_exists('get_email_template')) {
      * @param string $content Email content
      * @return string HTML template
      */
-    function get_email_template($title, $content)
+    function get_email_template($title, $content, $customTitle = null)
     {
+        $displayTitle = $customTitle ?? \App\Libraries\TenantContext::name();
         return '
 <!DOCTYPE html>
 <html lang="id">
@@ -142,7 +229,7 @@ if (!function_exists('get_email_template')) {
             display: inline-block;
             padding: 12px 30px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #ffffff;
+            color: #ffffff !important;
             text-decoration: none;
             border-radius: 5px;
             margin: 20px 0;
@@ -166,14 +253,13 @@ if (!function_exists('get_email_template')) {
 <body>
     <div class="container">
         <div class="header">
-            <h1>' . \App\Libraries\TenantContext::name() . '</h1>
+            <h1>' . $displayTitle . '</h1>
         </div>
         <div class="content">
             ' . $content . '
         </div>
         <div class="footer">
-            <p>&copy; ' . date('Y') . ' ' . \App\Libraries\TenantContext::name() . '. All rights reserved.</p>
-            <p>Jika Anda memiliki pertanyaan, silakan hubungi kami di ' . \App\Libraries\TenantContext::email() . '</p>
+            <p>&copy; ' . date('Y') . ' ' . $displayTitle . '. All rights reserved.</p>
         </div>
     </div>
 </body>
