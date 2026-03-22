@@ -19,33 +19,33 @@ class MigrateTransactions extends BaseCommand
 
         CLI::write("Stage 1: Cleanup Existing Tenant 1 Transactions...", 'yellow');
         $dbNew->query('SET FOREIGN_KEY_CHECKS=0');
-        
+
         $tid = 1;
         // Targeted wipe of transaction related tables for current tenant
         $dbNew->table('transaction')->where('tenant_id', $tid)->delete();
-        $dbNew->table('transaction_meta')->whereIn('transaction_id', function($q) use ($tid) {
+        $dbNew->table('transaction_meta')->whereIn('transaction_id', function ($q) use ($tid) {
             return $q->select('id')->from('transaction')->where('tenant_id', $tid);
         })->delete();
-        $dbNew->table('sales_product')->whereIn('id_transaction', function($q) use ($tid) {
+        $dbNew->table('sales_product')->whereIn('id_transaction', function ($q) use ($tid) {
             return $q->select('id')->from('transaction')->where('tenant_id', $tid);
         })->delete();
-        
+
         // Wipe migration-specific journals for this tenant
         $dbNew->table('journals')->where('tenant_id', $tid)->whereIn('reference_type', ['SALES', 'COGS'])->delete();
         // Missing journal items will likely be cleaned by cascade or we cleanup journal_items not linked to a journal later?
         // Actually CI4 query builder delete doesn't always cascade if using simple table calls.
         // We'll just be thorough.
-        
+
         $dbNew->query('SET FOREIGN_KEY_CHECKS=1');
 
         CLI::write("Stage 2: Fetching Old WAITING_PAYMENT Transactions...", 'yellow');
-        
+
         $sqlTr = "SELECT * FROM `transaction` WHERE status = 'WAITING_PAYMENT' ORDER BY id ASC";
         $oldTransactions = $dbOld->query($sqlTr)->getResultArray();
-        
+
         CLI::write("Stage 3: Processing...", 'yellow');
         $now = date('Y-m-d H:i:s');
-        
+
         foreach ($oldTransactions as $row) {
             $oldId = $row['id'];
             CLI::write("Processing Trx ID: {$oldId} | {$row['invoice']}", 'cyan');
@@ -58,7 +58,8 @@ class MigrateTransactions extends BaseCommand
             $sqlMeta = "SELECT * FROM transaction_meta WHERE transaction_id = ?";
             $metaRows = $dbOld->query($sqlMeta, [$oldId])->getResultArray();
             $metaData = [];
-            foreach ($metaRows as $m) $metaData[$m['key']] = $m['value'];
+            foreach ($metaRows as $m)
+                $metaData[$m['key']] = $m['value'];
 
             // 3. Insert Transaction
             $newTr = [
@@ -102,6 +103,7 @@ class MigrateTransactions extends BaseCommand
 
                 $dbNew->table('sales_product')->insert([
                     'id_transaction' => $newId,
+                    'tenant_id' => 1,
                     'kode_barang' => $sku,
                     'jumlah' => $qty,
                     'harga_system' => (float)$item['harga_system'],
@@ -116,15 +118,15 @@ class MigrateTransactions extends BaseCommand
                 ]);
 
                 // Deduction logic: We MUST deduct stock because distribute-stock included these in the 'stock' column.
-                $dbNew->query("UPDATE stock SET stock = stock - ? WHERE id_barang = ? AND id_toko = ? AND tenant_id = 1", 
-                              [$qty, $sku, $row['id_toko']]);
+                $dbNew->query("UPDATE stock SET stock = stock - ? WHERE id_barang = ? AND id_toko = ? AND tenant_id = 1",
+                [$qty, $sku, $row['id_toko']]);
 
                 // Stock Ledger for audit
                 $dbNew->table('stock_ledgers')->insert([
                     'tenant_id' => 1, 'id_barang' => $sku, 'id_toko' => $row['id_toko'],
-                    'qty' => -$qty, 'balance' => 0, 
+                    'qty' => -$qty, 'balance' => 0,
                     'reference_type' => 'TRANSACTION', 'reference_id' => $newId,
-                    'description' => "Migrasi: Penjualan WP - {$newTr['invoice']}", 
+                    'description' => "Migrasi: Penjualan WP - {$newTr['invoice']}",
                     'created_at' => $row['date_time']
                 ]);
             }
@@ -150,16 +152,19 @@ class MigrateTransactions extends BaseCommand
         // Sales Journal
         $jid = $this->insertJ($db, 'SALES', $trxId, $invoice, $date, "Invoice #$invoice", $storeId);
         $this->insertJI($db, $jid, '10' . $storeId . '3', $grandTotal, 0); // AR
-        if ($totalDiscount > 0) $this->insertJI($db, $jid, '40' . $storeId . '2', $totalDiscount, 0); // Discount
+        if ($totalDiscount > 0)
+            $this->insertJI($db, $jid, '40' . $storeId . '2', $totalDiscount, 0); // Discount
         $this->insertJI($db, $jid, '40' . $storeId . '1', 0, $grossAmount); // Sales
-        if ($ppnValue > 0) $this->insertJI($db, $jid, '20' . $storeId . '5', 0, $ppnValue); // Tax
-        
+        if ($ppnValue > 0)
+            $this->insertJI($db, $jid, '20' . $storeId . '5', 0, $ppnValue); // Tax
+
         $shipping = (float)($meta['biaya_pengiriman'] ?? 0);
         if ($shipping > 0) {
             if (($meta['free_ongkir'] ?? '0') === '1') {
                 $this->insertJI($db, $jid, '50' . $storeId . '6', $shipping, 0);
                 $this->insertJI($db, $jid, '20' . $storeId . '1', 0, $shipping);
-            } else {
+            }
+            else {
                 $this->insertJI($db, $jid, '40' . $storeId . '1', 0, $shipping);
             }
         }
@@ -172,7 +177,8 @@ class MigrateTransactions extends BaseCommand
         }
     }
 
-    private function insertJ($db, $type, $refId, $refNo, $date, $desc, $sid) {
+    private function insertJ($db, $type, $refId, $refNo, $date, $desc, $sid)
+    {
         $db->table('journals')->insert([
             'tenant_id' => 1, 'id_toko' => $sid, 'reference_type' => $type,
             'reference_id' => $refId, 'reference_no' => $refNo, 'date' => $date,
@@ -181,7 +187,8 @@ class MigrateTransactions extends BaseCommand
         return $db->insertID();
     }
 
-    private function insertJI($db, $jid, $accCode, $dbVal, $crVal) {
+    private function insertJI($db, $jid, $accCode, $dbVal, $crVal)
+    {
         $acc = $db->table('accounts')->where('tenant_id', 1)->where('code', $accCode)->get()->getRowArray();
         if ($acc) {
             $db->table('journal_items')->insert([

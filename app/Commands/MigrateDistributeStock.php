@@ -18,7 +18,7 @@ class MigrateDistributeStock extends BaseCommand
         $dbNew = Database::connect('default');
 
         CLI::write("Stage 1: Calculation...", 'yellow');
-        
+
         // Fetch distribution from OLD DB
         $sqlStock = "SELECT s.id_barang, s.id_toko, s.stock as normal, s.barang_cacat as cacat 
                      FROM stock s 
@@ -28,7 +28,7 @@ class MigrateDistributeStock extends BaseCommand
                        FROM sales_product sp 
                        JOIN transaction t ON t.id = sp.id_transaction 
                        JOIN product p ON p.id_barang = sp.kode_barang
-                       WHERE t.status = 'WAITING_PAYMENT' 
+                       WHERE t.status IN ('WAITING_PAYMENT', 'REFUNDED') 
                        AND p.deleted_at IS NULL
                        GROUP BY sp.kode_barang, t.id_toko";
         $sqlProducts = "SELECT id_barang, harga_modal, harga_jual FROM product WHERE deleted_at IS NULL";
@@ -38,16 +38,18 @@ class MigrateDistributeStock extends BaseCommand
         $products = $dbOld->query($sqlProducts)->getResultArray();
 
         $normalMap = []; // [kode][tokoId] = normal + pending
-        $cacatMap = [];  // [kode][tokoId] = cacat
+        $cacatMap = []; // [kode][tokoId] = cacat
         $productMaster = [];
 
         foreach ($oldStockDist as $row) {
-            $kode = $row['id_barang']; $tokoId = $row['id_toko'];
+            $kode = $row['id_barang'];
+            $tokoId = $row['id_toko'];
             $normalMap[$kode][$tokoId] = ($normalMap[$kode][$tokoId] ?? 0) + (int)$row['normal'];
             $cacatMap[$kode][$tokoId] = ($cacatMap[$kode][$tokoId] ?? 0) + (int)$row['cacat'];
         }
         foreach ($oldPendingDist as $row) {
-            $kode = $row['id_barang']; $tokoId = $row['id_toko'];
+            $kode = $row['id_barang'];
+            $tokoId = $row['id_toko'];
             $normalMap[$kode][$tokoId] = ($normalMap[$kode][$tokoId] ?? 0) + (int)$row['pending'];
         }
         foreach ($products as $p) {
@@ -69,7 +71,7 @@ class MigrateDistributeStock extends BaseCommand
         $idTokoMaster = 3;
         $now = date('Y-m-d H:i:s');
         $date = date('Y-m-d');
-        
+
         $stocksFinal = []; // [kode][tokoId] = ['stock' => X, 'cacat' => Y]
         $ledgers = [];
         $journals = [];
@@ -78,7 +80,7 @@ class MigrateDistributeStock extends BaseCommand
         // 1. Fetch the latest Purchase record
         $pembelian = $dbNew->table('pembelian')->where('id_toko', $idTokoMaster)->orderBy('id', 'DESC')->get()->getRowArray();
         $pembelianId = $pembelian ? $pembelian['id'] : 0;
-        
+
         if ($pembelianId) {
             $dbNew->table('pembelian')->where('id', $pembelianId)->update(['status' => 'SUCCESS']);
         }
@@ -107,13 +109,15 @@ class MigrateDistributeStock extends BaseCommand
             // Distribution
             $runningBalanceMaster = $totalQtyProd;
             foreach ($allStoreIds as $tokoId) {
-                if ($tokoId == $idTokoMaster) continue;
+                if ($tokoId == $idTokoMaster)
+                    continue;
 
                 $qNormal = $storesNormal[$tokoId] ?? 0;
                 $qCacat = $storesCacat[$tokoId] ?? 0;
                 $qTotal = $qNormal + $qCacat;
 
-                if ($qTotal == 0) continue;
+                if ($qTotal == 0)
+                    continue;
 
                 $refId = "TRF-MIG-" . date('ymd') . "-" . substr(md5($kode . $tokoId), 0, 8);
                 $itemValue = $itemModal * $qTotal;
@@ -160,9 +164,11 @@ class MigrateDistributeStock extends BaseCommand
             // Update Master Final Balance
             $stocksFinal[$kode][$idTokoMaster]['stock'] -= ($totalNormalAllStores - ($stocksFinal[$kode][$idTokoMaster]['stock'] ?? 0)); // Actually easier to just re-calculate
             // Wait, logic for Master Final:
-            $usedNormalX = 0; $usedCacatX = 0;
+            $usedNormalX = 0;
+            $usedCacatX = 0;
             foreach ($allStoreIds as $tid) {
-                if ($tid == $idTokoMaster) continue;
+                if ($tid == $idTokoMaster)
+                    continue;
                 $usedNormalX += ($storesNormal[$tid] ?? 0);
                 $usedCacatX += ($storesCacat[$tid] ?? 0);
             }
@@ -184,7 +190,7 @@ class MigrateDistributeStock extends BaseCommand
         foreach ($stocksFinal as $kode => $stores) {
             foreach ($stores as $tid => $q) {
                 $stockInserts[] = [
-                    'tenant_id' => 1, 'id_barang' => $kode, 'id_toko' => $tid, 
+                    'tenant_id' => 1, 'id_barang' => $kode, 'id_toko' => $tid,
                     'stock' => $q['stock'], 'barang_cacat' => $q['cacat']
                 ];
             }
@@ -193,7 +199,9 @@ class MigrateDistributeStock extends BaseCommand
         $this->batchInsert($dbNew, 'stock_ledgers', $ledgers, 300);
 
         $accRows = $dbNew->table('accounts')->get()->getResultArray();
-        $accMap = []; foreach ($accRows as $r) $accMap[$r['code']] = $r['id'];
+        $accMap = [];
+        foreach ($accRows as $r)
+            $accMap[$r['code']] = $r['id'];
 
         foreach ($journals as $j) {
             $_items = $j['_items'];
@@ -215,8 +223,10 @@ class MigrateDistributeStock extends BaseCommand
         CLI::write("Distribution Complete!", 'green');
     }
 
-    private function batchInsert($db, $table, $data, $size = 200) {
-        if (empty($data)) return;
+    private function batchInsert($db, $table, $data, $size = 200)
+    {
+        if (empty($data))
+            return;
         $chunks = array_chunk($data, $size);
         foreach ($chunks as $chunk) {
             $db->table($table)->ignore(true)->insertBatch($chunk);
