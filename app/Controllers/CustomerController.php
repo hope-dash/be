@@ -64,11 +64,13 @@ class CustomerController extends BaseController
             if ($query) {
                 $insertid = $this->customer->insertId();
                 return $this->jsonResponse->oneResp('Customer Added', ['customer_id' => $insertid]);
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("Add Customer Failed");
 
             }
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage());
         }
     }
@@ -118,11 +120,13 @@ class CustomerController extends BaseController
 
             if ($query) {
                 return $this->jsonResponse->oneResp('Customer Updated', ['customer_id' => $id]);
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("Update Customer Failed");
 
             }
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage());
         }
     }
@@ -136,11 +140,13 @@ class CustomerController extends BaseController
             if ($query) {
                 $this->customer->delete($id);
                 return $this->jsonResponse->oneResp("Data Deleted", "", 200);
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("Customer Not Found", 401);
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage());
         }
     }
@@ -160,11 +166,13 @@ class CustomerController extends BaseController
 
             if ($query) {
                 return $this->jsonResponse->oneResp("", $query, 200);
-            } else {
+            }
+            else {
                 return $this->jsonResponse->error("User Not Found", 404);
             }
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -174,9 +182,9 @@ class CustomerController extends BaseController
         try {
             $sortBy = $this->request->getGet('sortBy') ?? 'id';
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
-            $namaUser = $this->request->getGet('nama_customer') ?? '';
-            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
-            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+            $namaUser = $this->request->getGet('nama_customer') ?? $this->request->getGet('search') ?? '';
+            $limit = max((int)($this->request->getGet('limit') ?: 10), 1);
+            $page = max((int)($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
             $allowedSortBy = ['id', 'nama_customer'];
@@ -211,7 +219,8 @@ class CustomerController extends BaseController
 
             return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -253,7 +262,8 @@ class CustomerController extends BaseController
 
             return $this->jsonResponse->oneResp("Customer found", $customer);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }

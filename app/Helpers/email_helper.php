@@ -424,7 +424,7 @@ if (!function_exists('send_invoice_email')) {
             <p>Anda dapat melihat detail pesanan Anda melalui link di bawah ini:</p>
             
             <center>
-                <a href="' . env('app.baseURL', 'http://localhost:3000') . '/api/invoice/download/' . $transaction['id'] . '" class="button" style="color: #ffffff;">Lihat Invoice</a>
+                <a href="' . env('app.baseURL', 'http://localhost:3000') . '/api/invoice/download/' . $transaction['id'] . '?tenant=' . \App\Libraries\TenantContext::code() . '" class="button" style="color: #ffffff;">Lihat Invoice</a>
             </center>
             
             <p>Terima kasih atas kepercayaan Anda.</p>
@@ -611,7 +611,7 @@ if (!function_exists('send_invoice_adjusted_email')) {
             <p>Anda dapat melihat detail pesanan Anda melalui link di bawah ini:</p>
             
             <center>
-                <a href="' . env('app.baseURL', 'http://localhost:3000') . '/api/invoice/download/' . $transaction['id'] . '" class="button" style="color: #ffffff;">Lihat Invoice Terbaru</a>
+                <a href="' . env('app.baseURL', 'http://localhost:3000') . '/api/invoice/download/' . $transaction['id'] . '?tenant=' . \App\Libraries\TenantContext::code() . '" class="button" style="color: #ffffff;">Lihat Invoice Terbaru</a>
             </center>
             
             <p>Terima kasih atas pengertian dan kepercayaan Anda.</p>
