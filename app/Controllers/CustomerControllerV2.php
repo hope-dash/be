@@ -53,14 +53,20 @@ class CustomerControllerV2 extends ResourceController
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
             }
 
-            // Check if customer already exists by email
-            $existingByEmail = $this->customerModel->where('email', $data->email)->first();
+            // Check if customer already exists by email (Scoped by tenant_id)
+            $existingByEmail = $this->customerModel
+                ->where('email', $data->email)
+                ->where('tenant_id', TenantContext::id())
+                ->first();
             if ($existingByEmail && !empty($existingByEmail['password'])) {
                 return $this->jsonResponse->error("Email sudah terdaftar", 400);
             }
 
-            // Check if customer already exists by phone number
-            $existingByPhone = $this->customerModel->where('no_hp_customer', $data->no_hp_customer)->first();
+            // Check if customer already exists by phone number (Scoped by tenant_id)
+            $existingByPhone = $this->customerModel
+                ->where('no_hp_customer', $data->no_hp_customer)
+                ->where('tenant_id', TenantContext::id())
+                ->first();
             if ($existingByPhone && !empty($existingByPhone['password'])) {
                 return $this->jsonResponse->error("Nomor HP sudah terdaftar", 400);
             }
@@ -213,7 +219,10 @@ class CustomerControllerV2 extends ResourceController
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
             }
 
-            $customer = $this->customerModel->where('email', $data->email)->first();
+            $customer = $this->customerModel
+                ->where('email', $data->email)
+                ->where('tenant_id', TenantContext::id())
+                ->first();
 
             if (!$customer) {
                 return $this->jsonResponse->error("Invalid credentials", 401);
@@ -708,6 +717,7 @@ class CustomerControllerV2 extends ResourceController
                 // Check if email is already used
                 $existingCustomer = $this->customerModel
                     ->where('email', $data->email)
+                    ->where('tenant_id', TenantContext::id())
                     ->where('id !=', $customer['id'])
                     ->first();
 

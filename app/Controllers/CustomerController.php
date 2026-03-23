@@ -26,8 +26,8 @@ class CustomerController extends BaseController
             $validation->setRules([
                 'nama_customer' => 'required',
                 'alamat' => 'required',
-                'no_hp_customer' => 'required|min_length[10]|max_length[15]|is_unique[customer.no_hp_customer]',
-                'email' => 'permit_empty|valid_email|is_unique[customer.email]',
+                'no_hp_customer' => 'required|min_length[10]|max_length[15]',
+                'email' => 'permit_empty|valid_email',
                 'provinsi' => 'permit_empty',
                 'kota_kabupaten' => 'permit_empty',
                 'kecamatan' => 'permit_empty',
@@ -40,6 +40,26 @@ class CustomerController extends BaseController
 
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+            }
+
+            // Manual unique check (Tenant Scoped)
+            $existingPhone = $this->customer
+                ->where('no_hp_customer', $data->no_hp_customer)
+                ->where('tenant_id', \App\Libraries\TenantContext::id())
+                ->first();
+            if ($existingPhone) {
+                return $this->jsonResponse->error("Nomor HP sudah terdaftar", 400);
+            }
+
+            // Manual unique check for email (Tenant Scoped)
+            if (!empty($data->email)) {
+                $existingEmail = $this->customer
+                    ->where('email', $data->email)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
+                    ->first();
+                if ($existingEmail) {
+                    return $this->jsonResponse->error("Email sudah terdaftar", 400);
+                }
             }
 
             $customerData = [
@@ -84,8 +104,8 @@ class CustomerController extends BaseController
             $validation->setRules([
                 'nama_customer' => 'required',
                 'alamat' => 'required',
-                'no_hp_customer' => "required|min_length[10]|max_length[15]|is_unique[customer.no_hp_customer,id,{$id}]",
-                'email' => "permit_empty|valid_email|is_unique[customer.email,id,{$id}]",
+                'no_hp_customer' => "required|min_length[10]|max_length[15]",
+                'email' => "permit_empty|valid_email",
                 'provinsi' => 'permit_empty',
                 'kota_kabupaten' => 'permit_empty',
                 'kecamatan' => 'permit_empty',
@@ -98,6 +118,28 @@ class CustomerController extends BaseController
 
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+            }
+
+            // Manual unique check (Tenant Scoped)
+            $existingPhone = $this->customer
+                ->where('no_hp_customer', $data->no_hp_customer)
+                ->where('tenant_id', \App\Libraries\TenantContext::id())
+                ->where('id !=', $id)
+                ->first();
+            if ($existingPhone) {
+                return $this->jsonResponse->error("Nomor HP sudah terdaftar", 400);
+            }
+
+            // Manual unique check for email (Tenant Scoped)
+            if (!empty($data->email)) {
+                $existingEmail = $this->customer
+                    ->where('email', $data->email)
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
+                    ->where('id !=', $id)
+                    ->first();
+                if ($existingEmail) {
+                    return $this->jsonResponse->error("Email sudah terdaftar", 400);
+                }
             }
 
             $customerData = [
