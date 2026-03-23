@@ -195,6 +195,19 @@ class TenantControllerV2 extends ResourceController
 
             $db->transCommit();
 
+            // 5. Send welcome email to tenant
+            try {
+                send_tenant_welcome_email(
+                    $input['email'] ?? '',
+                    $input['pic_name'] ?? 'Owner',
+                    $input['name'] ?? 'Toko Baru',
+                    $input['password'] ?? '',
+                    $code
+                );
+            } catch (\Exception $e) {
+                log_message('error', 'Failed to send tenant welcome email: ' . $e->getMessage());
+            }
+
             return $this->jsonResponse->oneResp('Tenant berhasil dibuat', [
                 'tenant_id' => $tenantId,
                 'code' => $code,

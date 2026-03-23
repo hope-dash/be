@@ -621,3 +621,42 @@ if (!function_exists('send_invoice_adjusted_email')) {
         return enqueue_email($email, 'Pembaruan Tagihan Pesanan #' . $invoice . ' - ' . \App\Libraries\TenantContext::name(), $html);
     }
 }
+
+if (!function_exists('send_tenant_welcome_email')) {
+    /**
+     * Send welcome email to new Tenant with login credentials
+     */
+    function send_tenant_welcome_email($to, $picName, $tenantName, $password, $tenantCode)
+    {
+        $loginUrl = env('app.frontendURL', 'https://hope.umkmhebat.com') . '/login';
+        
+        $content = '
+            <h2>Selamat Datang, ' . htmlspecialchars($picName) . '!</h2>
+            <p>Terima kasih telah bergabung dengan platform kami. Akun tenant <strong>' . htmlspecialchars($tenantName) . '</strong> Anda telah berhasil dibuat.</p>
+            
+            <div class="info-box">
+                <h3>Informasi Login Admin Anda:</h3>
+                <p><strong>Tenant ID:</strong> ' . htmlspecialchars($tenantCode) . '</p>
+                <p><strong>Email:</strong> ' . htmlspecialchars($to) . '</p>
+                <p><strong>Password:</strong> ' . htmlspecialchars($password) . '</p>
+            </div>
+            
+            <p>Anda dapat mengakses dashboard admin Anda melalui tautan di bawah ini:</p>
+            
+            <center>
+                <a href="' . $loginUrl . '" class="button" style="color: #ffffff;">Login ke Dashboard</a>
+            </center>
+            
+            <p><strong>Tips Aman:</strong> Silakan login menggunakan kredensial di atas dan segera ubah password Anda di menu Profil untuk keamanan tambahan.</p>
+            
+            <p>Jika Anda memiliki pertanyaan atau memerlukan bantuan, jangan ragu untuk menghubungi tim support kami.</p>
+        ';
+
+        // For system emails like this, we use the fallback system context or env
+        $html = get_email_template('Selamat Datang di Platform Kami', $content, 'System Administrator');
+
+        // We use send_system_email to ensure it goes out via the admin SMTP directly or queue it?
+        // Let's use send_system_email for now as it's an administrative task.
+        return send_system_email($to, 'Selamat Datang! Akun Tenant ' . $tenantName . ' Berhasil Dibuat', $html);
+    }
+}
