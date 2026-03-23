@@ -947,7 +947,7 @@ class ProductController extends ResourceController
             if (!empty($namaProduct)) {
                 $db = \Config\Database::connect();
                 $escapedVal = $db->escapeLikeString($namaProduct);
-                
+
                 $builder->groupStart()
                     ->where("CONCAT(COALESCE(product.nama_barang, ''), ' ', COALESCE(model_barang.nama_model, ''), ' ', COALESCE(seri.seri, '')) LIKE '%{$escapedVal}%'")
                     ->orLike("product.id_barang", $namaProduct)

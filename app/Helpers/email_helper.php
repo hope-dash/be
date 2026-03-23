@@ -76,6 +76,7 @@ if (!function_exists('send_system_email')) {
         $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
 
         $email->setFrom($fromEmail, $fromName);
+        $email->setReplyTo(env('email.replyTo', $fromEmail), $fromName);
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);
@@ -118,7 +119,9 @@ if (!function_exists('send_email_with_attachments')) {
 
         $email->initialize($config);
 
-        $email->setFrom(env('email.SMTPUser'), \App\Libraries\TenantContext::name());
+        $senderName = \App\Libraries\TenantContext::name();
+        $email->setFrom(env('email.SMTPUser'), $senderName);
+        $email->setReplyTo(\App\Libraries\TenantContext::email(), $senderName);
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);
@@ -166,6 +169,7 @@ if (!function_exists('send_system_email_with_attachments')) {
         $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
 
         $email->setFrom($fromEmail, $fromName);
+        $email->setReplyTo(env('email.replyTo', $fromEmail), $fromName);
         $email->setTo($to);
         $email->setSubject($subject);
         $email->setMessage($message);

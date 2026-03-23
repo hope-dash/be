@@ -82,7 +82,8 @@ class TransactionControllerV2 extends ResourceController
                 $existingCust = $this->customerModel->where('no_hp_customer', $data->customer_phone)->first();
                 if ($existingCust) {
                     $customerId = $existingCust['id'];
-                } else {
+                }
+                else {
                     // Create new customer
                     $custData = [
                         'nama_customer' => $data->customer_name ?? 'Guest',
@@ -130,7 +131,8 @@ class TransactionControllerV2 extends ResourceController
                 if (strtoupper($itemDiscountType) === 'PERCENTAGE' || strtoupper($itemDiscountType) === 'PERCENT') {
                     $itemDiscountType = 'PERCENTAGE';
                     $itemDiscountValue = ($itemTotal * $itemDiscountAmount) / 100;
-                } else {
+                }
+                else {
                     $itemDiscountType = 'FIXED';
                     $itemDiscountValue = $itemDiscountAmount;
                 }
@@ -168,7 +170,8 @@ class TransactionControllerV2 extends ResourceController
             if (strtoupper($txDiscountType) === 'PERCENTAGE' || strtoupper($txDiscountType) === 'PERCENT') {
                 $txDiscountType = 'PERCENTAGE';
                 $txDiscountValue = ($itemActualSubtotal * $txDiscountAmount) / 100;
-            } else {
+            }
+            else {
                 $txDiscountType = 'FIXED';
                 $txDiscountValue = $txDiscountAmount;
             }
@@ -249,7 +252,7 @@ class TransactionControllerV2 extends ResourceController
                     $this->transactionMetaModel->insert([
                         'transaction_id' => $trxId,
                         'key' => $key,
-                        'value' => (string) $val
+                        'value' => (string)$val
                     ]);
                 }
             }
@@ -368,7 +371,8 @@ class TransactionControllerV2 extends ResourceController
 
                         send_invoice_email($emailData);
                     }
-                } catch (\Exception $e) {
+                }
+                catch (\Exception $e) {
                     // Log error but don't fail the transaction
                     log_message('error', 'Failed to enqueue invoice email: ' . $e->getMessage());
                 }
@@ -376,7 +380,8 @@ class TransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Transaksi berhasil dibuat', ['id' => $trxId], 201);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -404,7 +409,8 @@ class TransactionControllerV2 extends ResourceController
 
                 if (strtoupper($itemDiscountType) === 'PERCENTAGE' || strtoupper($itemDiscountType) === 'PERCENT') {
                     $itemDiscountValue = ($itemTotal * $itemDiscountAmount) / 100;
-                } else {
+                }
+                else {
                     $itemDiscountValue = $itemDiscountAmount;
                 }
 
@@ -420,7 +426,8 @@ class TransactionControllerV2 extends ResourceController
 
             if (strtoupper($txDiscountType) === 'PERCENTAGE' || strtoupper($txDiscountType) === 'PERCENT') {
                 $txDiscountValue = ($itemActualSubtotal * $txDiscountAmount) / 100;
-            } else {
+            }
+            else {
                 $txDiscountValue = $txDiscountAmount;
             }
 
@@ -447,7 +454,8 @@ class TransactionControllerV2 extends ResourceController
                 'grand_total' => $grandTotal
             ], 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -503,7 +511,8 @@ class TransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Pembayaran berhasil ditambahkan', ['new_status' => $newStatus], 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -553,23 +562,24 @@ class TransactionControllerV2 extends ResourceController
                     'description' => "Rejected payment of {$payment['amount']} for {$trx['invoice']}. Reason: " . ($data->reason ?? 'None'),
                     'detail' => ['payment_id' => $payment['id'], 'reason' => $data->reason ?? null]
                 ]);
-            } else if ($action === 'ACCEPT') {
+            }
+            else if ($action === 'ACCEPT') {
                 // Update payment status
                 $this->paymentModel->update($payment['id'], ['status' => 'VERIFIED']);
 
                 // Journal Entry (Following addPayment logic)
                 // Transfers typically go to Bank (1002)
                 $accountCode = '10' . $trx['id_toko'] . '2';
-                $amount = (float) $payment['amount'];
+                $amount = (float)$payment['amount'];
 
                 $journalId = $this->createJournal('PAYMENT', $id, $trx['invoice'], date('Y-m-d'), "Payment verification for {$trx['invoice']}", $trx['id_toko']);
                 $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Bank
                 $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
 
                 // Update Transaction Status
-                $newTotalPaid = (float) $trx['total_payment'] + $amount;
+                $newTotalPaid = (float)$trx['total_payment'] + $amount;
                 // actual_total is the target. If it's reached, it's PAID.
-                $newStatus = ($newTotalPaid >= (float) $trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
+                $newStatus = ($newTotalPaid >= (float)$trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
 
                 $this->transactionModel->update($id, [
                     'total_payment' => $newTotalPaid,
@@ -585,7 +595,8 @@ class TransactionControllerV2 extends ResourceController
                     'description' => "Accepted payment of {$amount} for {$trx['invoice']}",
                     'detail' => ['payment_id' => $payment['id'], 'amount' => $amount]
                 ]);
-            } else {
+            }
+            else {
                 throw new \Exception("Aksi tidak valid: $action. Gunakan ACCEPT atau REJECT.");
             }
 
@@ -607,7 +618,8 @@ class TransactionControllerV2 extends ResourceController
                     $trx['customer'] = $custData;
                     if ($action === 'ACCEPT') {
                         send_payment_confirmed_email($trx);
-                    } else if ($action === 'REJECT') {
+                    }
+                    else if ($action === 'REJECT') {
                         send_payment_rejected_email($trx, $data->reason ?? '');
                     }
                 }
@@ -615,7 +627,8 @@ class TransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp("Pembayaran berhasil di" . strtolower($action), ['new_status' => $newStatus ?? null], 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -635,12 +648,13 @@ class TransactionControllerV2 extends ResourceController
         $adjustments = [];
         if (isset($data->adjustments) && is_array($data->adjustments)) {
             $adjustments = $data->adjustments;
-        } else {
+        }
+        else {
             $adjustments[] = [
                 'category' => $data->category ?? '',
                 'component_name' => $data->component_name ?? 'Penambahan/Pengurangan',
                 'type' => $data->type ?? 'addition',
-                'amount' => (float) ($data->amount ?? 0)
+                'amount' => (float)($data->amount ?? 0)
             ];
         }
 
@@ -650,7 +664,7 @@ class TransactionControllerV2 extends ResourceController
 
         $this->db->transStart();
         try {
-            $actualTotal = (float) $trx['actual_total'];
+            $actualTotal = (float)$trx['actual_total'];
             $newActualTotal = $actualTotal;
 
             $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
@@ -659,15 +673,15 @@ class TransactionControllerV2 extends ResourceController
                 $metaMap[$m['key']] = $m;
             }
 
-            $ppnPercent = (float) ($metaMap['ppn']['value'] ?? 0);
-            $currentPpnValue = (float) ($metaMap['ppn_value']['value'] ?? 0);
+            $ppnPercent = (float)($metaMap['ppn']['value'] ?? 0);
+            $currentPpnValue = (float)($metaMap['ppn_value']['value'] ?? 0);
             $ppnValueId = $metaMap['ppn_value']['id'] ?? null;
             $ppnMetaId = $metaMap['ppn']['id'] ?? null;
 
             // Compute current Base Subtotal accurately
-            $baseSubtotal = (float) $trx['amount']
-                - (float) ($metaMap['item_discount_total']['value'] ?? 0)
-                - (float) ($metaMap['tx_discount_value']['value'] ?? 0);
+            $baseSubtotal = (float)$trx['amount']
+                - (float)($metaMap['item_discount_total']['value'] ?? 0)
+                - (float)($metaMap['tx_discount_value']['value'] ?? 0);
 
             $adjustmentsJSON = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'adjustments')->first();
             $previousAdjustments = $adjustmentsJSON ? json_decode($adjustmentsJSON['value'], true) : [];
@@ -677,9 +691,10 @@ class TransactionControllerV2 extends ResourceController
                 $isD = (!empty($pCat) && ($pCat === 'diskon' || $pCat === 'discount')) || (empty($pCat) && (stripos($pComp, 'diskon') !== false || stripos($pComp, 'discount') !== false));
                 if ($isD) {
                     if (($pa['type'] ?? 'addition') === 'subtraction') {
-                        $baseSubtotal -= (float) $pa['amount'];
-                    } else {
-                        $baseSubtotal += (float) $pa['amount'];
+                        $baseSubtotal -= (float)$pa['amount'];
+                    }
+                    else {
+                        $baseSubtotal += (float)$pa['amount'];
                     }
                 }
             }
@@ -694,16 +709,17 @@ class TransactionControllerV2 extends ResourceController
             $logDetails = [];
 
             foreach ($adjustments as $adjRaw) {
-                $adj = (array) $adjRaw;
+                $adj = (array)$adjRaw;
                 $category = strtolower(trim($adj['category'] ?? ''));
                 $componentName = $adj['component_name'] ?? 'Penambahan/Pengurangan';
                 $type = $adj['type'] ?? 'addition';
-                $amount = (float) ($adj['amount'] ?? 0);
+                $amount = (float)($adj['amount'] ?? 0);
 
                 if (!empty($category)) {
                     $isDiscountAdjustment = ($category === 'diskon' || $category === 'discount');
                     $isPpnAdjustment = ($category === 'ppn' || $category === 'pajak');
-                } else {
+                }
+                else {
                     // Fallback to testing component_name if category missing
                     $isDiscountAdjustment = stripos($componentName, 'diskon') !== false || stripos($componentName, 'discount') !== false;
                     $isPpnAdjustment = stripos($componentName, 'ppn') !== false || stripos($componentName, 'pajak') !== false;
@@ -725,7 +741,8 @@ class TransactionControllerV2 extends ResourceController
                         $discountAdjustment = $amount;
                         $ppnChange = -$ppnAdjustment;
                         $baseSubtotal -= $amount;
-                    } else {
+                    }
+                    else {
                         $arAdjustment = ($amount + $ppnAdjustment);
                         $discountAdjustment = -$amount;
                         $ppnChange = $ppnAdjustment;
@@ -733,7 +750,8 @@ class TransactionControllerV2 extends ResourceController
                     }
                     $trackedPpnValue += $ppnChange;
 
-                } elseif ($isPpnAdjustment) {
+                }
+                elseif ($isPpnAdjustment) {
                     $newPpnPercent = $amount;
                     $newPpnPercentToSave = $newPpnPercent;
 
@@ -745,11 +763,13 @@ class TransactionControllerV2 extends ResourceController
                     $ppnPercent = $newPpnPercent;
                     $trackedPpnValue = $calculatedNewPpnValue;
 
-                } else {
+                }
+                else {
                     if ($type === 'addition') {
                         $arAdjustment = $amount;
                         $incomeAdjustment = $amount;
-                    } else {
+                    }
+                    else {
                         $arAdjustment = -$amount;
                         $incomeAdjustment = -$amount;
                     }
@@ -780,12 +800,13 @@ class TransactionControllerV2 extends ResourceController
                     $newPpnValue = 0;
 
                 if ($ppnValueId) {
-                    $this->transactionMetaModel->update($ppnValueId, ['value' => (string) $newPpnValue]);
-                } else {
+                    $this->transactionMetaModel->update($ppnValueId, ['value' => (string)$newPpnValue]);
+                }
+                else {
                     $this->transactionMetaModel->insert([
                         'transaction_id' => $id,
                         'key' => 'ppn_value',
-                        'value' => (string) $newPpnValue
+                        'value' => (string)$newPpnValue
                     ]);
                 }
             }
@@ -793,12 +814,13 @@ class TransactionControllerV2 extends ResourceController
             // Save Meta PPN Percentage if changed
             if ($newPpnPercentToSave !== null) {
                 if ($ppnMetaId) {
-                    $this->transactionMetaModel->update($ppnMetaId, ['value' => (string) $newPpnPercentToSave]);
-                } else {
+                    $this->transactionMetaModel->update($ppnMetaId, ['value' => (string)$newPpnPercentToSave]);
+                }
+                else {
                     $this->transactionMetaModel->insert([
                         'transaction_id' => $id,
                         'key' => 'ppn',
-                        'value' => (string) $newPpnPercentToSave
+                        'value' => (string)$newPpnPercentToSave
                     ]);
                 }
             }
@@ -811,44 +833,51 @@ class TransactionControllerV2 extends ResourceController
             // 1. AR Booking (10x3)
             if ($totalArAdjustment > 0) {
                 $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', $totalArAdjustment, 0, $trx['id_toko']);
-            } elseif ($totalArAdjustment < 0) {
+            }
+            elseif ($totalArAdjustment < 0) {
                 $this->addJournalItem($jId, '10' . $trx['id_toko'] . '3', 0, abs($totalArAdjustment), $trx['id_toko']);
             }
 
             // 2. Discount Booking (40x2)
             if ($totalDiscountAdjustment > 0) {
                 $this->addJournalItem($jId, '40' . $trx['id_toko'] . '2', $totalDiscountAdjustment, 0, $trx['id_toko']);
-            } elseif ($totalDiscountAdjustment < 0) {
+            }
+            elseif ($totalDiscountAdjustment < 0) {
                 $this->addJournalItem($jId, '40' . $trx['id_toko'] . '2', 0, abs($totalDiscountAdjustment), $trx['id_toko']);
             }
 
             // 3. PPN Booking (20x5)
             if ($totalPpnChange > 0) {
                 $this->addJournalItem($jId, '20' . $trx['id_toko'] . '5', 0, $totalPpnChange, $trx['id_toko']);
-            } elseif ($totalPpnChange < 0) {
+            }
+            elseif ($totalPpnChange < 0) {
                 $this->addJournalItem($jId, '20' . $trx['id_toko'] . '5', abs($totalPpnChange), 0, $trx['id_toko']);
             }
 
             // 4. Other Income/Sales Booking (40x1)
             if ($totalIncomeAdjustment > 0) {
                 $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', 0, $totalIncomeAdjustment, $trx['id_toko']);
-            } elseif ($totalIncomeAdjustment < 0) {
+            }
+            elseif ($totalIncomeAdjustment < 0) {
                 $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', abs($totalIncomeAdjustment), 0, $trx['id_toko']);
             }
 
             // Check if status needs to change from PAID to NEED_REFUND or PARTIALLY_PAID
-            $totalPayment = (float) $trx['total_payment'];
+            $totalPayment = (float)$trx['total_payment'];
             $newStatus = $trx['status'];
             $refundNeeded = 0;
 
             if ($newActualTotal < $totalPayment) {
                 $newStatus = 'NEED_REFUND';
                 $refundNeeded = $totalPayment - $newActualTotal;
-            } else if ($newActualTotal == $totalPayment) {
+            }
+            else if ($newActualTotal == $totalPayment) {
                 $newStatus = ($totalPayment > 0) ? 'PAID' : 'WAITING_PAYMENT';
-            } else if ($totalPayment > 0 && $newActualTotal > $totalPayment) {
+            }
+            else if ($totalPayment > 0 && $newActualTotal > $totalPayment) {
                 $newStatus = 'PARTIALLY_PAID';
-            } else if ($totalPayment == 0) {
+            }
+            else if ($totalPayment == 0) {
                 $newStatus = 'WAITING_PAYMENT';
             }
 
@@ -857,14 +886,16 @@ class TransactionControllerV2 extends ResourceController
             if ($refundNeeded > 0) {
                 if ($refundMeta) {
                     $this->transactionMetaModel->update($refundMeta['id'], ['value' => $refundNeeded]);
-                } else {
+                }
+                else {
                     $this->transactionMetaModel->insert([
                         'transaction_id' => $id,
                         'key' => 'refund_needed',
                         'value' => $refundNeeded
                     ]);
                 }
-            } elseif ($refundMeta) {
+            }
+            elseif ($refundMeta) {
                 $this->transactionMetaModel->update($refundMeta['id'], ['value' => 0]);
             }
 
@@ -889,7 +920,8 @@ class TransactionControllerV2 extends ResourceController
 
             if ($adjustmentsJSON) {
                 $this->transactionMetaModel->update($adjustmentsJSON['id'], ['value' => json_encode($adjustmentsRecord)]);
-            } else {
+            }
+            else {
                 $this->transactionMetaModel->insert([
                     'transaction_id' => $id,
                     'key' => 'adjustments',
@@ -933,7 +965,8 @@ class TransactionControllerV2 extends ResourceController
                 'status' => $newStatus
             ], 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -953,9 +986,11 @@ class TransactionControllerV2 extends ResourceController
         try {
             // Restore Stock
             $items = $this->salesProductModel->where('id_transaction', $id)->findAll();
+            log_message('debug', '[CancelTransaction] Found ' . count($items) . ' items to restore for transaction ID: ' . $id);
             $cogsReversal = 0;
 
             foreach ($items as $item) {
+                log_message('debug', '[CancelTransaction] Restoring ' . $item['jumlah'] . ' of product ' . $item['kode_barang']);
                 $this->addStock($item['kode_barang'], $trx['id_toko'], $item['jumlah'], $id, "Cancel Transaction {$trx['invoice']}");
                 $cogsReversal += $item['total_modal'];
             }
@@ -977,11 +1012,11 @@ class TransactionControllerV2 extends ResourceController
                 $metaMap[$m['key']] = $m['value'];
             }
 
-            $ppnValue = (float) ($metaMap['ppn_value'] ?? 0);
-            $itemDiscountTotal = (float) ($metaMap['item_discount_total'] ?? 0);
-            $txDiscountValue = (float) ($metaMap['tx_discount_value'] ?? 0);
+            $ppnValue = (float)($metaMap['ppn_value'] ?? 0);
+            $itemDiscountTotal = (float)($metaMap['item_discount_total'] ?? 0);
+            $txDiscountValue = (float)($metaMap['tx_discount_value'] ?? 0);
             $totalDiscount = $itemDiscountTotal + $txDiscountValue;
-            $shippingCost = (float) ($metaMap['biaya_pengiriman'] ?? 0);
+            $shippingCost = (float)($metaMap['biaya_pengiriman'] ?? 0);
             $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
 
             // Reverse AR
@@ -1029,7 +1064,7 @@ class TransactionControllerV2 extends ResourceController
 
             if ($trx['total_payment'] > 0) {
                 $newStatus = 'NEED_REFUND';
-                $refundNeeded = (float) $trx['total_payment'];
+                $refundNeeded = (float)$trx['total_payment'];
 
                 // Logic: Ongkir tidak dikembalikan jika status pengiriman DELIVERED (dan bukan free ongkir)
                 if (strtoupper($trx['delivery_status'] ?? '') === 'DELIVERED' && !$isFreeOngkir && $shippingCost > 0) {
@@ -1060,7 +1095,8 @@ class TransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Transaksi berhasil dibatalkan', ['status' => $newStatus], 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -1194,7 +1230,8 @@ class TransactionControllerV2 extends ResourceController
                 'items_returned' => count($returnDetails),
                 'total_value' => $revenueReduction
             ], 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -1233,7 +1270,7 @@ class TransactionControllerV2 extends ResourceController
 
             if ($refundMeta) {
                 // User Request: newTotalPaid derived from meta (refund_needed) - amount
-                $remaining = (float) $refundMeta['value'] - $amount;
+                $remaining = (float)$refundMeta['value'] - $amount;
 
                 if ($remaining <= 100) {
                     $remaining = 0;
@@ -1242,7 +1279,8 @@ class TransactionControllerV2 extends ResourceController
 
                 $this->transactionMetaModel->update($refundMeta['id'], ['value' => $remaining]);
                 $newTotalPaid = $remaining;
-            } else {
+            }
+            else {
                 // Fallback
                 $newTotalPaid = $trx['total_payment'] - $amount;
                 if ($newTotalPaid <= 0)
@@ -1267,7 +1305,8 @@ class TransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Refund berhasil diproses', [], 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -1306,7 +1345,7 @@ class TransactionControllerV2 extends ResourceController
                     $biayaMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'biaya_pengiriman')->first();
                     $freeMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'free_ongkir')->first();
 
-                    $shippingCost = (float) ($biayaMeta['value'] ?? 0);
+                    $shippingCost = (float)($biayaMeta['value'] ?? 0);
                     $isFreeOngkir = ($freeMeta['value'] ?? '0') === '1';
 
                     if ($shippingCost > 0) {
@@ -1349,9 +1388,11 @@ class TransactionControllerV2 extends ResourceController
                     $trx['customer'] = $custData;
                     if (strtoupper($status ?? '') === 'READY') {
                         send_order_ready_email($trx);
-                    } else if (strtoupper($status ?? '') === 'SHIPPED') {
+                    }
+                    else if (strtoupper($status ?? '') === 'SHIPPED') {
                         send_order_shipped_email($trx, $resi, $courier);
-                    } else if (strtoupper($status ?? '') === 'DELIVERED') {
+                    }
+                    else if (strtoupper($status ?? '') === 'DELIVERED') {
                         send_order_delivered_email($trx);
                     }
                 }
@@ -1359,7 +1400,8 @@ class TransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp("Status pengiriman berhasil diperbarui", [], 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -1369,7 +1411,8 @@ class TransactionControllerV2 extends ResourceController
         $existing = $this->transactionMetaModel->where('transaction_id', $trxId)->where('key', $key)->first();
         if ($existing) {
             $this->transactionMetaModel->update($existing['id'], ['value' => $value]);
-        } else {
+        }
+        else {
             $this->transactionMetaModel->insert([
                 'transaction_id' => $trxId,
                 'key' => $key,
@@ -1456,8 +1499,15 @@ class TransactionControllerV2 extends ResourceController
     private function addStock($productCode, $tokoId, $qty, $trxId, $reason, $isDamaged = false)
     {
         $stockEntry = $this->stockModel->where('id_barang', $productCode)->where('id_toko', $tokoId)->first();
-        if (!$stockEntry)
-            return;
+        if (!$stockEntry) {
+            $this->stockModel->insert([
+                'id_barang' => $productCode,
+                'id_toko' => $tokoId,
+                'stock' => 0,
+                'barang_cacat' => 0
+            ]);
+            $stockEntry = $this->stockModel->where('id_barang', $productCode)->where('id_toko', $tokoId)->first();
+        }
 
         if ($isDamaged) {
             $newCacat = $stockEntry['barang_cacat'] + $qty;
@@ -1486,7 +1536,7 @@ class TransactionControllerV2 extends ResourceController
             'action_type' => 'STOCK_IN',
             'target_table' => 'product',
             'target_id' => $product ? $product['id'] : 0,
-            'description' => "Penambahan Stock (Return): Produk $productCode di Toko #$tokoId. Qty: +$qty, Total: $newStock. Ref: $reason"
+            'description' => "Penambahan Stock (Cancel): Produk $productCode di Toko #$tokoId. Qty: +$qty, Total: $newStock. Ref: $reason"
         ]);
     }
 
@@ -1519,7 +1569,7 @@ class TransactionControllerV2 extends ResourceController
             // Security Check: If hit by Customer, verify ownership
             if (property_exists($this->request, 'customer') && isset($this->request->customer)) {
                 $customerId = $this->request->customer['id'];
-                if (!isset($metaMap['customer_id']) || (int) $metaMap['customer_id'] !== (int) $customerId) {
+                if (!isset($metaMap['customer_id']) || (int)$metaMap['customer_id'] !== (int)$customerId) {
                     return $this->jsonResponse->error("Akses Ditolak: Anda tidak memiliki izin untuk melihat transaksi ini.", 403);
                 }
             }
@@ -1554,7 +1604,8 @@ class TransactionControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Sukses', $transaction, 200);
 
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -1565,8 +1616,8 @@ class TransactionControllerV2 extends ResourceController
         try {
             $status = $this->request->getGet('status'); // e.g., PAID, PARTIALLY_PAID
             $idToko = $this->request->getGet('id_toko');
-            $limit = (int) $this->request->getGet('limit') ?: 20;
-            $page = (int) $this->request->getGet('page') ?: 1;
+            $limit = (int)$this->request->getGet('limit') ?: 20;
+            $page = (int)$this->request->getGet('page') ?: 1;
             $offset = ($page - 1) * $limit;
 
             $builder = $this->transactionModel;
@@ -1600,7 +1651,8 @@ class TransactionControllerV2 extends ResourceController
             }
 
             return $this->jsonResponse->multiResp('', $transactions, $totalData, $totalPage, $page, $limit, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -1636,7 +1688,8 @@ class TransactionControllerV2 extends ResourceController
                 $this->transactionMetaModel->update($existingMeta['id'], [
                     'value' => $data->value
                 ]);
-            } else {
+            }
+            else {
                 // Insert new
                 $this->transactionMetaModel->insert([
                     'transaction_id' => $id,
@@ -1659,7 +1712,8 @@ class TransactionControllerV2 extends ResourceController
             ]);
 
             return $this->jsonResponse->oneResp('Meta transaksi berhasil diperbarui', [], 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
