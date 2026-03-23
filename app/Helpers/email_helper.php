@@ -321,7 +321,7 @@ if (!function_exists('send_registration_email')) {
 
         $html = get_email_template('Selamat Datang di ' . \App\Libraries\TenantContext::name(), $content);
 
-        return send_email($email, 'Selamat Datang di ' . \App\Libraries\TenantContext::name() . ' - Verifikasi Email Anda', $html);
+        return enqueue_email($email, 'Selamat Datang di ' . \App\Libraries\TenantContext::name() . ' - Verifikasi Email Anda', $html);
     }
 }
 
@@ -374,6 +374,7 @@ if (!function_exists('enqueue_email')) {
     {
         $emailQueueModel = new \App\Models\EmailQueueModel();
         return $emailQueueModel->insert([
+            'tenant_id' => \App\Libraries\TenantContext::id(),
             'recipient' => $to,
             'subject' => $subject,
             'message' => $message,

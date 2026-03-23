@@ -101,6 +101,7 @@ class CustomerControllerV2 extends ResourceController
             }
 
             // Send registration email with credentials and verification link
+            log_message('debug', '[Registration] Tenant Name: ' . \App\Libraries\TenantContext::name() . ' ID: ' . \App\Libraries\TenantContext::id());
             $emailSent = send_registration_email(
                 $data->email,
                 $data->nama_customer,
