@@ -20,7 +20,7 @@ class TenantMiddleware implements FilterInterface
         $tenantCode = trim((string) $request->getHeaderLine('X-Tenant'));
         
         // Fallback to query parameter for GET requests (links from email)
-        if ($tenantCode === '' && $request->getMethod() === 'get') {
+        if ($tenantCode === '' && strtolower($request->getMethod()) === 'get') {
             $tenantCode = (string) $request->getGet('tenant');
         }
 
