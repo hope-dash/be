@@ -41,6 +41,7 @@ $routes->group('api/wilayah', function ($routes) {
 
 // Expedition API
 $routes->get('api/expedition/shipping-cost', 'ExpeditionController::getShippingCost');
+$routes->get('api/shipping/track', 'ShippingController::track');
 
 // --- 3. PUBLIC TENANT ROUTES (X-Tenant Required, No Token) ---
 $routes->group('api', ['filter' => 'tenant'], function ($routes) {
