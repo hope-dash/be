@@ -47,7 +47,7 @@ final class TenantContext
 
     public static function url(): string
     {
-        return self::$tenant['url'] ?? env('app.baseURL', 'https://api-staging.hopesparepart.com');
+        return self::$tenant['url'] ?? env('app.baseURL', 'https://api.hopesparepart.com');
     }
 }
 
