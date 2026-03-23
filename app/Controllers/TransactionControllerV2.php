@@ -230,10 +230,10 @@ class TransactionControllerV2 extends ResourceController
                 'customer_name' => $data->customer_name ?? '',
                 'customer_phone' => $data->customer_phone ?? '',
                 'alamat' => $data->alamat ?? '',
-                'provinsi' => $data->provinsi ?? '',
-                'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? '',
-                'kecamatan' => $data->kecamatan ?? '',
-                'kelurahan' => $data->kelurahan ?? '',
+                'provinsi' => $data->provinsi ?? $data->nama_rovinsi ?? '',
+                'kota_kabupaten' => $data->kota_kabupaten ?? $data->kota ?? $data->nama_kota_kabupaten ?? $data->nama_kota ?? '',
+                'kecamatan' => $data->kecamatan ?? $data->nama_kecamatan ?? '',
+                'kelurahan' => $data->kelurahan ?? $data->nama_kelurahan ?? '',
                 'kode_pos' => $data->kode_pos ?? '',
                 'source' => $data->source ?? '',
                 'jatuh_tempo' => $data->jatuh_tempo ?? '',
@@ -1564,6 +1564,23 @@ class TransactionControllerV2 extends ResourceController
             foreach ($metas as $m) {
                 $metaMap[$m['key']] = $m['value'];
             }
+
+            // Resolve Regional Names if they are stored as IDs
+            $regions = [
+                'provinsi' => 'provincy',
+                'kota_kabupaten' => 'kota_kabupaten',
+                'kecamatan' => 'kecamatan',
+                'kelurahan' => 'kelurahan'
+            ];
+            foreach ($regions as $key => $table) {
+                if (isset($metaMap[$key]) && is_numeric($metaMap[$key]) && !empty($metaMap[$key])) {
+                    $regionalData = $db->table($table)->where('code', $metaMap[$key])->get()->getRowArray();
+                    if ($regionalData) {
+                        $metaMap[$key] = $regionalData['name'];
+                    }
+                }
+            }
+
             $transaction['meta'] = $metaMap;
 
             // Security Check: If hit by Customer, verify ownership
