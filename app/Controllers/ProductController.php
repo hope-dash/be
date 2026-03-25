@@ -2227,4 +2227,203 @@ class ProductController extends ResourceController
 
         return $this->jsonResponse->oneResp(count($dataToInsert) . ' products added successfully', [], 201);
     }
+    public function moveToCacat($id = null)
+    {
+        $token = $this->request->user;
+        $data = $this->request->getJSON();
+        $qty = (int)($data->qty ?? 0);
+        $idToko = $data->id_toko ?? null;
+        $notes = $data->notes ?? 'Pindah ke Cacat';
+
+        if ($qty <= 0 || !$idToko) {
+            return $this->jsonResponse->error("Qty dan ID Toko wajib diisi", 400);
+        }
+
+        $product = $this->productModel->find($id);
+        if (!$product) return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+
+        $stock = $this->stockModel->where('id_barang', $product['id_barang'])->where('id_toko', $idToko)->first();
+        if (!$stock || $stock['stock'] < $qty) {
+            return $this->jsonResponse->error("Stok normal tidak mencukupi", 400);
+        }
+
+        $this->db->transStart();
+        try {
+            // Update Stock
+            $this->stockModel->update($stock['id'], [
+                'stock' => $stock['stock'] - $qty,
+                'barang_cacat' => $stock['barang_cacat'] + $qty
+            ]);
+
+            // Journal
+            $cogsTotal = $product['harga_modal'] * $qty;
+            if ($cogsTotal > 0) {
+                $refNo = 'ADJ-' . time();
+                $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Normal to Cacat: {$product['nama_barang']} ({$notes})", $idToko);
+                // Dr Inventory Cacat (10x5)
+                $this->internalAddJournalItem($jid, '10' . $idToko . '5', $cogsTotal, 0, $idToko); 
+                // Cr Inventory Normal (10x4)
+                $this->internalAddJournalItem($jid, '10' . $idToko . '4', 0, $cogsTotal, $idToko); 
+            }
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'MOVE_TO_CACAT',
+                'target_table' => 'stock',
+                'target_id' => $stock['id'],
+                'description' => "Pindah stock normal ke cacat: {$product['nama_barang']} Qty: {$qty}. Notes: {$notes}"
+            ]);
+
+            $this->db->transComplete();
+            return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang cacat", null, 200);
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    public function moveToNormal($id = null)
+    {
+        $token = $this->request->user;
+        $data = $this->request->getJSON();
+        $qty = (int)($data->qty ?? 0);
+        $idToko = $data->id_toko ?? null;
+        $notes = $data->notes ?? 'Pindah ke Normal';
+
+        if ($qty <= 0 || !$idToko) {
+            return $this->jsonResponse->error("Qty dan ID Toko wajib diisi", 400);
+        }
+
+        $product = $this->productModel->find($id);
+        if (!$product) return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+
+        $stock = $this->stockModel->where('id_barang', $product['id_barang'])->where('id_toko', $idToko)->first();
+        if (!$stock || $stock['barang_cacat'] < $qty) {
+            return $this->jsonResponse->error("Stok cacat tidak mencukupi", 400);
+        }
+
+        $this->db->transStart();
+        try {
+            $this->stockModel->update($stock['id'], [
+                'stock' => $stock['stock'] + $qty,
+                'barang_cacat' => $stock['barang_cacat'] - $qty
+            ]);
+
+            // Journal
+            $cogsTotal = $product['harga_modal'] * $qty;
+            if ($cogsTotal > 0) {
+                $refNo = 'ADJ-' . time();
+                $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Cacat to Normal: {$product['nama_barang']} ({$notes})", $idToko);
+                // Dr Inventory Normal (10x4)
+                $this->internalAddJournalItem($jid, '10' . $idToko . '4', $cogsTotal, 0, $idToko); 
+                // Cr Inventory Cacat (10x5)
+                $this->internalAddJournalItem($jid, '10' . $idToko . '5', 0, $cogsTotal, $idToko); 
+            }
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'MOVE_TO_NORMAL',
+                'target_table' => 'stock',
+                'target_id' => $stock['id'],
+                'description' => "Pindah stock cacat ke normal: {$product['nama_barang']} Qty: {$qty}. Notes: {$notes}"
+            ]);
+
+            $this->db->transComplete();
+            return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang normal", null, 200);
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    public function writeOffCacat($id = null)
+    {
+        $token = $this->request->user;
+        $data = $this->request->getJSON();
+        $qty = (int)($data->qty ?? 0);
+        $idToko = $data->id_toko ?? null;
+        $notes = $data->notes ?? 'Pembersihan Barang Cacat (Rugi)';
+
+        if ($qty <= 0 || !$idToko) {
+            return $this->jsonResponse->error("Qty dan ID Toko wajib diisi", 400);
+        }
+
+        $product = $this->productModel->find($id);
+        if (!$product) return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+
+        $stock = $this->stockModel->where('id_barang', $product['id_barang'])->where('id_toko', $idToko)->first();
+        if (!$stock || $stock['barang_cacat'] < $qty) {
+            return $this->jsonResponse->error("Stok cacat tidak mencukupi", 400);
+        }
+
+        $this->db->transStart();
+        try {
+            $this->stockModel->update($stock['id'], [
+                'barang_cacat' => $stock['barang_cacat'] - $qty
+            ]);
+
+            // Journal: Loss on Damaged Goods
+            $cogsTotal = $product['harga_modal'] * $qty;
+            if ($cogsTotal > 0) {
+                $refNo = 'LOSS-' . time();
+                $jid = $this->internalCreateJournal('WRITE_OFF', $id, $refNo, date('Y-m-d'), "Write-off Cacat: {$product['nama_barang']} ({$notes})", $idToko);
+                // Dr HPP (As requested: HPP +)
+                $this->internalAddJournalItem($jid, '50' . $idToko . '1', $cogsTotal, 0, $idToko); 
+                // Cr Inventory Cacat (10x5)
+                $this->internalAddJournalItem($jid, '10' . $idToko . '5', 0, $cogsTotal, $idToko); 
+            }
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'WRITE_OFF_CACAT',
+                'target_table' => 'stock',
+                'target_id' => $stock['id'],
+                'description' => "Write-off (anggap rugi) stock cacat: {$product['nama_barang']} Qty: {$qty}. Notes: {$notes}"
+            ]);
+
+            $this->db->transComplete();
+            return $this->jsonResponse->oneResp("Berhasil melakukan write-off barang cacat", null, 200);
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    private function internalCreateJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null)
+    {
+        $journalModel = new \App\Models\JournalModel();
+        $data = [
+            'tenant_id' => TenantContext::id(),
+            'id_toko' => $tokoId,
+            'reference_type' => $refType,
+            'reference_id' => $refId,
+            'reference_no' => $refNo,
+            'date' => $date,
+            'description' => $desc,
+            'created_at' => date('Y-m-d H:i:s')
+        ];
+        $journalModel->insert($data);
+        return $journalModel->getInsertID();
+    }
+
+    private function internalAddJournalItem($journalId, $accountCode, $debit, $credit, $tokoId = null)
+    {
+        $accountModel = new \App\Models\AccountModel();
+        $journalItemModel = new \App\Models\JournalItemModel();
+        
+        $account = $accountModel->getByBaseCode($accountCode, $tokoId);
+        if (!$account) {
+            $account = $accountModel->where('code', $accountCode)->first();
+        }
+
+        if (!$account) return;
+
+        $journalItemModel->insert([
+            'journal_id' => $journalId,
+            'account_id' => $account['id'],
+            'debit' => $debit,
+            'credit' => $credit,
+            'created_at' => date('Y-m-d H:i:s')
+        ]);
+    }
 }

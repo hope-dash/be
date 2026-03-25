@@ -1113,7 +1113,8 @@ class TransactionControllerV2 extends ResourceController
 
         $this->db->transStart();
         try {
-            $cogsReversal = 0;
+            $cogsNormal = 0;
+            $cogsCacat = 0;
             $revenueReduction = 0;
             $returnDetails = [];
             $returnSummary = [];
@@ -1138,7 +1139,13 @@ class TransactionControllerV2 extends ResourceController
                 $this->addStock($item->kode_barang, $trx['id_toko'], $qty, $id, "Retur Barang ({$item->condition})", $isDamaged);
 
                 $modalOne = $saleItem['total_modal'] / $saleItem['jumlah'];
-                $cogsReversal += ($modalOne * $qty);
+                $itemModalTotal = ($modalOne * $qty);
+                
+                if ($isDamaged) {
+                    $cogsCacat += $itemModalTotal;
+                } else {
+                    $cogsNormal += $itemModalTotal;
+                }
 
                 $priceOne = $saleItem['total'] / $saleItem['jumlah'];
                 $revenueReduction += ($priceOne * $qty);
@@ -1183,10 +1190,22 @@ class TransactionControllerV2 extends ResourceController
                 'value' => json_encode($returnDetails)
             ]);
 
-            if ($cogsReversal > 0) {
+            $totalCogsReversal = $cogsNormal + $cogsCacat;
+            if ($totalCogsReversal > 0) {
                 $jid = $this->createJournal('RETUR_COGS', $id, $trx['invoice'], date('Y-m-d'), "Retur COGS Reversal", $trx['id_toko']);
-                $this->addJournalItem($jid, '10' . $trx['id_toko'] . '4', $cogsReversal, 0, $trx['id_toko']);
-                $this->addJournalItem($jid, '50' . $trx['id_toko'] . '1', 0, $cogsReversal, $trx['id_toko']);
+                
+                if ($cogsNormal > 0) {
+                    // Dr Inventory Normal (10x4)
+                    $this->addJournalItem($jid, '10' . $trx['id_toko'] . '4', $cogsNormal, 0, $trx['id_toko']);
+                }
+                
+                if ($cogsCacat > 0) {
+                    // Dr Inventory Cacat (10x5)
+                    $this->addJournalItem($jid, '10' . $trx['id_toko'] . '5', $cogsCacat, 0, $trx['id_toko']);
+                }
+                
+                // Cr COGS (50x1)
+                $this->addJournalItem($jid, '50' . $trx['id_toko'] . '1', 0, $totalCogsReversal, $trx['id_toko']);
             }
 
             if ($revenueReduction > 0) {
@@ -1512,7 +1531,16 @@ class TransactionControllerV2 extends ResourceController
         if ($isDamaged) {
             $newCacat = $stockEntry['barang_cacat'] + $qty;
             $this->stockModel->update($stockEntry['id'], ['barang_cacat' => $newCacat]);
-            // Log damage but usually not in normal stock ledger unless separate logic exist
+
+            $this->stockLedgerModel->insert([
+                'id_barang' => $productCode,
+                'id_toko' => $tokoId,
+                'qty' => $qty,
+                'balance' => $newCacat, // In this case balance of damaged goods? or just for info
+                'reference_type' => 'DAMAGE',
+                'reference_id' => $trxId,
+                'description' => $reason . " (Barang Cacat)"
+            ]);
             return;
         }
 

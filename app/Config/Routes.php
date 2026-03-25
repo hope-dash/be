@@ -234,6 +234,9 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('product', 'ProductController::createProductV2');
         $routes->put('product/(:num)', 'ProductController::updateProductV2/$1');
         $routes->post('product/(:num)/adjust-stock', 'ProductController::adjustStock/$1');
+        $routes->post('product/(:num)/move-to-cacat', 'ProductController::moveToCacat/$1');
+        $routes->post('product/(:num)/move-to-normal', 'ProductController::moveToNormal/$1');
+        $routes->post('product/(:num)/write-off-cacat', 'ProductController::writeOffCacat/$1');
 
         // Subscription
         $routes->get('subscription', 'SubscriptionControllerV2::detail');

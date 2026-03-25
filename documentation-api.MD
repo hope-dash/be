@@ -718,6 +718,62 @@ Jika ada **ongkos kirim**, biaya ini ditanggung oleh Toko Asal (`source_toko_id`
 }
 ```
 
+
+### C. Stock Adjustment (Cacat Management)
+
+Kelola stok barang rusak (cacat) dan perpindahannya antar kategori stok.
+
+#### 1. Move Normal to Cacat
+
+Memindahkan stok dari kategori Normal ke Cacat (Cacat In). Otomatis mencatat jurnal pergeseran aset.
+
+- **URL**: `POST /v2/product/{id}/move-to-cacat`
+- **Body**:
+
+```json
+{
+  "id_toko": 1,
+  "qty": 5,
+  "notes": "Layar pecah saat handling"
+}
+```
+
+- **Jurnal**: (Dr) Inventaris Cacat | (Cr) Inventaris Normal
+
+#### 2. Move Cacat to Normal
+
+Memindahkan stok dari kategori Cacat kembali ke Normal (Cacat Out).
+
+- **URL**: `POST /v2/product/{id}/move-to-normal`
+- **Body**:
+
+```json
+{
+  "id_toko": 1,
+  "qty": 2,
+  "notes": "Sudah ganti casing, layak jual"
+}
+```
+
+- **Jurnal**: (Dr) Inventaris Normal | (Cr) Inventaris Cacat
+
+#### 3. Write-off Cacat (Loss)
+
+Menghapus stok cacat dan menganggapnya sebagai kerugian (HPP+).
+
+- **URL**: `POST /v2/product/{id}/write-off-cacat`
+- **Body**:
+
+```json
+{
+  "id_toko": 1,
+  "qty": 3,
+  "notes": "Barang hilang/hancur total"
+}
+```
+
+- **Jurnal**: (Dr) HPP | (Cr) Inventaris Cacat
+
 ---
 
 ## 5. EXPENSE (Pengeluaran Operasional)
