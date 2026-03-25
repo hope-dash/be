@@ -2261,7 +2261,7 @@ class ProductController extends ResourceController
                 $refNo = 'ADJ-' . time();
                 $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Normal to Cacat: {$product['nama_barang']} ({$notes})", $idToko);
                 // Dr Inventory Cacat (10x5)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '5', $cogsTotal, 0, $idToko); 
+                $this->internalAddJournalItem($jid, '10' . $idToko . '7', $cogsTotal, 0, $idToko); 
                 // Cr Inventory Normal (10x4)
                 $this->internalAddJournalItem($jid, '10' . $idToko . '4', 0, $cogsTotal, $idToko); 
             }
@@ -2316,8 +2316,8 @@ class ProductController extends ResourceController
                 $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Cacat to Normal: {$product['nama_barang']} ({$notes})", $idToko);
                 // Dr Inventory Normal (10x4)
                 $this->internalAddJournalItem($jid, '10' . $idToko . '4', $cogsTotal, 0, $idToko); 
-                // Cr Inventory Cacat (10x5)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '5', 0, $cogsTotal, $idToko); 
+                // Cr Inventory Cacat (10x7)
+                $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko); 
             }
 
             log_aktivitas([
@@ -2369,8 +2369,8 @@ class ProductController extends ResourceController
                 $jid = $this->internalCreateJournal('WRITE_OFF', $id, $refNo, date('Y-m-d'), "Write-off Cacat: {$product['nama_barang']} ({$notes})", $idToko);
                 // Dr HPP (As requested: HPP +)
                 $this->internalAddJournalItem($jid, '50' . $idToko . '1', $cogsTotal, 0, $idToko); 
-                // Cr Inventory Cacat (10x5)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '5', 0, $cogsTotal, $idToko); 
+                // Cr Inventory Cacat (10x7)
+                $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko); 
             }
 
             log_aktivitas([

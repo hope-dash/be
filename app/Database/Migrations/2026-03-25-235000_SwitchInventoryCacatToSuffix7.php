@@ -4,13 +4,13 @@ namespace App\Database\Migrations;
 
 use CodeIgniter\Database\Migration;
 
-class AddInventoryCacatAccounts extends Migration
+class SwitchInventoryCacatToSuffix7 extends Migration
 {
     public function up()
     {
         $db = \Config\Database::connect();
         
-        // 1. Ensure Global Account (Template)
+        // 1. Ensure Global Account 1007
         $globalExists = $db->table('accounts')
             ->where('base_code', '1007')
             ->where('id_toko', null)
@@ -30,14 +30,12 @@ class AddInventoryCacatAccounts extends Migration
             ]);
         }
 
-        // 2. Ensure Toko-specific Accounts
+        // 2. Ensure Toko-specific Accounts 10x7
         $tokoList = $db->table('toko')->get()->getResultArray();
 
         foreach ($tokoList as $toko) {
             $tokoId = $toko['id'];
             $tenantId = $toko['tenant_id'];
-            
-            // Following the pattern: '10' . $idToko . '7'
             $code = '10' . $tokoId . '7';
             
             $exists = $db->table('accounts')
@@ -58,6 +56,13 @@ class AddInventoryCacatAccounts extends Migration
                 ]);
             }
         }
+        
+        // 3. Clean up the accidental 1005 accounts IF they were named "Persediaan Barang Cacat"
+        // (to avoid breaking genuine Transit accounts)
+        $db->table('accounts')
+            ->where('base_code', '1005')
+            ->like('name', 'Persediaan Barang Cacat')
+            ->delete();
     }
 
     public function down()

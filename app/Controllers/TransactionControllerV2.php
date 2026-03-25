@@ -1140,10 +1140,11 @@ class TransactionControllerV2 extends ResourceController
 
                 $modalOne = $saleItem['total_modal'] / $saleItem['jumlah'];
                 $itemModalTotal = ($modalOne * $qty);
-                
+
                 if ($isDamaged) {
                     $cogsCacat += $itemModalTotal;
-                } else {
+                }
+                else {
                     $cogsNormal += $itemModalTotal;
                 }
 
@@ -1193,17 +1194,17 @@ class TransactionControllerV2 extends ResourceController
             $totalCogsReversal = $cogsNormal + $cogsCacat;
             if ($totalCogsReversal > 0) {
                 $jid = $this->createJournal('RETUR_COGS', $id, $trx['invoice'], date('Y-m-d'), "Retur COGS Reversal", $trx['id_toko']);
-                
+
                 if ($cogsNormal > 0) {
                     // Dr Inventory Normal (10x4)
                     $this->addJournalItem($jid, '10' . $trx['id_toko'] . '4', $cogsNormal, 0, $trx['id_toko']);
                 }
-                
+
                 if ($cogsCacat > 0) {
-                    // Dr Inventory Cacat (10x5)
-                    $this->addJournalItem($jid, '10' . $trx['id_toko'] . '5', $cogsCacat, 0, $trx['id_toko']);
+                    // Dr Inventory Cacat (10x7)
+                    $this->addJournalItem($jid, '10' . $trx['id_toko'] . '7', $cogsCacat, 0, $trx['id_toko']);
                 }
-                
+
                 // Cr COGS (50x1)
                 $this->addJournalItem($jid, '50' . $trx['id_toko'] . '1', 0, $totalCogsReversal, $trx['id_toko']);
             }

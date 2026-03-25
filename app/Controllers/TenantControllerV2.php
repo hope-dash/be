@@ -17,6 +17,7 @@ class TenantControllerV2 extends ResourceController
 
     public function __construct()
     {
+        helper(['email_helper']);
         $this->jsonResponse = new JsonResponse();
         $this->tenantModel = new TenantModel();
     }
@@ -200,7 +201,7 @@ class TenantControllerV2 extends ResourceController
                 send_tenant_welcome_email(
                     $input['email'] ?? '',
                     $input['pic_name'] ?? 'Owner',
-                    $input['name'] ?? 'Toko Baru',
+                    $input['toko_name'] ?? 'Toko Baru',
                     $input['password'] ?? '',
                     $code
                 );

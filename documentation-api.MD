@@ -738,7 +738,7 @@ Memindahkan stok dari kategori Normal ke Cacat (Cacat In). Otomatis mencatat jur
 }
 ```
 
-- **Jurnal**: (Dr) Inventaris Cacat | (Cr) Inventaris Normal
+- **Jurnal**: (Dr) Inventaris Cacat (10x7) | (Cr) Inventaris Normal (10x4)
 
 #### 2. Move Cacat to Normal
 
@@ -755,7 +755,7 @@ Memindahkan stok dari kategori Cacat kembali ke Normal (Cacat Out).
 }
 ```
 
-- **Jurnal**: (Dr) Inventaris Normal | (Cr) Inventaris Cacat
+- **Jurnal**: (Dr) Inventaris Normal (10x4) | (Cr) Inventaris Cacat (10x7)
 
 #### 3. Write-off Cacat (Loss)
 
@@ -772,7 +772,7 @@ Menghapus stok cacat dan menganggapnya sebagai kerugian (HPP+).
 }
 ```
 
-- **Jurnal**: (Dr) HPP | (Cr) Inventaris Cacat
+- **Jurnal**: (Dr) HPP (50x1) | (Cr) Inventaris Cacat (10x7)
 
 ---
 
