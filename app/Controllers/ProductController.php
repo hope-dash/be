@@ -628,66 +628,92 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
         }
 
-        $product = $this->productModel->find($id);
-        if (!$product) {
-            return $this->jsonResponse->error("Produk tidak ditemukan", 404);
-        }
+        $this->db->transStart();
+        try {
+            $product = $this->productModel->find($id);
+            if (!$product) {
+                return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+            }
 
-        $id_barang = $product['id_barang'];
+            $id_barang = $product['id_barang'];
 
-        $existingStock = $this->stockModel
-            ->where('id_barang', $id_barang)
-            ->where('id_toko', $data->id_toko)
-            ->first();
+            $existingStock = $this->stockModel
+                ->where('id_barang', $id_barang)
+                ->where('id_toko', $data->id_toko)
+                ->first();
 
-        if (!$existingStock) {
-            $stockData = [
-                'id_barang' => $id_barang,
-                'id_toko' => $data->id_toko,
-                'stock' => $data->stock,
-                'barang_cacat' => $data->barang_cacat,
-            ];
-            $this->stockModel->insert($stockData);
-            $newStockId = $this->stockModel->getInsertID();
+            $oldStock = 0;
+            $oldCacat = 0;
+            $stockId = null;
 
-            $alasan = $data->alasan ?? 'Penyesuaian manual';
+            if (!$existingStock) {
+                $stockData = [
+                    'id_barang' => $id_barang,
+                    'id_toko' => $data->id_toko,
+                    'stock' => $data->stock,
+                    'barang_cacat' => $data->barang_cacat,
+                    'tenant_id' => \App\Libraries\TenantContext::id(),
+                ];
+                $this->stockModel->insert($stockData);
+                $stockId = $this->stockModel->getInsertID();
+            } else {
+                $stockId = $existingStock['id'];
+                $oldStock = (int)$existingStock['stock'];
+                $oldCacat = (int)$existingStock['barang_cacat'];
+
+                $stockData = [
+                    'stock' => $data->stock,
+                    'barang_cacat' => $data->barang_cacat,
+                ];
+                $this->stockModel->update($stockId, $stockData);
+            }
+
+            // --- Journal Entry for Adjustment ---
+            $diffStock = (int)$data->stock - $oldStock;
+            $diffCacat = (int)$data->barang_cacat - $oldCacat;
+            $alasan = $data->alasan ?? 'Penyesuaian manual (Opname)';
+
+            if ($diffStock != 0 || $diffCacat != 0) {
+                $refNo = 'ADJ-OPNAME-' . time();
+                $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Stock Opname: {$product['nama_barang']} ({$alasan})", $data->id_toko);
+
+                // 1. Adjustment Normal Stock
+                if ($diffStock != 0) {
+                    $valueStock = abs($diffStock * (float)$product['harga_modal']);
+                    if ($valueStock > 0) {
+                        if ($diffStock > 0) {
+                            // Surplus: Dr Inventory (10x4), Cr Equity (30x1)
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $valueStock, 0, $data->id_toko);
+                            $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueStock, $data->id_toko);
+                        } else {
+                            // Shortage: Dr HPP (50x1), Cr Inventory (10x4)
+                            $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueStock, 0, $data->id_toko);
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $valueStock, $data->id_toko);
+                        }
+                    }
+                }
+
+                // 2. Adjustment Cacat Stock
+                if ($diffCacat != 0) {
+                    $valueCacat = abs($diffCacat * (float)$product['harga_modal']);
+                    if ($valueCacat > 0) {
+                        if ($diffCacat > 0) {
+                            // Surplus Cacat: Dr Inventory Cacat (10x7), Cr Equity (30x1)
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $valueCacat, 0, $data->id_toko);
+                            $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueCacat, $data->id_toko);
+                        } else {
+                            // Shortage Cacat: Dr HPP (50x1), Cr Inventory Cacat (10x7)
+                            $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueCacat, 0, $data->id_toko);
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $valueCacat, $data->id_toko);
+                        }
+                    }
+                }
+            }
+
+            // --- Log Activities ---
             $descParts = [];
-            if (0 != $data->stock)
-                $descParts[] = "normal dari 0->{$data->stock}";
-            if (0 != $data->barang_cacat)
-                $descParts[] = "cacat dari 0->{$data->barang_cacat}";
-            $descText = !empty($descParts) ? implode(', ', $descParts) : "tidak ada perubahan";
-
-            log_aktivitas([
-                'user_id' => $token['user_id'],
-                'action_type' => 'ADJUST_STOCK',
-                'target_table' => 'stock',
-                'target_id' => $newStockId,
-                'description' => "{$descText}, keterangan: {$alasan}",
-                'detail' => [
-                    'old' => null,
-                    'new' => $stockData,
-                    'alasan' => $alasan
-                ],
-            ]);
-        }
-        else {
-            $oldStock = $existingStock['stock'];
-            $oldCacat = $existingStock['barang_cacat'];
-
-            $stockData = [
-                'stock' => $data->stock,
-                'barang_cacat' => $data->barang_cacat,
-            ];
-
-            $this->stockModel->update($existingStock['id'], $stockData);
-
-            $alasan = $data->alasan ?? 'Penyesuaian manual';
-            $descParts = [];
-            if ($oldStock != $data->stock)
-                $descParts[] = "normal dari {$oldStock}->{$data->stock}";
-            if ($oldCacat != $data->barang_cacat)
-                $descParts[] = "cacat dari {$oldCacat}->{$data->barang_cacat}";
+            if ($oldStock != $data->stock) $descParts[] = "normal {$oldStock}->{$data->stock}";
+            if ($oldCacat != $data->barang_cacat) $descParts[] = "cacat {$oldCacat}->{$data->barang_cacat}";
 
             if (!empty($descParts)) {
                 $descText = implode(', ', $descParts);
@@ -695,18 +721,22 @@ class ProductController extends ResourceController
                     'user_id' => $token['user_id'],
                     'action_type' => 'ADJUST_STOCK',
                     'target_table' => 'stock',
-                    'target_id' => $existingStock['id'],
-                    'description' => "{$descText}, keterangan: {$alasan}",
+                    'target_id' => $stockId,
+                    'description' => "Opname: {$descText}, ket: {$alasan}",
                     'detail' => [
-                        'old' => $existingStock,
-                        'new' => $stockData,
+                        'old' => ['stock' => $oldStock, 'barang_cacat' => $oldCacat],
+                        'new' => ['stock' => $data->stock, 'barang_cacat' => $data->barang_cacat],
                         'alasan' => $alasan
                     ],
                 ]);
             }
-        }
 
-        return $this->jsonResponse->oneResp('Penyesuaian stok berhasil', ['id' => $id, 'id_barang' => $id_barang, 'id_toko' => $data->id_toko], 200);
+            $this->db->transComplete();
+            return $this->jsonResponse->oneResp('Penyesuaian stok berhasil', ['id' => $id, 'id_barang' => $id_barang, 'id_toko' => $data->id_toko], 200);
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
     }
 
     private function getProductDetailArray($id)
