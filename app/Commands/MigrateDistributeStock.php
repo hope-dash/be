@@ -123,7 +123,9 @@ class MigrateDistributeStock extends BaseCommand
                     continue;
 
                 $refId = "TRF-MIG-" . date('ymd') . "-" . substr(md5($kode . $tokoId), 0, 8);
-                $itemValue = $itemModal * $qTotal;
+                $valueNormal = $itemModal * $qNormal;
+                $valueCacat = $itemModal * $qCacat;
+                $totalValue = $valueNormal + $valueCacat;
 
                 $runningBalanceMaster -= $qTotal;
                 $stocksFinal[$kode][$tokoId] = ['stock' => $qNormal, 'cacat' => $qCacat];
@@ -144,25 +146,44 @@ class MigrateDistributeStock extends BaseCommand
                     'description' => "Migrasi: Terima dari Master", 'created_at' => $now
                 ];
 
-                // Journals
-                $journals[] = [
-                    'tenant_id' => 1, 'id_toko' => $idTokoMaster, 'reference_type' => 'TRANSFER_OUT',
-                    'reference_id' => $refId, 'reference_no' => $refId, 'date' => $date,
-                    'description' => "Inventory Out ($kode) -> $tokoId", 'created_at' => $now,
-                    '_items' => [
-                        ['code' => '10' . $tokoId . '4', 'db' => $itemValue, 'cr' => 0],
-                        ['code' => '10' . $idTokoMaster . '4', 'db' => 0, 'cr' => $itemValue]
-                    ]
-                ];
-                $journals[] = [
-                    'tenant_id' => 1, 'id_toko' => $tokoId, 'reference_type' => 'TRANSFER_IN',
-                    'reference_id' => $refId, 'reference_no' => $refId, 'date' => $date,
-                    'description' => "Inventory In ($kode) <- Master", 'created_at' => $now,
-                    '_items' => [
-                        ['code' => '10' . $tokoId . '4', 'db' => $itemValue, 'cr' => 0],
-                        ['code' => '30' . $idTokoMaster . '1', 'db' => 0, 'cr' => $itemValue]
-                    ]
-                ];
+                // Journals Out (Master Store context)
+                $itemsOut = [];
+                if ($valueNormal > 0) {
+                    $itemsOut[] = ['code' => '10' . $tokoId . '4', 'db' => $valueNormal, 'cr' => 0];
+                    $itemsOut[] = ['code' => '10' . $idTokoMaster . '4', 'db' => 0, 'cr' => $valueNormal];
+                }
+                if ($valueCacat > 0) {
+                    $itemsOut[] = ['code' => '10' . $tokoId . '7', 'db' => $valueCacat, 'cr' => 0];
+                    $itemsOut[] = ['code' => '10' . $idTokoMaster . '7', 'db' => 0, 'cr' => $valueCacat];
+                }
+
+                if (!empty($itemsOut)) {
+                    $journals[] = [
+                        'tenant_id' => 1, 'id_toko' => $idTokoMaster, 'reference_type' => 'TRANSFER_OUT',
+                        'reference_id' => $refId, 'reference_no' => $refId, 'date' => $date,
+                        'description' => "Inventory Out ($kode) -> $tokoId", 'created_at' => $now,
+                        '_items' => $itemsOut
+                    ];
+                }
+
+                // Journals In (Target Store context)
+                $itemsIn = [];
+                if ($valueNormal > 0) {
+                    $itemsIn[] = ['code' => '10' . $tokoId . '4', 'db' => $valueNormal, 'cr' => 0];
+                }
+                if ($valueCacat > 0) {
+                    $itemsIn[] = ['code' => '10' . $tokoId . '7', 'db' => $valueCacat, 'cr' => 0];
+                }
+                
+                if (!empty($itemsIn)) {
+                    $itemsIn[] = ['code' => '30' . $idTokoMaster . '1', 'db' => 0, 'cr' => $totalValue];
+                    $journals[] = [
+                        'tenant_id' => 1, 'id_toko' => $tokoId, 'reference_type' => 'TRANSFER_IN',
+                        'reference_id' => $refId, 'reference_no' => $refId, 'date' => $date,
+                        'description' => "Inventory In ($kode) <- Master", 'created_at' => $now,
+                        '_items' => $itemsIn
+                    ];
+                }
             }
             // Update Master Final Balance
             $stocksFinal[$kode][$idTokoMaster]['stock'] -= ($totalNormalAllStores - ($stocksFinal[$kode][$idTokoMaster]['stock'] ?? 0)); // Actually easier to just re-calculate
