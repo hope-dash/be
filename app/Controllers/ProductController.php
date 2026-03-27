@@ -673,38 +673,65 @@ class ProductController extends ResourceController
             $diffCacat = (int)$data->barang_cacat - $oldCacat;
             $alasan = $data->alasan ?? 'Penyesuaian manual (Opname)';
 
+            $oldTotal = $oldStock + $oldCacat;
+            $newTotal = (int)$data->stock + (int)$data->barang_cacat;
+            $totalDiff = $newTotal - $oldTotal;
+
             if ($diffStock != 0 || $diffCacat != 0) {
                 $refNo = 'ADJ-OPNAME-' . time();
                 $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Stock Opname: {$product['nama_barang']} ({$alasan})", $data->id_toko);
 
-                // 1. Adjustment Normal Stock
-                if ($diffStock != 0) {
-                    $valueStock = abs($diffStock * (float)$product['harga_modal']);
-                    if ($valueStock > 0) {
-                        if ($diffStock > 0) {
-                            // Surplus: Dr Inventory (10x4), Cr Equity (30x1)
-                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $valueStock, 0, $data->id_toko);
-                            $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueStock, $data->id_toko);
+                if ($totalDiff === 0) {
+                    // --- Reklasifikasi saja (total tidak berubah) ---
+                    // Hanya normal & cacat yang bergeser, tidak ada barang yg hilang/tambah
+                    $moveQty = abs($diffCacat); // bisa pakai diff mana saja, keduanya counterpart
+                    $moveValue = $moveQty * (float)$product['harga_modal'];
+
+                    if ($moveValue > 0) {
+                        if ($diffCacat > 0) {
+                            // Normal berkurang, Cacat bertambah → Normal ke Cacat
+                            // Dr Inventory Cacat (10x7), Cr Inventory Normal (10x4)
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $moveValue, 0, $data->id_toko);
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $moveValue, $data->id_toko);
                         } else {
-                            // Shortage: Dr HPP (50x1), Cr Inventory (10x4)
-                            $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueStock, 0, $data->id_toko);
-                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $valueStock, $data->id_toko);
+                            // Cacat berkurang, Normal bertambah → Cacat ke Normal
+                            // Dr Inventory Normal (10x4), Cr Inventory Cacat (10x7)
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $moveValue, 0, $data->id_toko);
+                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $moveValue, $data->id_toko);
                         }
                     }
-                }
+                } else {
+                    // --- Total berubah: ada selisih stok nyata ---
 
-                // 2. Adjustment Cacat Stock
-                if ($diffCacat != 0) {
-                    $valueCacat = abs($diffCacat * (float)$product['harga_modal']);
-                    if ($valueCacat > 0) {
-                        if ($diffCacat > 0) {
-                            // Surplus Cacat: Dr Inventory Cacat (10x7), Cr Equity (30x1)
-                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $valueCacat, 0, $data->id_toko);
-                            $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueCacat, $data->id_toko);
-                        } else {
-                            // Shortage Cacat: Dr HPP (50x1), Cr Inventory Cacat (10x7)
-                            $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueCacat, 0, $data->id_toko);
-                            $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $valueCacat, $data->id_toko);
+                    // 1. Adjustment Normal Stock
+                    if ($diffStock != 0) {
+                        $valueStock = abs($diffStock * (float)$product['harga_modal']);
+                        if ($valueStock > 0) {
+                            if ($diffStock > 0) {
+                                // Surplus: Dr Inventory Normal (10x4), Cr Ekuitas (30x1)
+                                $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $valueStock, 0, $data->id_toko);
+                                $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueStock, $data->id_toko);
+                            } else {
+                                // Shortage: Dr HPP (50x1), Cr Inventory Normal (10x4)
+                                $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueStock, 0, $data->id_toko);
+                                $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $valueStock, $data->id_toko);
+                            }
+                        }
+                    }
+
+                    // 2. Adjustment Cacat Stock
+                    if ($diffCacat != 0) {
+                        $valueCacat = abs($diffCacat * (float)$product['harga_modal']);
+                        if ($valueCacat > 0) {
+                            if ($diffCacat > 0) {
+                                // Surplus Cacat: Dr Inventory Cacat (10x7), Cr Ekuitas (30x1)
+                                $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $valueCacat, 0, $data->id_toko);
+                                $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueCacat, $data->id_toko);
+                            } else {
+                                // Shortage Cacat: Dr HPP (50x1), Cr Inventory Cacat (10x7)
+                                $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueCacat, 0, $data->id_toko);
+                                $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $valueCacat, $data->id_toko);
+                            }
                         }
                     }
                 }
