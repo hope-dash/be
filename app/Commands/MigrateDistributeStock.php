@@ -35,7 +35,10 @@ class MigrateDistributeStock extends BaseCommand
 
         $oldStockDist = $dbOld->query($sqlStock)->getResultArray();
         $oldPendingDist = $dbOld->query($sqlPending)->getResultArray();
-        $products = $dbOld->query($sqlProducts)->getResultArray();
+
+        // 🔹 FETCH PRODUCTS FROM NEW DB to ensure we respect deletions in New DB
+        $sqlProductsNew = "SELECT id_barang, harga_modal, harga_jual FROM product WHERE deleted_at IS NULL AND tenant_id = 1";
+        $products = $dbNew->query($sqlProductsNew)->getResultArray();
 
         $normalMap = []; // [kode][tokoId] = normal + pending
         $cacatMap = []; // [kode][tokoId] = cacat
@@ -59,8 +62,8 @@ class MigrateDistributeStock extends BaseCommand
             ];
         }
 
-        // We combine all products from both maps
-        $allKodes = array_unique(array_merge(array_keys($normalMap), array_keys($cacatMap)));
+        // Only process products that exist in NEW db
+        $allKodes = array_keys($productMaster);
 
         CLI::write("Stage 2: Processing Distribution & Journals...", 'yellow');
 
@@ -91,13 +94,15 @@ class MigrateDistributeStock extends BaseCommand
         foreach ($allKodes as $kode) {
             $storesNormal = $normalMap[$kode] ?? [];
             $storesCacat = $cacatMap[$kode] ?? [];
-            $allStoreIds = array_unique(array_merge(array_keys($storesNormal), array_keys($storesCacat)));
-
+            // allStoreIds fetch from old is just for iterating but we override with 1 and 2
+            
             $totalNormalAllStores = array_sum($storesNormal);
             $totalCacatAllStores = array_sum($storesCacat);
             $totalQtyProd = $totalNormalAllStores + $totalCacatAllStores;
 
-            $pInfo = $productMaster[$kode] ?? ['harga_modal' => 0, 'harga_jual' => 0];
+            if ($totalQtyProd <= 0) continue;
+
+            $pInfo = $productMaster[$kode];
             $itemModal = $pInfo['harga_modal'];
 
             // Initial Master Entry (PURCHASE)
@@ -109,18 +114,22 @@ class MigrateDistributeStock extends BaseCommand
                 'description' => "Migrasi: Stok Awal Master", 'created_at' => $now
             ];
 
-            // Distribution
+            // Distribution to Branch 1 & 2
+            $branches = [1, 2];
             $runningBalanceMaster = $totalQtyProd;
-            foreach ($allStoreIds as $tokoId) {
-                if ($tokoId == $idTokoMaster)
-                    continue;
 
+            foreach ($branches as $tokoId) {
                 $qNormal = $storesNormal[$tokoId] ?? 0;
                 $qCacat = $storesCacat[$tokoId] ?? 0;
-                $qTotal = $qNormal + $qCacat;
 
-                if ($qTotal == 0)
-                    continue;
+                // 🔸 IF TOKO 1, also take whatever was in Store 3 in Old DB
+                if ($tokoId == 1) {
+                    $qNormal += ($storesNormal[$idTokoMaster] ?? 0);
+                    $qCacat += ($storesCacat[$idTokoMaster] ?? 0);
+                }
+
+                $qTotal = $qNormal + $qCacat;
+                if ($qTotal <= 0) continue;
 
                 $refId = "TRF-MIG-" . date('ymd') . "-" . substr(md5($kode . $tokoId), 0, 8);
                 $valueNormal = $itemModal * $qNormal;
@@ -185,21 +194,8 @@ class MigrateDistributeStock extends BaseCommand
                     ];
                 }
             }
-            // Update Master Final Balance
-            $stocksFinal[$kode][$idTokoMaster]['stock'] -= ($totalNormalAllStores - ($stocksFinal[$kode][$idTokoMaster]['stock'] ?? 0)); // Actually easier to just re-calculate
-            // Wait, logic for Master Final:
-            $usedNormalX = 0;
-            $usedCacatX = 0;
-            foreach ($allStoreIds as $tid) {
-                if ($tid == $idTokoMaster)
-                    continue;
-                $usedNormalX += ($storesNormal[$tid] ?? 0);
-                $usedCacatX += ($storesCacat[$tid] ?? 0);
-            }
-            $stocksFinal[$kode][$idTokoMaster] = [
-                'stock' => $totalNormalAllStores - $usedNormalX,
-                'cacat' => $totalCacatAllStores - $usedCacatX
-            ];
+            // Update Master Final Balance to ZERO as requested (everything distributed to 1 & 2)
+            $stocksFinal[$kode][$idTokoMaster] = ['stock' => 0, 'cacat' => 0];
         }
 
         CLI::write("Stage 3: Inserting Collections...", 'yellow');
