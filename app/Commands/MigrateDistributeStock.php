@@ -58,8 +58,7 @@ class MigrateDistributeStock extends BaseCommand
             "SELECT sp.kode_barang, t.id_toko, SUM(sp.jumlah) as pending
              FROM sales_product sp
              JOIN `transaction` t ON t.id = sp.id_transaction
-             WHERE t.status = 'WAITING_PAYMENT'
-               AND t.id_toko != 3
+             WHERE t.status IN ('WAITING_PAYMENT','PARTIALLY_PAID')
              GROUP BY sp.kode_barang, t.id_toko"
         )->getResultArray();
 

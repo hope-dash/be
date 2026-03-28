@@ -38,7 +38,7 @@ class MigrateStockToBelanja extends BaseCommand
                 SELECT sp.kode_barang, SUM(sp.jumlah) as total_pending
                 FROM sales_product sp
                 JOIN transaction t ON t.id = sp.id_transaction
-                WHERE t.status IN ('WAITING_PAYMENT')
+                WHERE t.status IN ('WAITING_PAYMENT','PARTIALLY_PAID')
                 GROUP BY sp.kode_barang
             ) ps ON ps.kode_barang = p.id_barang
             WHERE p.deleted_at IS NULL
