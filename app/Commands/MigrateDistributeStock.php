@@ -10,246 +10,338 @@ class MigrateDistributeStock extends BaseCommand
 {
     protected $group = 'Migration';
     protected $name = 'migrate:distribute-stock';
-    protected $description = 'Finalize Master Stock and Distribute to Stores with Journals (Merged Normal/Pending and Separate Cacat)';
+    protected $description = 'Distribute stock from Master Toko (ID 3) to branches based on OLD DB stock per product';
 
     public function run(array $params)
     {
         $dbOld = Database::connect('old');
         $dbNew = Database::connect('default');
 
-        CLI::write("Stage 1: Calculation...", 'yellow');
-
-        // Fetch distribution from OLD DB
-        $sqlStock = "SELECT s.id_barang, s.id_toko, s.stock as normal, s.barang_cacat as cacat 
-                     FROM stock s 
-                     JOIN product p ON p.id_barang = s.id_barang 
-                     WHERE p.deleted_at IS NULL";
-        $sqlPending = "SELECT sp.kode_barang as id_barang, t.id_toko, SUM(sp.jumlah) as pending 
-                       FROM sales_product sp 
-                       JOIN transaction t ON t.id = sp.id_transaction 
-                       JOIN product p ON p.id_barang = sp.kode_barang
-                       WHERE t.status IN ('WAITING_PAYMENT', 'REFUNDED') 
-                       AND p.deleted_at IS NULL
-                       GROUP BY sp.kode_barang, t.id_toko";
-        $sqlProducts = "SELECT id_barang, harga_modal, harga_jual FROM product WHERE deleted_at IS NULL";
-
-        $oldStockDist = $dbOld->query($sqlStock)->getResultArray();
-        $oldPendingDist = $dbOld->query($sqlPending)->getResultArray();
-
-        // 🔹 FETCH PRODUCTS FROM NEW DB to ensure we respect deletions in New DB
-        $sqlProductsNew = "SELECT id_barang, harga_modal, harga_jual FROM product WHERE deleted_at IS NULL AND tenant_id = 1";
-        $products = $dbNew->query($sqlProductsNew)->getResultArray();
-
-        $normalMap = []; // [kode][tokoId] = normal + pending
-        $cacatMap = []; // [kode][tokoId] = cacat
-        $productMaster = [];
-
-        foreach ($oldStockDist as $row) {
-            $kode = $row['id_barang'];
-            $tokoId = $row['id_toko'];
-            $normalMap[$kode][$tokoId] = ($normalMap[$kode][$tokoId] ?? 0) + (int)$row['normal'];
-            $cacatMap[$kode][$tokoId] = ($cacatMap[$kode][$tokoId] ?? 0) + (int)$row['cacat'];
-        }
-        foreach ($oldPendingDist as $row) {
-            $kode = $row['id_barang'];
-            $tokoId = $row['id_toko'];
-            $normalMap[$kode][$tokoId] = ($normalMap[$kode][$tokoId] ?? 0) + (int)$row['pending'];
-        }
-        foreach ($products as $p) {
-            $productMaster[$p['id_barang']] = [
-                'harga_modal' => round((float)$p['harga_modal']),
-                'harga_jual' => round((float)$p['harga_jual'])
-            ];
-        }
-
-        // Only process products that exist in NEW db
-        $allKodes = array_keys($productMaster);
-
-        CLI::write("Stage 2: Processing Distribution & Journals...", 'yellow');
-
-        // Cleanup stock/ledgers for this tenant to avoid duplicates (KEEPING JOURNALS)
-        CLI::write("Cleaning stock and stock_ledgers for Tenant 1 (Safe Wipe)...", 'red');
-        $dbNew->query('SET FOREIGN_KEY_CHECKS=0');
-        $dbNew->table('stock')->where('tenant_id', 1)->delete();
-        $dbNew->table('stock_ledgers')->where('tenant_id', 1)->delete();
-        $dbNew->query('SET FOREIGN_KEY_CHECKS=1');
-
         $idTokoMaster = 3;
+        $tenantId = 1;
         $now = date('Y-m-d H:i:s');
         $date = date('Y-m-d');
 
-        $stocksFinal = []; // [kode][tokoId] = ['stock' => X, 'cacat' => Y]
-        $ledgers = [];
-        $journals = [];
-        $journal_items = [];
+        // ─────────────────────────────────────────────────────────
+        // STAGE 1: Bulk-load everything into memory
+        // ─────────────────────────────────────────────────────────
+        CLI::write("Stage 1: Bulk-loading data...", 'yellow');
 
-        // 1. Fetch the latest Purchase record
-        $pembelian = $dbNew->table('pembelian')->where('id_toko', $idTokoMaster)->orderBy('id', 'DESC')->get()->getRowArray();
-        $pembelianId = $pembelian ? $pembelian['id'] : 0;
+        // 1a. Products from NEW DB (source of truth)
+        $products = $dbNew->query(
+            "SELECT id_barang, harga_modal FROM product WHERE tenant_id = ? AND deleted_at IS NULL",
+        [$tenantId]
+        )->getResultArray();
 
-        if ($pembelianId) {
-            $dbNew->table('pembelian')->where('id', $pembelianId)->update(['status' => 'SUCCESS']);
+        $productMap = [];
+        foreach ($products as $p) {
+            $productMap[$p['id_barang']] = round((float)$p['harga_modal']);
+        }
+        CLI::write("  Products: " . count($productMap), 'cyan');
+
+        // 1b. OLD DB stock (all branches, exclude master id 3)
+        $oldStocks = $dbOld->query(
+            "SELECT id_barang, id_toko, stock, barang_cacat FROM stock WHERE id_toko != 3"
+        )->getResultArray();
+
+        $oldStockByKode = [];
+        foreach ($oldStocks as $row) {
+            $k = $row['id_barang'];
+            $t = (int)$row['id_toko'];
+            $oldStockByKode[$k][$t]['normal'] = ($oldStockByKode[$k][$t]['normal'] ?? 0) + (int)$row['stock'];
+            $oldStockByKode[$k][$t]['cacat'] = ($oldStockByKode[$k][$t]['cacat'] ?? 0) + (int)$row['barang_cacat'];
+        }
+        CLI::write("  Old stock rows: " . count($oldStocks), 'cyan');
+
+        // 1c. OLD DB WAITING_PAYMENT pending per product per branch
+        $oldPending = $dbOld->query(
+            "SELECT sp.kode_barang, t.id_toko, SUM(sp.jumlah) as pending
+             FROM sales_product sp
+             JOIN `transaction` t ON t.id = sp.id_transaction
+             WHERE t.status = 'WAITING_PAYMENT'
+               AND t.id_toko != 3
+             GROUP BY sp.kode_barang, t.id_toko"
+        )->getResultArray();
+
+        $pendingByKode = [];
+        foreach ($oldPending as $row) {
+            $k = $row['kode_barang'];
+            $t = (int)$row['id_toko'];
+            $pendingByKode[$k][$t] = ($pendingByKode[$k][$t] ?? 0) + (int)$row['pending'];
+        }
+        CLI::write("  Pending rows: " . count($oldPending), 'cyan');
+
+        // 1d. NEW DB master stocks (id_toko = 3)
+        $masterStockRows = $dbNew->query(
+            "SELECT id, id_barang, stock, barang_cacat FROM stock WHERE id_toko = ? AND tenant_id = ?",
+        [$idTokoMaster, $tenantId]
+        )->getResultArray();
+
+        $masterStockMap = [];
+        foreach ($masterStockRows as $row) {
+            $masterStockMap[$row['id_barang']] = [
+                'id' => $row['id'],
+                'normal' => (int)$row['stock'],
+                'cacat' => (int)$row['barang_cacat'],
+            ];
+        }
+        CLI::write("  Master stock rows: " . count($masterStockMap), 'cyan');
+
+        // 1e. NEW DB existing branch stocks (id_toko != 3)
+        $branchStockRows = $dbNew->query(
+            "SELECT id, id_barang, id_toko, stock, barang_cacat FROM stock WHERE id_toko != ? AND tenant_id = ?",
+        [$idTokoMaster, $tenantId]
+        )->getResultArray();
+
+        $branchStockMap = [];
+        foreach ($branchStockRows as $row) {
+            $branchStockMap[$row['id_barang']][(int)$row['id_toko']] = [
+                'id' => $row['id'],
+                'normal' => (int)$row['stock'],
+                'cacat' => (int)$row['barang_cacat'],
+            ];
+        }
+        CLI::write("  Branch stock rows: " . count($branchStockRows), 'cyan');
+
+        // 1f. Account map
+        $accRows = $dbNew->table('accounts')->get()->getResultArray();
+        $accMap = [];
+        foreach ($accRows as $r) {
+            $accMap[$r['code']] = $r['id'];
         }
 
-        foreach ($allKodes as $kode) {
-            $storesNormal = $normalMap[$kode] ?? [];
-            $storesCacat = $cacatMap[$kode] ?? [];
-            // allStoreIds fetch from old is just for iterating but we override with 1 and 2
-            
-            $totalNormalAllStores = array_sum($storesNormal);
-            $totalCacatAllStores = array_sum($storesCacat);
-            $totalQtyProd = $totalNormalAllStores + $totalCacatAllStores;
+        // ─────────────────────────────────────────────────────────
+        // STAGE 2: Process distributions in memory
+        // ─────────────────────────────────────────────────────────
+        CLI::write("Stage 2: Computing distributions...", 'yellow');
 
-            if ($totalQtyProd <= 0) continue;
+        $stockUpdates = []; // [id => [stock, barang_cacat]]
+        $stockInserts = [];
+        $ledgerInserts = [];
+        $journalQueue = []; // journals + items to insert sequentially
 
-            $pInfo = $productMaster[$kode];
-            $itemModal = $pInfo['harga_modal'];
+        $totalTransferred = 0;
+        $skipped = 0;
 
-            // Initial Master Entry (PURCHASE)
-            $stocksFinal[$kode][$idTokoMaster] = ['stock' => $totalNormalAllStores, 'cacat' => $totalCacatAllStores];
-            $ledgers[] = [
-                'tenant_id' => 1, 'id_barang' => $kode, 'id_toko' => $idTokoMaster,
-                'qty' => $totalQtyProd, 'balance' => $totalQtyProd,
-                'reference_type' => 'PURCHASE', 'reference_id' => $pembelianId,
-                'description' => "Migrasi: Stok Awal Master", 'created_at' => $now
-            ];
+        foreach ($productMap as $kode => $itemModal) {
+            $branches = $oldStockByKode[$kode] ?? [];
 
-            // Distribution to Branch 1 & 2
-            $branches = [1, 2];
-            $runningBalanceMaster = $totalQtyProd;
+            // Merge pending into branch map
+            foreach (($pendingByKode[$kode] ?? []) as $tid => $pending) {
+                $branches[$tid]['normal'] = ($branches[$tid]['normal'] ?? 0) + $pending;
+                $branches[$tid]['cacat'] = $branches[$tid]['cacat'] ?? 0;
+            }
 
-            foreach ($branches as $tokoId) {
-                $qNormal = $storesNormal[$tokoId] ?? 0;
-                $qCacat = $storesCacat[$tokoId] ?? 0;
+            if (empty($branches)) {
+                $skipped++;
+                continue;
+            }
 
-                // 🔸 IF TOKO 1, also take whatever was in Store 3 in Old DB
-                if ($tokoId == 1) {
-                    $qNormal += ($storesNormal[$idTokoMaster] ?? 0);
-                    $qCacat += ($storesCacat[$idTokoMaster] ?? 0);
+            if (!isset($masterStockMap[$kode])) {
+                $skipped++;
+                continue;
+            }
+
+            $masterNormal = $masterStockMap[$kode]['normal'];
+            $masterCacat = $masterStockMap[$kode]['cacat'];
+            $masterId = $masterStockMap[$kode]['id'];
+
+            foreach ($branches as $tokoId => $qty) {
+                $qNormal = $qty['normal'];
+                $qCacat = $qty['cacat'];
+                $qTotal = $qNormal + $qCacat;
+
+                if ($qTotal <= 0)
+                    continue;
+
+                // Cap to what master has
+                if ($qTotal > ($masterNormal + $masterCacat)) {
+                    $qNormal = min($qNormal, $masterNormal);
+                    $qCacat = min($qCacat, $masterCacat);
+                    $qTotal = $qNormal + $qCacat;
+                    if ($qTotal <= 0)
+                        continue;
                 }
 
-                $qTotal = $qNormal + $qCacat;
-                if ($qTotal <= 0) continue;
-
-                $refId = "TRF-MIG-" . date('ymd') . "-" . substr(md5($kode . $tokoId), 0, 8);
+                $refId = 'TRF-MIG-' . date('ymd') . '-' . substr(md5($kode . $tokoId), 0, 8);
                 $valueNormal = $itemModal * $qNormal;
                 $valueCacat = $itemModal * $qCacat;
                 $totalValue = $valueNormal + $valueCacat;
 
-                $runningBalanceMaster -= $qTotal;
-                $stocksFinal[$kode][$tokoId] = ['stock' => $qNormal, 'cacat' => $qCacat];
+                // Deduct from master (in memory)
+                $masterNormal -= $qNormal;
+                $masterCacat -= $qCacat;
 
-                // Ledger Out Master
-                $ledgers[] = [
-                    'tenant_id' => 1, 'id_barang' => $kode, 'id_toko' => $idTokoMaster,
-                    'qty' => -$qTotal, 'balance' => $runningBalanceMaster,
+                // Queue master stock update
+                $stockUpdates[$masterId] = ['stock' => $masterNormal, 'cacat' => $masterCacat];
+
+                // Queue branch stock upsert
+                if (isset($branchStockMap[$kode][$tokoId])) {
+                    $bId = $branchStockMap[$kode][$tokoId]['id'];
+                    $newNormal = ($stockUpdates[$bId]['stock'] ?? $branchStockMap[$kode][$tokoId]['normal']) + $qNormal;
+                    $newCacat = ($stockUpdates[$bId]['cacat'] ?? $branchStockMap[$kode][$tokoId]['cacat']) + $qCacat;
+                    $stockUpdates[$bId] = ['stock' => $newNormal, 'cacat' => $newCacat];
+                    $branchBalance = $newNormal + $newCacat;
+                }
+                else {
+                    // Track that we need to insert (use negative key to avoid collision)
+                    $insertKey = $kode . '_' . $tokoId;
+                    if (!isset($stockInserts[$insertKey])) {
+                        $stockInserts[$insertKey] = [
+                            'tenant_id' => $tenantId, 'id_barang' => $kode, 'id_toko' => $tokoId,
+                            'stock' => 0, 'barang_cacat' => 0,
+                        ];
+                    }
+                    $stockInserts[$insertKey]['stock'] += $qNormal;
+                    $stockInserts[$insertKey]['barang_cacat'] += $qCacat;
+                    $branchBalance = $stockInserts[$insertKey]['stock'] + $stockInserts[$insertKey]['barang_cacat'];
+                }
+
+                $masterBalance = $masterNormal + $masterCacat;
+
+                // Ledgers
+                $ledgerInserts[] = [
+                    'tenant_id' => $tenantId, 'id_barang' => $kode, 'id_toko' => $idTokoMaster,
+                    'qty' => -$qTotal, 'balance' => $masterBalance,
                     'reference_type' => 'TRANSFER_OUT', 'reference_id' => $refId,
-                    'description' => "Migrasi: Transfer ke Toko $tokoId", 'created_at' => $now
+                    'description' => "Migrasi: Transfer ke Toko $tokoId", 'created_at' => $now,
                 ];
-
-                // Ledger In Target
-                $ledgers[] = [
-                    'tenant_id' => 1, 'id_barang' => $kode, 'id_toko' => $tokoId,
-                    'qty' => $qTotal, 'balance' => $qTotal,
+                $ledgerInserts[] = [
+                    'tenant_id' => $tenantId, 'id_barang' => $kode, 'id_toko' => $tokoId,
+                    'qty' => $qTotal, 'balance' => $branchBalance,
                     'reference_type' => 'TRANSFER_IN', 'reference_id' => $refId,
-                    'description' => "Migrasi: Terima dari Master", 'created_at' => $now
+                    'description' => "Migrasi: Terima dari Master", 'created_at' => $now,
                 ];
 
-                // Journals Out (Master Store context)
-                $itemsOut = [];
-                if ($valueNormal > 0) {
-                    $itemsOut[] = ['code' => '10' . $tokoId . '4', 'db' => $valueNormal, 'cr' => 0];
-                    $itemsOut[] = ['code' => '10' . $idTokoMaster . '4', 'db' => 0, 'cr' => $valueNormal];
-                }
-                if ($valueCacat > 0) {
-                    $itemsOut[] = ['code' => '10' . $tokoId . '7', 'db' => $valueCacat, 'cr' => 0];
-                    $itemsOut[] = ['code' => '10' . $idTokoMaster . '7', 'db' => 0, 'cr' => $valueCacat];
-                }
+                // Journals (need to be inserted to get ID for items)
+                if ($totalValue > 0) {
+                    $outItems = [];
+                    if ($valueNormal > 0) {
+                        if (isset($accMap['10' . $tokoId . '4']))
+                            $outItems[] = ['account_id' => $accMap['10' . $tokoId . '4'], 'debit' => $valueNormal, 'credit' => 0];
+                        if (isset($accMap['10' . $idTokoMaster . '4']))
+                            $outItems[] = ['account_id' => $accMap['10' . $idTokoMaster . '4'], 'debit' => 0, 'credit' => $valueNormal];
+                    }
+                    if ($valueCacat > 0) {
+                        if (isset($accMap['10' . $tokoId . '7']))
+                            $outItems[] = ['account_id' => $accMap['10' . $tokoId . '7'], 'debit' => $valueCacat, 'credit' => 0];
+                        // Credit dari normal master (1034), bukan dari cacat master
+                        if (isset($accMap['10' . $idTokoMaster . '4']))
+                            $outItems[] = ['account_id' => $accMap['10' . $idTokoMaster . '4'], 'debit' => 0, 'credit' => $valueCacat];
+                    }
 
-                if (!empty($itemsOut)) {
-                    $journals[] = [
-                        'tenant_id' => 1, 'id_toko' => $idTokoMaster, 'reference_type' => 'TRANSFER_OUT',
-                        'reference_id' => $refId, 'reference_no' => $refId, 'date' => $date,
-                        'description' => "Inventory Out ($kode) -> $tokoId", 'created_at' => $now,
-                        '_items' => $itemsOut
+                    $inItems = [];
+                    if ($valueNormal > 0 && isset($accMap['10' . $tokoId . '4'])) {
+                        $inItems[] = ['account_id' => $accMap['10' . $tokoId . '4'], 'debit' => $valueNormal, 'credit' => 0];
+                    }
+                    if ($valueCacat > 0 && isset($accMap['10' . $tokoId . '7'])) {
+                        $inItems[] = ['account_id' => $accMap['10' . $tokoId . '7'], 'debit' => $valueCacat, 'credit' => 0];
+                    }
+                    if (!empty($inItems) && isset($accMap['30' . $idTokoMaster . '1'])) {
+                        $inItems[] = ['account_id' => $accMap['30' . $idTokoMaster . '1'], 'debit' => 0, 'credit' => $totalValue];
+                    }
+
+                    $journalQueue[] = [
+                        'out' => [
+                            'tenant_id' => $tenantId, 'id_toko' => $idTokoMaster,
+                            'reference_type' => 'TRANSFER_OUT', 'reference_id' => $refId,
+                            'reference_no' => $refId, 'date' => $date,
+                            'description' => "Inventory Out ($kode) -> Toko $tokoId", 'created_at' => $now,
+                        ],
+                        'out_items' => $outItems,
+                        'in' => [
+                            'tenant_id' => $tenantId, 'id_toko' => $tokoId,
+                            'reference_type' => 'TRANSFER_IN', 'reference_id' => $refId,
+                            'reference_no' => $refId, 'date' => $date,
+                            'description' => "Inventory In ($kode) <- Master", 'created_at' => $now,
+                        ],
+                        'in_items' => $inItems,
                     ];
                 }
 
-                // Journals In (Target Store context)
-                $itemsIn = [];
-                if ($valueNormal > 0) {
-                    $itemsIn[] = ['code' => '10' . $tokoId . '4', 'db' => $valueNormal, 'cr' => 0];
-                }
-                if ($valueCacat > 0) {
-                    $itemsIn[] = ['code' => '10' . $tokoId . '7', 'db' => $valueCacat, 'cr' => 0];
-                }
-                
-                if (!empty($itemsIn)) {
-                    $itemsIn[] = ['code' => '30' . $idTokoMaster . '1', 'db' => 0, 'cr' => $totalValue];
-                    $journals[] = [
-                        'tenant_id' => 1, 'id_toko' => $tokoId, 'reference_type' => 'TRANSFER_IN',
-                        'reference_id' => $refId, 'reference_no' => $refId, 'date' => $date,
-                        'description' => "Inventory In ($kode) <- Master", 'created_at' => $now,
-                        '_items' => $itemsIn
-                    ];
-                }
+                $totalTransferred++;
             }
-            // Update Master Final Balance to ZERO as requested (everything distributed to 1 & 2)
-            $stocksFinal[$kode][$idTokoMaster] = ['stock' => 0, 'cacat' => 0];
+
+            // Sync master balance after processing all branches for this product
+            $masterStockMap[$kode]['normal'] = $masterNormal;
+            $masterStockMap[$kode]['cacat'] = $masterCacat;
         }
 
-        CLI::write("Stage 3: Inserting Collections...", 'yellow');
+        CLI::write("  Distributions computed: $totalTransferred, Skipped: $skipped", 'cyan');
+
+        // ─────────────────────────────────────────────────────────
+        // STAGE 3: Batch commit to DB
+        // ─────────────────────────────────────────────────────────
+        CLI::write("Stage 3: Writing to database...", 'yellow');
+
         $dbNew->transStart();
 
-        // 1. Cleanup current run data? (User said no, so I assume we run on clean DB or user handled)
-        // I will use raw query cleanup for stock/ledgers for this run only if there are duplicates, 
-        // but user specifically said "jangan hapus jurnal", so I'll just skip cleanup.
-        // To be safe, let's use insertBatch. If it fails, user might need to truncate.
+        // 3a. Stock updates (bulk via raw SQL for speed)
+        foreach ($stockUpdates as $stockId => $vals) {
+            $dbNew->query(
+                "UPDATE stock SET stock = ?, barang_cacat = ? WHERE id = ?",
+            [$vals['stock'], $vals['cacat'], $stockId]
+            );
+        }
+        CLI::write("  Stock updated: " . count($stockUpdates) . " rows", 'cyan');
 
-        $stockInserts = [];
-        foreach ($stocksFinal as $kode => $stores) {
-            foreach ($stores as $tid => $q) {
-                $stockInserts[] = [
-                    'tenant_id' => 1, 'id_barang' => $kode, 'id_toko' => $tid,
-                    'stock' => $q['stock'], 'barang_cacat' => $q['cacat']
-                ];
+        // 3b. Stock inserts (batch)
+        if (!empty($stockInserts)) {
+            $chunks = array_chunk(array_values($stockInserts), 300);
+            foreach ($chunks as $chunk) {
+                $dbNew->table('stock')->ignore(true)->insertBatch($chunk);
             }
         }
-        $this->batchInsert($dbNew, 'stock', $stockInserts);
-        $this->batchInsert($dbNew, 'stock_ledgers', $ledgers, 300);
+        CLI::write("  Stock inserted: " . count($stockInserts) . " rows", 'cyan');
 
-        $accRows = $dbNew->table('accounts')->get()->getResultArray();
-        $accMap = [];
-        foreach ($accRows as $r)
-            $accMap[$r['code']] = $r['id'];
+        // 3c. Ledgers (batch)
+        if (!empty($ledgerInserts)) {
+            $chunks = array_chunk($ledgerInserts, 500);
+            foreach ($chunks as $chunk) {
+                $dbNew->table('stock_ledgers')->ignore(true)->insertBatch($chunk);
+            }
+        }
+        CLI::write("  Ledgers inserted: " . count($ledgerInserts) . " rows", 'cyan');
 
-        foreach ($journals as $j) {
-            $_items = $j['_items'];
-            unset($j['_items']);
-            $dbNew->table('journals')->insert($j);
-            $jid = $dbNew->insertID();
-            foreach ($_items as $item) {
-                if (isset($accMap[$item['code']])) {
-                    $journal_items[] = [
-                        'journal_id' => $jid, 'account_id' => $accMap[$item['code']],
-                        'debit' => $item['db'], 'credit' => $item['cr'], 'created_at' => $now
-                    ];
+        // 3d. Journals + items (sequential insert for IDs, but batch items)
+        $allJournalItems = [];
+        foreach ($journalQueue as $entry) {
+            // OUT journal
+            if (!empty($entry['out_items'])) {
+                $dbNew->table('journals')->insert($entry['out']);
+                $jidOut = $dbNew->insertID();
+                foreach ($entry['out_items'] as $item) {
+                    $allJournalItems[] = ['journal_id' => $jidOut, 'account_id' => $item['account_id'], 'debit' => $item['debit'], 'credit' => $item['credit'], 'created_at' => $now];
+                }
+            }
+            // IN journal
+            if (!empty($entry['in_items'])) {
+                $dbNew->table('journals')->insert($entry['in']);
+                $jidIn = $dbNew->insertID();
+                foreach ($entry['in_items'] as $item) {
+                    $allJournalItems[] = ['journal_id' => $jidIn, 'account_id' => $item['account_id'], 'debit' => $item['debit'], 'credit' => $item['credit'], 'created_at' => $now];
                 }
             }
         }
-        $this->batchInsert($dbNew, 'journal_items', $journal_items, 500);
+        // Batch insert all journal items at once
+        if (!empty($allJournalItems)) {
+            $chunks = array_chunk($allJournalItems, 500);
+            foreach ($chunks as $chunk) {
+                $dbNew->table('journal_items')->insertBatch($chunk);
+            }
+        }
+        CLI::write("  Journals: " . count($journalQueue) . " pairs, Items: " . count($allJournalItems), 'cyan');
 
         $dbNew->transComplete();
-        CLI::write("Distribution Complete!", 'green');
-    }
 
-    private function batchInsert($db, $table, $data, $size = 200)
-    {
-        if (empty($data))
-            return;
-        $chunks = array_chunk($data, $size);
-        foreach ($chunks as $chunk) {
-            $db->table($table)->ignore(true)->insertBatch($chunk);
+        CLI::write("", 'white');
+        if ($dbNew->transStatus() === false) {
+            CLI::error("Transaction FAILED. Check DB errors.");
+        }
+        else {
+            CLI::write("Distribution Complete!", 'green');
+            CLI::write("  Transferred: $totalTransferred", 'green');
+            CLI::write("  Skipped:     $skipped", 'yellow');
         }
     }
 }
