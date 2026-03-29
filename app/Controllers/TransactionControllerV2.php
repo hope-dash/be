@@ -134,7 +134,7 @@ class TransactionControllerV2 extends ResourceController
                 }
                 else {
                     $itemDiscountType = 'FIXED';
-                    $itemDiscountValue = $itemDiscountAmount;
+                    $itemDiscountValue = $itemDiscountAmount * $qty; // Discount per unit
                 }
 
                 // Validate Stock
