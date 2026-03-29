@@ -392,6 +392,7 @@ class CustomerTransactionControllerV2 extends ResourceController
                     'kode_pos' => $data['kode_pos'] ?? $customer['kode_pos'],
                     'pengiriman' => $pengirimanCourier,
                     'biaya_pengiriman' => $shippingCost,
+                    'free_ongkir' => ($shippingCost == 0 && !empty($pengirimanCourier)) ? '1' : '0',
                     'tx_discount_value' => $txnDiscountValue,
                     'item_discount_total' => $totalItemDiscount,
                     'source' => 'CUSTOMER_PORTAL'

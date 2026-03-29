@@ -514,7 +514,7 @@
                                 <tr>
                                     <td>Ongkos Kirim:</td>
                                     <td class="text-right">
-                                        <?php if ($transaction['meta']['free_ongkir'] == 1): ?>
+                                        <?php if (!empty($transaction['meta']['free_ongkir']) && $transaction['meta']['free_ongkir'] == 1): ?>
                                             <span style="text-decoration: line-through; color: #999;">Rp
                                                 <?= number_format($transaction['meta']['biaya_pengiriman'], 0, ',', '.') ?></span>
                                             <span style="color: #27ae60; font-weight: bold; margin-left: 5px;">GRATIS</span>
