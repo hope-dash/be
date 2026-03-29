@@ -6,6 +6,7 @@ use CodeIgniter\Controller;
 use App\Models\TransactionModel;
 use App\Models\TransactionMetaModel;
 use App\Models\TransactionPaymentModel;
+use App\Libraries\TenantContext;
 
 class InvoiceController extends Controller
 {
@@ -199,25 +200,42 @@ class InvoiceController extends Controller
     {
         $db = \Config\Database::connect();
 
-        // Get Transaction with Toko info
+        // 1. Get Transaction with Toko info (Matches TransactionControllerV2::getDetail)
         $transaction = $this->transactionModel
-            ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.email_toko, toko.image_logo as toko_logo, toko.bank, toko.nama_pemilik, toko.nomer_rekening')
-            ->join('toko', 'transaction.id_toko = toko.id', 'left')
+            ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo, toko.bank, toko.nomer_rekening, toko.nama_pemilik')
+            ->join('toko', 'transaction.id_toko = toko.id AND toko.tenant_id = transaction.tenant_id', 'left')
             ->find($id);
 
         if (!$transaction) {
             return null;
         }
 
-        // Get All Metadata
+        // 2. Get All Metadata
         $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
         $metaMap = [];
         foreach ($metas as $m) {
             $metaMap[$m['key']] = $m['value'];
         }
+
+        // Resolve Regional Names if they are stored as IDs/Codes
+        $regions = [
+            'provinsi' => 'provincy',
+            'kota_kabupaten' => 'kota_kabupaten',
+            'kecamatan' => 'kecamatan',
+            'kelurahan' => 'kelurahan'
+        ];
+        foreach ($regions as $key => $table) {
+            if (isset($metaMap[$key]) && is_numeric($metaMap[$key]) && !empty($metaMap[$key])) {
+                $regionalData = $db->table($table)->where('code', $metaMap[$key])->get()->getRowArray();
+                if ($regionalData) {
+                    $metaMap[$key] = $regionalData['name'];
+                }
+            }
+        }
+
         $transaction['meta'] = $metaMap;
 
-        // Get Items (Sales Product)
+        // 3. Get Items (Sales Product)
         $items = $db->table('sales_product sp')
             ->select("
                 sp.*,
@@ -227,16 +245,17 @@ class InvoiceController extends Controller
                 s.seri,
                 CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang
             ")
-            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
-            ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
-            ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+            ->join('product p', 'sp.kode_barang = p.id_barang AND p.tenant_id = sp.tenant_id', 'left')
+            ->join('model_barang mb', 'p.id_model_barang = mb.id AND mb.tenant_id = sp.tenant_id', 'left')
+            ->join('seri s', 'p.id_seri_barang = s.id AND s.tenant_id = sp.tenant_id', 'left')
             ->where('sp.id_transaction', $id)
+            ->where('sp.tenant_id', TenantContext::id())
             ->get()
             ->getResultArray();
 
         $transaction['items'] = $items;
 
-        // Get Payments
+        // 4. Get Payments
         $payments = $this->paymentModel
             ->where('transaction_id', $id)
             ->orderBy('paid_at', 'DESC')
@@ -244,10 +263,10 @@ class InvoiceController extends Controller
 
         $transaction['payments'] = $payments;
 
-        // Get Customer info if exists
+        // Add Customer info if exists (from id_customer)
         if (!empty($transaction['id_customer'])) {
             $customer = $db->table('customer')
-                ->select('nama_customer, phone_number, alamat')
+                ->select('nama_customer, no_hp_customer as phone_number, alamat')
                 ->where('id', $transaction['id_customer'])
                 ->get()
                 ->getRowArray();

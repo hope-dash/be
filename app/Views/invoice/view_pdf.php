@@ -530,20 +530,21 @@
                         if (!empty($transaction['meta']['adjustments'])):
                             $adjustments = json_decode($transaction['meta']['adjustments'], true) ?? [];
                             foreach ($adjustments as $adj):
-                                $isAddition = ($adj['type'] === 'addition');
-                                $sign = $isAddition ? '+ Rp ' : '- Rp ';
+                                if (($adj['category'] ?? '') === 'PPN') continue;
+                                $isSubtraction = (($adj['type'] ?? '') === 'subtraction' || ($adj['type'] ?? '') === 'reduction');
+                                $color = $isSubtraction ? '#059669' : '#666';
+                                $sign = $isSubtraction ? '- ' : '+ ';
                                 ?>
-                                <table class="summary-row" cellpadding="0" cellspacing="0">
+                                <table class="summary-row" cellpadding="0" cellspacing="0" style="color: <?= $color ?>;">
                                     <tr>
-                                        <td><?= esc($adj['component_name']) ?>:</td>
-                                        <td class="text-right"><?= $sign . number_format($adj['amount'], 0, ',', '.') ?></td>
+                                        <td><?= esc($adj['component_name'] ?? $adj['category'] ?? 'Penyesuaian') ?>:</td>
+                                        <td class="text-right"><?= $sign ?>Rp <?= number_format($adj['amount'], 0, ',', '.') ?></td>
                                     </tr>
                                 </table>
                                 <?php
                             endforeach;
                         endif;
                         ?>
-
                         <table class="summary-row total" cellpadding="0" cellspacing="0">
                             <tr>
                                 <td>TOTAL:</td>
@@ -552,19 +553,19 @@
                                 </td>
                             </tr>
                         </table>
-                        <?php if (!empty($transaction['total_paid'])): ?>
-                            <table class="summary-row" cellpadding="0" cellspacing="0">
+                        <?php if (isset($transaction['total_paid']) && $transaction['total_paid'] > 0): ?>
+                            <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #059669;">
                                 <tr>
-                                    <td style="color: #27ae60;">Dibayar:</td>
-                                    <td class="text-right" style="color: #27ae60;">Rp
+                                    <td>Dibayar:</td>
+                                    <td class="text-right">Rp
                                         <?= number_format($transaction['total_paid'], 0, ',', '.') ?>
                                     </td>
                                 </tr>
                             </table>
-                            <table class="summary-row" cellpadding="0" cellspacing="0">
+                            <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #dc2626; font-weight: bold;">
                                 <tr>
-                                    <td style="color: #e74c3c;">Sisa:</td>
-                                    <td class="text-right" style="color: #e74c3c;">Rp
+                                    <td>Sisa:</td>
+                                    <td class="text-right">Rp
                                         <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) - $transaction['total_paid'], 0, ',', '.') ?>
                                     </td>
                                 </tr>
