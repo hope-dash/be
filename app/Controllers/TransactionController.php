@@ -538,7 +538,7 @@ class TransactionController extends BaseController
         $search = $request->getGet('search');
         $total_min = $request->getGet('total_min');
         $total_max = $request->getGet('total_max');
-        $sortBy = $request->getGet('sortBy') ?: 't.id';
+        $sortByRaw = $request->getGet('sortBy') ?: 't.id';
         $sortMethod = strtolower($request->getGet('sortMethod') ?: 'desc');
         $limit = max((int) ($request->getGet('limit') ?: 10), 1);
         $page = max((int) ($request->getGet('page') ?: 1), 1);
@@ -549,10 +549,21 @@ class TransactionController extends BaseController
         }
 
         // Determine if we can use the optimized path (Deferred Joins)
-        // We cannot use it if we are sorting by joined columns (complex sort)
-        // BUT we CAN use it for searching now by using subqueries/EXISTS
-        $complexSortColumns = ['customer_name', 'jatuh_tempo']; // Columns not in 'transaction' or 'toko'
-        $isComplexQuery = in_array($sortBy, $complexSortColumns);
+        $complexSortColumns = ['customer_name', 'jatuh_tempo', 'jatuh_tempo_pada']; // Columns not in 'transaction' or 'toko'
+        $isComplexQuery = in_array($sortByRaw, $complexSortColumns);
+
+        // Map sorting keys to proper DB columns
+        $optimizedSortMap = [
+            'invoice_number' => 't.invoice',
+            'delivery_status' => 't.delivery_status',
+            'actual_total' => 't.actual_total',
+            'amount' => 't.amount',
+            'date_time' => 't.date_time',
+            'total_payment' => 't.total_payment',
+            'status' => 't.status'
+        ];
+        
+        $sortBy = $isComplexQuery ? $sortByRaw : ($optimizedSortMap[$sortByRaw] ?? $sortByRaw);
 
         if (!$isComplexQuery) {
             // ==========================================

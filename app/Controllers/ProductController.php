@@ -656,7 +656,8 @@ class ProductController extends ResourceController
                 ];
                 $this->stockModel->insert($stockData);
                 $stockId = $this->stockModel->getInsertID();
-            } else {
+            }
+            else {
                 $stockId = $existingStock['id'];
                 $oldStock = (int)$existingStock['stock'];
                 $oldCacat = (int)$existingStock['barang_cacat'];
@@ -693,14 +694,16 @@ class ProductController extends ResourceController
                             // Dr Inventory Cacat (10x7), Cr Inventory Normal (10x4)
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $moveValue, 0, $data->id_toko);
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $moveValue, $data->id_toko);
-                        } else {
+                        }
+                        else {
                             // Cacat berkurang, Normal bertambah → Cacat ke Normal
                             // Dr Inventory Normal (10x4), Cr Inventory Cacat (10x7)
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $moveValue, 0, $data->id_toko);
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $moveValue, $data->id_toko);
                         }
                     }
-                } else {
+                }
+                else {
                     // --- Total berubah: ada selisih stok nyata ---
 
                     // 1. Adjustment Normal Stock
@@ -711,7 +714,8 @@ class ProductController extends ResourceController
                                 // Surplus: Dr Inventory Normal (10x4), Cr Ekuitas (30x1)
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $valueStock, 0, $data->id_toko);
                                 $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueStock, $data->id_toko);
-                            } else {
+                            }
+                            else {
                                 // Shortage: Dr HPP (50x1), Cr Inventory Normal (10x4)
                                 $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueStock, 0, $data->id_toko);
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $valueStock, $data->id_toko);
@@ -727,7 +731,8 @@ class ProductController extends ResourceController
                                 // Surplus Cacat: Dr Inventory Cacat (10x7), Cr Ekuitas (30x1)
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $valueCacat, 0, $data->id_toko);
                                 $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueCacat, $data->id_toko);
-                            } else {
+                            }
+                            else {
                                 // Shortage Cacat: Dr HPP (50x1), Cr Inventory Cacat (10x7)
                                 $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueCacat, 0, $data->id_toko);
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $valueCacat, $data->id_toko);
@@ -739,8 +744,10 @@ class ProductController extends ResourceController
 
             // --- Log Activities ---
             $descParts = [];
-            if ($oldStock != $data->stock) $descParts[] = "normal {$oldStock}->{$data->stock}";
-            if ($oldCacat != $data->barang_cacat) $descParts[] = "cacat {$oldCacat}->{$data->barang_cacat}";
+            if ($oldStock != $data->stock)
+                $descParts[] = "normal {$oldStock}->{$data->stock}";
+            if ($oldCacat != $data->barang_cacat)
+                $descParts[] = "cacat {$oldCacat}->{$data->barang_cacat}";
 
             if (!empty($descParts)) {
                 $descText = implode(', ', $descParts);
@@ -760,7 +767,8 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp('Penyesuaian stok berhasil', ['id' => $id, 'id_barang' => $id_barang, 'id_toko' => $data->id_toko], 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -972,6 +980,7 @@ class ProductController extends ResourceController
             $model = trim($this->request->getGet('model') ?? '');
             $suplier = trim($this->request->getGet('suplier') ?? '');
             $stockFilter = trim($this->request->getGet('stock') ?? '');
+            $id_toko = trim($this->request->getGet('id_toko') ?? '');
             $limit = max((int)($this->request->getGet('limit') ?: 25), 1);
             $page = max((int)($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
@@ -996,8 +1005,14 @@ class ProductController extends ResourceController
                 'seri.seri',
             ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
-                ->where('product.tenant_id', \App\Libraries\TenantContext::id())
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+
+            // Filter by toko: only show products that have stock in this toko
+            if (!empty($id_toko)) {
+                $builder->join('stock', 'stock.id_barang = product.id_barang AND stock.id_toko = ' . (int)$id_toko, 'inner');
+            }
+
+            $builder->where('product.tenant_id', \App\Libraries\TenantContext::id())
                 ->where('product.deleted_at IS NULL');
 
             // === Filter ===
@@ -1111,7 +1126,7 @@ class ProductController extends ResourceController
                     ')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $productCodes)
-                    ->where('t.tenant_id', \App\Libraries\TenantContext::id())
+                    ->where('sp.tenant_id', \App\Libraries\TenantContext::id())
                     ->groupBy('sp.kode_barang, t.id_toko')
                     ->get()->getResultArray();
 
@@ -1137,7 +1152,7 @@ class ProductController extends ResourceController
                     ->join('pembelian p', 'p.id = pd.pembelian_id')
                     ->whereIn('pd.kode_barang', $productCodes)
                     ->whereIn('p.status', ['APPROVED', 'NEED_REVIEW', 'WAITING', 'PENDING', 'ON_PROGRESS'])
-                    ->where('p.tenant_id', \App\Libraries\TenantContext::id())
+                    ->where('pd.tenant_id', \App\Libraries\TenantContext::id())
                     ->where('p.deleted_at IS NULL')
                     ->groupBy('pd.kode_barang')
                     ->get()->getResultArray();
@@ -2297,7 +2312,8 @@ class ProductController extends ResourceController
         }
 
         $product = $this->productModel->find($id);
-        if (!$product) return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+        if (!$product)
+            return $this->jsonResponse->error("Produk tidak ditemukan", 404);
 
         $stock = $this->stockModel->where('id_barang', $product['id_barang'])->where('id_toko', $idToko)->first();
         if (!$stock || $stock['stock'] < $qty) {
@@ -2318,9 +2334,9 @@ class ProductController extends ResourceController
                 $refNo = 'ADJ-' . time();
                 $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Normal to Cacat: {$product['nama_barang']} ({$notes})", $idToko);
                 // Dr Inventory Cacat (10x5)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '7', $cogsTotal, 0, $idToko); 
+                $this->internalAddJournalItem($jid, '10' . $idToko . '7', $cogsTotal, 0, $idToko);
                 // Cr Inventory Normal (10x4)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '4', 0, $cogsTotal, $idToko); 
+                $this->internalAddJournalItem($jid, '10' . $idToko . '4', 0, $cogsTotal, $idToko);
             }
 
             log_aktivitas([
@@ -2333,7 +2349,8 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang cacat", null, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -2352,7 +2369,8 @@ class ProductController extends ResourceController
         }
 
         $product = $this->productModel->find($id);
-        if (!$product) return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+        if (!$product)
+            return $this->jsonResponse->error("Produk tidak ditemukan", 404);
 
         $stock = $this->stockModel->where('id_barang', $product['id_barang'])->where('id_toko', $idToko)->first();
         if (!$stock || $stock['barang_cacat'] < $qty) {
@@ -2372,9 +2390,9 @@ class ProductController extends ResourceController
                 $refNo = 'ADJ-' . time();
                 $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Cacat to Normal: {$product['nama_barang']} ({$notes})", $idToko);
                 // Dr Inventory Normal (10x4)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '4', $cogsTotal, 0, $idToko); 
+                $this->internalAddJournalItem($jid, '10' . $idToko . '4', $cogsTotal, 0, $idToko);
                 // Cr Inventory Cacat (10x7)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko); 
+                $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko);
             }
 
             log_aktivitas([
@@ -2387,7 +2405,8 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang normal", null, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -2406,7 +2425,8 @@ class ProductController extends ResourceController
         }
 
         $product = $this->productModel->find($id);
-        if (!$product) return $this->jsonResponse->error("Produk tidak ditemukan", 404);
+        if (!$product)
+            return $this->jsonResponse->error("Produk tidak ditemukan", 404);
 
         $stock = $this->stockModel->where('id_barang', $product['id_barang'])->where('id_toko', $idToko)->first();
         if (!$stock || $stock['barang_cacat'] < $qty) {
@@ -2425,9 +2445,9 @@ class ProductController extends ResourceController
                 $refNo = 'LOSS-' . time();
                 $jid = $this->internalCreateJournal('WRITE_OFF', $id, $refNo, date('Y-m-d'), "Write-off Cacat: {$product['nama_barang']} ({$notes})", $idToko);
                 // Dr HPP (As requested: HPP +)
-                $this->internalAddJournalItem($jid, '50' . $idToko . '1', $cogsTotal, 0, $idToko); 
+                $this->internalAddJournalItem($jid, '50' . $idToko . '1', $cogsTotal, 0, $idToko);
                 // Cr Inventory Cacat (10x7)
-                $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko); 
+                $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko);
             }
 
             log_aktivitas([
@@ -2440,7 +2460,8 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp("Berhasil melakukan write-off barang cacat", null, 200);
-        } catch (\Exception $e) {
+        }
+        catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -2467,13 +2488,14 @@ class ProductController extends ResourceController
     {
         $accountModel = new \App\Models\AccountModel();
         $journalItemModel = new \App\Models\JournalItemModel();
-        
+
         $account = $accountModel->getByBaseCode($accountCode, $tokoId);
         if (!$account) {
             $account = $accountModel->where('code', $accountCode)->first();
         }
 
-        if (!$account) return;
+        if (!$account)
+            return;
 
         $journalItemModel->insert([
             'journal_id' => $journalId,
