@@ -379,6 +379,7 @@ class CustomerTransactionControllerV2 extends ResourceController
 
                 $invoiceNo = 'INV' . date('ymd') . $trxId;
                 $this->transactionModel->update($trxId, ['invoice' => $invoiceNo]);
+                $trxData['invoice'] = $invoiceNo; // Update local variable for journals & email
 
                 // 5. Meta Data
                 $metaEntries = [
