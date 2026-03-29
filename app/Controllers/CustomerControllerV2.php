@@ -34,13 +34,13 @@ class CustomerControllerV2 extends ResourceController
         $this->db = \Config\Database::connect();
     }
 
-    // Customer Registration
+    // Customer Registration (OTP-based)
     public function register()
     {
         try {
             $data = $this->request->getJSON();
 
-            // Validation (Removed is_unique because we handle it manually for empty password cases)
+            // Validation
             $validation = \Config\Services::validation();
             $validation->setRules([
                 'nama_customer' => 'required',
@@ -74,8 +74,9 @@ class CustomerControllerV2 extends ResourceController
             // Decide which record to update (Priority: Email match, then Phone match)
             $existingCustomer = $existingByEmail ?? $existingByPhone;
 
-            // Generate email verification token
-            $verificationToken = bin2hex(random_bytes(32));
+            // Generate 6-digit OTP (expires in 5 minutes)
+            $otpCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $otpExpiresAt = date('Y-m-d H:i:s', strtotime('+5 minutes'));
 
             $customerData = [
                 'nama_customer' => $data->nama_customer,
@@ -89,16 +90,15 @@ class CustomerControllerV2 extends ResourceController
                 'kelurahan' => $data->kelurahan ?? '',
                 'kode_pos' => $data->kode_pos ?? '',
                 'type' => 'regular',
-                'email_verification_token' => $verificationToken,
-                'email_verified_at' => null, // Ensure it needs to be verified
+                'otp_code' => $otpCode,
+                'otp_expires_at' => $otpExpiresAt,
+                'email_verified_at' => null,
             ];
 
             if ($existingCustomer) {
-                // Update existing record if password was empty (Linked via Email or Phone)
                 $this->customerModel->update($existingCustomer['id'], $customerData);
                 $customerId = $existingCustomer['id'];
             } else {
-                // Insert new record
                 $customerId = $this->customerModel->insert($customerData);
             }
 
@@ -106,17 +106,16 @@ class CustomerControllerV2 extends ResourceController
                 return $this->jsonResponse->error("Registration failed", 500);
             }
 
-            // Send registration email with credentials and verification link
-            log_message('debug', '[Registration] Tenant Name: ' . \App\Libraries\TenantContext::name() . ' ID: ' . \App\Libraries\TenantContext::id());
-            $emailSent = send_registration_email(
+            // Send OTP email
+            $emailSent = send_otp_email(
                 $data->email,
                 $data->nama_customer,
-                $data->password, // Plain text password for email
-                $verificationToken
+                $otpCode
             );
 
-            return $this->jsonResponse->oneResp('Registration successful. Please check your email to verify your account.', [
+            return $this->jsonResponse->oneResp('Registrasi berhasil. Silakan cek email Anda untuk kode OTP.', [
                 'customer_id' => $customerId,
+                'email' => $data->email,
                 'email_sent' => $emailSent
             ], 201);
         } catch (\Exception $e) {
@@ -124,82 +123,107 @@ class CustomerControllerV2 extends ResourceController
         }
     }
 
-    // Email Verification
-    public function verifyEmail()
+    // Verify OTP
+    public function verifyOtp()
     {
         try {
             $data = $this->request->getJSON();
 
-            if (empty($data->token)) {
-                return $this->jsonResponse->error("Verification token required", 400);
+            if (empty($data->email) || empty($data->otp)) {
+                return $this->jsonResponse->error("Email dan kode OTP wajib diisi", 400);
             }
 
             $customer = $this->customerModel
-                ->where('email_verification_token', $data->token)
+                ->where('email', $data->email)
+                ->where('tenant_id', TenantContext::id())
                 ->first();
 
             if (!$customer) {
-                return $this->jsonResponse->error("Invalid verification token", 404);
+                return $this->jsonResponse->error("Customer tidak ditemukan", 404);
             }
 
             if ($customer['email_verified_at']) {
-                return $this->jsonResponse->error("Email already verified", 400);
+                return $this->jsonResponse->error("Email sudah terverifikasi", 400);
             }
 
+            if (empty($customer['otp_code'])) {
+                return $this->jsonResponse->error("Tidak ada kode OTP aktif. Silakan kirim ulang.", 400);
+            }
+
+            // Check expiry
+            if (strtotime($customer['otp_expires_at']) < time()) {
+                return $this->jsonResponse->error("Kode OTP sudah kadaluarsa. Silakan kirim ulang.", 400);
+            }
+
+            // Verify OTP
+            if ($customer['otp_code'] !== $data->otp) {
+                return $this->jsonResponse->error("Kode OTP tidak valid", 400);
+            }
+
+            // Mark verified, clear OTP
             $this->customerModel->update($customer['id'], [
                 'email_verified_at' => date('Y-m-d H:i:s'),
-                'email_verification_token' => null
+                'otp_code' => null,
+                'otp_expires_at' => null,
             ]);
 
-            return $this->jsonResponse->oneResp('Email verified successfully', [], 200);
+            return $this->jsonResponse->oneResp('Email berhasil diverifikasi', [], 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
 
-    // Email Verification Page (GET request from email link)
-    public function verifyEmailPage()
+    // Resend OTP
+    public function resendOtp()
     {
         try {
-            $token = $this->request->getGet('token');
+            $data = $this->request->getJSON();
 
-            if (empty($token)) {
-                return view('customer/verification_error', [
-                    'message' => 'Token verifikasi tidak ditemukan.'
-                ]);
+            if (empty($data->email)) {
+                return $this->jsonResponse->error("Email wajib diisi", 400);
             }
 
             $customer = $this->customerModel
-                ->where('email_verification_token', $token)
+                ->where('email', $data->email)
+                ->where('tenant_id', TenantContext::id())
                 ->first();
 
             if (!$customer) {
-                return view('customer/verification_error', [
-                    'message' => 'Token verifikasi tidak valid atau sudah kadaluarsa.'
-                ]);
+                return $this->jsonResponse->error("Customer tidak ditemukan", 404);
             }
 
             if ($customer['email_verified_at']) {
-                return view('customer/verification_success', [
-                    'message' => 'Email Anda sudah terverifikasi sebelumnya.',
-                    'already_verified' => true
-                ]);
+                return $this->jsonResponse->error("Email sudah terverifikasi", 400);
             }
 
+            // Rate limit: don't resend if last OTP is still fresh (< 1 minute old)
+            if (!empty($customer['otp_expires_at'])) {
+                $createdAt = strtotime($customer['otp_expires_at']) - 300; // OTP was 5 min, so created = expires - 5min
+                if ((time() - $createdAt) < 60) {
+                    return $this->jsonResponse->error("Mohon tunggu sebentar sebelum mengirim ulang OTP", 429);
+                }
+            }
+
+            // Generate new OTP
+            $otpCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $otpExpiresAt = date('Y-m-d H:i:s', strtotime('+5 minutes'));
+
             $this->customerModel->update($customer['id'], [
-                'email_verified_at' => date('Y-m-d H:i:s'),
-                'email_verification_token' => null
+                'otp_code' => $otpCode,
+                'otp_expires_at' => $otpExpiresAt,
             ]);
 
-            return view('customer/verification_success', [
-                'message' => 'Email Anda berhasil diverifikasi!',
-                'customer_name' => $customer['nama_customer'],
-                'already_verified' => false
-            ]);
+            $emailSent = send_otp_email(
+                $customer['email'],
+                $customer['nama_customer'],
+                $otpCode
+            );
+
+            return $this->jsonResponse->oneResp('Kode OTP baru telah dikirim ke email Anda.', [
+                'email_sent' => $emailSent
+            ], 200);
         } catch (\Exception $e) {
-            return view('customer/verification_error', [
-                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
-            ]);
+            return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
 

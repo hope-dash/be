@@ -326,6 +326,49 @@ if (!function_exists('send_registration_email')) {
     }
 }
 
+if (!function_exists('send_otp_email')) {
+    /**
+     * Send OTP verification email
+     *
+     * @param string $email Customer email
+     * @param string $name Customer name
+     * @param string $otpCode 6-digit OTP code
+     * @return bool Success status
+     */
+    function send_otp_email($email, $name, $otpCode)
+    {
+        $tenantName = \App\Libraries\TenantContext::name();
+
+        // Build individual digit boxes for OTP display
+        $otpDigits = '';
+        for ($i = 0; $i < strlen($otpCode); $i++) {
+            $otpDigits .= '<span style="display:inline-block;width:42px;height:50px;line-height:50px;text-align:center;font-size:28px;font-weight:bold;background:#f0f4f8;border:2px solid #d1d5db;border-radius:8px;margin:0 4px;color:#1a1a1a;letter-spacing:2px;">' . $otpCode[$i] . '</span>';
+        }
+
+        $content = '
+            <h2>Halo, ' . htmlspecialchars($name) . '!</h2>
+            <p>Terima kasih telah mendaftar di ' . $tenantName . '. Gunakan kode OTP di bawah ini untuk memverifikasi akun Anda:</p>
+
+            <div style="text-align:center;margin:30px 0;">
+                ' . $otpDigits . '
+            </div>
+
+            <div class="info-box">
+                <p style="margin:0;font-size:14px;color:#666;">⏱ Kode ini berlaku selama <strong>5 menit</strong>.</p>
+                <p style="margin:5px 0 0;font-size:14px;color:#666;">Jangan bagikan kode ini kepada siapapun.</p>
+            </div>
+
+            <p style="margin-top: 20px; font-size: 12px; color: #999;">
+                Jika Anda tidak merasa mendaftar di ' . $tenantName . ', abaikan email ini.
+            </p>
+        ';
+
+        $html = get_email_template('Kode Verifikasi Anda', $content);
+
+        return enqueue_email($email, 'Kode Verifikasi ' . $tenantName . ' - ' . $otpCode, $html);
+    }
+}
+
 if (!function_exists('send_verification_email')) {
     /**
      * Send email verification link

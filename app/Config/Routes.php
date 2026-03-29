@@ -70,13 +70,13 @@ $routes->group('api', ['filter' => 'tenant'], function ($routes) {
     // Customer V2 Public
     $routes->group('v2/customer', function ($routes) {
         $routes->post('register', 'CustomerControllerV2::register');
-        $routes->post('verify-email', 'CustomerControllerV2::verifyEmail');
+        $routes->post('verify-otp', 'CustomerControllerV2::verifyOtp');
+        $routes->post('resend-otp', 'CustomerControllerV2::resendOtp');
         $routes->post('login', 'CustomerControllerV2::login');
         $routes->post('voucher/validate', 'CustomerControllerV2::validateVoucher');
         $routes->get('products', 'CustomerControllerV2::getProducts');
         $routes->get('products/(:num)', 'CustomerControllerV2::getProductDetail/$1');
     });
-    $routes->get('customer/verify', 'CustomerControllerV2::verifyEmailPage');
 });
 
 // --- 4. ADMIN PROTECTED ROUTES (X-Tenant + jwtAuth Required) ---

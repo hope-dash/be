@@ -26,6 +26,8 @@ class CustomerModel extends TenantScopedModel
         'password',
         'email_verified_at',
         'email_verification_token',
+        'otp_code',
+        'otp_expires_at',
         'discount_type',
         'discount_value',
         'reset_token',
