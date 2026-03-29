@@ -448,6 +448,30 @@ class CustomerTransactionControllerV2 extends ResourceController
                     $this->addJournalItem($cogsJournalId, '10' . $actualIdToko . '4', 0, $totalModal, $actualIdToko); // Cr Inventory
                 }
 
+                if ($customerId) {
+                    try {
+                        helper('email');
+
+                        // Fetch toko bank info
+                        $toko = $this->tokoModel->find($idToko);
+
+                        if ($customer && !empty($customer['email'])) {
+                            $emailData = array_merge($trxData, [
+                                'id' => $trxId,
+                                'customer' => $customer,
+                                'bank' => $toko['bank'] ?? '',
+                                'nomer_rekening' => $toko['nomer_rekening'] ?? '',
+                                'nama_pemilik' => $toko['nama_pemilik'] ?? '',
+                                'actual_total' => $grandTotal
+                            ]);
+
+                            send_invoice_email($emailData);
+                        }
+                    } catch (\Exception $e) {
+                        log_message('error', 'Gagal mengirim email invoice: ' . $e->getMessage());
+                    }
+                }
+
                 $createdInvoices[] = [
                     'id' => $trxId,
                     'invoice' => $invoiceNo,
