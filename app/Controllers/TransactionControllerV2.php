@@ -15,6 +15,7 @@ use App\Models\TransactionPaymentModel;
 use App\Models\CustomerModel;
 use App\Models\JsonResponse;
 use App\Models\TransactionMetaModel;
+use App\Models\ReturModel;
 use App\Libraries\TenantContext;
 use App\Libraries\SubscriptionService;
 use CodeIgniter\API\ResponseTrait;
@@ -34,6 +35,7 @@ class TransactionControllerV2 extends ResourceController
     protected $paymentModel;
     protected $customerModel;
     protected $transactionMetaModel;
+    protected $returModel;
     protected $jsonResponse;
     protected $db;
 
@@ -51,6 +53,7 @@ class TransactionControllerV2 extends ResourceController
         $this->paymentModel = new TransactionPaymentModel();
         $this->customerModel = new CustomerModel();
         $this->transactionMetaModel = new TransactionMetaModel();
+        $this->returModel = new ReturModel();
         $this->jsonResponse = new JsonResponse();
         $this->db = \Config\Database::connect();
     }
@@ -1108,8 +1111,16 @@ class TransactionControllerV2 extends ResourceController
         $userId = $this->request->user['user_id'] ?? 0;
 
         $trx = $this->transactionModel->find($id);
-        if (!$trx)
+        if (!$trx) {
             return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+        }
+
+        // Fetch meta for recalculation
+        $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+        $metaMap = [];
+        foreach ($metas as $m) {
+            $metaMap[$m['key']] = $m['value'];
+        }
 
         $this->db->transStart();
         try {
@@ -1119,139 +1130,236 @@ class TransactionControllerV2 extends ResourceController
             $returnDetails = [];
             $returnSummary = [];
 
+            $oldActualTotal = (float) $trx['actual_total'];
+
             foreach ($data->items as $item) {
                 $saleItem = $this->salesProductModel
                     ->where('id_transaction', $id)
                     ->where('kode_barang', $item->kode_barang)
                     ->first();
 
-                if (!$saleItem)
+                if (!$saleItem) {
                     continue;
+                }
 
-                $qty = $item->qty;
+                $qtyToReturn = (int) $item->qty;
+                if ($qtyToReturn > $saleItem['jumlah']) {
+                    $qtyToReturn = $saleItem['jumlah'];
+                }
+
+                if ($qtyToReturn <= 0) {
+                    continue;
+                }
+
                 $isDamaged = ($item->condition === 'bad');
                 $conditionText = $isDamaged ? 'CACAT' : 'BAIK';
 
-                // Get product name for logging
+                // Get product info
                 $product = $this->productModel->where('id_barang', $item->kode_barang)->first();
                 $productName = $product['nama_barang'] ?? $item->kode_barang;
 
-                $this->addStock($item->kode_barang, $trx['id_toko'], $qty, $id, "Retur Barang ({$item->condition})", $isDamaged);
+                // 1. Insert into Retur Table
+                $this->returModel->insert([
+                    'transaction_id' => $id,
+                    'kode_barang' => $item->kode_barang,
+                    'barang_cacat' => $isDamaged ? 1 : 0,
+                    'jumlah' => $qtyToReturn,
+                    'solution' => $data->solution ?? 'RETURN'
+                ]);
 
-                $modalOne = $saleItem['total_modal'] / $saleItem['jumlah'];
-                $itemModalTotal = ($modalOne * $qty);
+                // 2. Restore Stock
+                $this->addStock($item->kode_barang, $trx['id_toko'], $qtyToReturn, $id, "Retur Barang ({$item->condition})", $isDamaged);
 
+                // 3. Update Sales Product Record (Reduce quantity)
+                $modalPerUnit = $saleItem['modal_system'];
+                $pricePerUnit = $saleItem['harga_jual'];
+
+                $newQty = $saleItem['jumlah'] - $qtyToReturn;
+                if ($newQty > 0) {
+                    $this->salesProductModel->update($saleItem['id'], [
+                        'jumlah' => $newQty,
+                        'total' => $pricePerUnit * $newQty,
+                        'total_modal' => $modalPerUnit * $newQty,
+                        'actual_total' => $pricePerUnit * $newQty
+                    ]);
+                } else {
+                    $this->salesProductModel->delete($saleItem['id']);
+                }
+
+                // Cogs reversal logic
+                $itemModalTotal = ($modalPerUnit * $qtyToReturn);
                 if ($isDamaged) {
                     $cogsCacat += $itemModalTotal;
-                }
-                else {
+                } else {
                     $cogsNormal += $itemModalTotal;
                 }
 
-                $priceOne = $saleItem['total'] / $saleItem['jumlah'];
-                $revenueReduction += ($priceOne * $qty);
+                // Revenue reduction logic (Based on actual per-unit selling price)
+                $revenueReduction += ($pricePerUnit * $qtyToReturn);
 
-                // Store detailed return info
                 $returnDetails[] = [
                     'kode_barang' => $item->kode_barang,
                     'nama_barang' => $productName,
-                    'qty' => $qty,
+                    'qty' => $qtyToReturn,
                     'condition' => $item->condition,
                     'is_damaged' => $isDamaged,
-                    'unit_price' => $priceOne,
-                    'total_value' => $priceOne * $qty
+                    'unit_price' => $pricePerUnit,
+                    'total_value' => $pricePerUnit * $qtyToReturn
                 ];
 
-                // Create individual product log
                 log_aktivitas([
                     'user_id' => $userId,
                     'action_type' => 'RETUR_PRODUCT',
                     'target_table' => 'product',
                     'target_id' => $product['id'] ?? 0,
-                    'description' => "Retur: {$productName} ({$item->kode_barang}) - Qty: {$qty} - Kondisi: {$conditionText}" . ($isDamaged ? " - Masuk ke Barang Cacat" : " - Masuk ke Stock Normal"),
+                    'description' => "Retur: {$productName} ({$item->kode_barang}) - Qty: {$qtyToReturn} - Kondisi: {$conditionText}",
                     'detail' => [
                         'transaction_id' => $id,
                         'invoice' => $trx['invoice'],
                         'kode_barang' => $item->kode_barang,
-                        'nama_barang' => $productName,
-                        'qty' => $qty,
-                        'condition' => $item->condition,
-                        'is_damaged' => $isDamaged,
-                        'stock_type' => $isDamaged ? 'barang_cacat' : 'stock_normal'
+                        'qty' => $qtyToReturn,
+                        'is_damaged' => $isDamaged
                     ]
                 ]);
 
-                $returnSummary[] = "{$productName} ({$item->kode_barang}): {$qty} pcs - {$conditionText}";
+                $returnSummary[] = "{$productName} ({$item->kode_barang}): {$qtyToReturn} pcs - {$conditionText}";
             }
 
-            // Store return details in transaction_meta
-            $this->transactionMetaModel->insert([
-                'transaction_id' => $id,
-                'key' => 'return_details',
-                'value' => json_encode($returnDetails)
+            // 4. Recalculate Transaction Totals
+            $remainingItems = $this->salesProductModel->where('id_transaction', $id)->findAll();
+            $newGrossAmount = 0;
+            $newTotalModal = 0;
+            $newItemDiscountTotal = 0;
+
+            foreach ($remainingItems as $ri) {
+                // actual_per_piece is the price after item discount
+                // but Transaction->amount is gross amount (before item discount)
+                // Let's re-sum everything
+                $grossUnit = $ri['harga_system'];
+                $newGrossAmount += ($grossUnit * $ri['jumlah']);
+                $newTotalModal += $ri['total_modal'];
+                
+                // Rederive item discount from meta or difference if not stored per line
+                $unitDiscount = $ri['harga_system'] - $ri['harga_jual'];
+                $newItemDiscountTotal += ($unitDiscount * $ri['jumlah']);
+            }
+
+            $newActualSubtotal = $newGrossAmount - $newItemDiscountTotal;
+
+            // Recalculate Transaction Level Discount
+            $txDiscountType = $trx['discount_type'] ?? 'FIXED';
+            $txDiscountAmount = (float)($trx['discount_amount'] ?? 0);
+            $newTxDiscountValue = 0;
+
+            if (strtoupper($txDiscountType) === 'PERCENTAGE') {
+                $newTxDiscountValue = ($newActualSubtotal * $txDiscountAmount) / 100;
+            } else {
+                $newTxDiscountValue = $txDiscountAmount;
+            }
+
+            $newAfterDiscountSubtotal = $newActualSubtotal - $newTxDiscountValue;
+
+            // Recalculate PPN
+            $ppnPercent = (float)($metaMap['ppn'] ?? 0);
+            $newPpnValue = ($newAfterDiscountSubtotal * $ppnPercent) / 100;
+
+            // Re-calculate Grand Total
+            $shippingCost = (float)($metaMap['biaya_pengiriman'] ?? 0);
+            $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
+
+            $newGrandTotal = $newAfterDiscountSubtotal + $newPpnValue;
+            if (!$isFreeOngkir) {
+                $newGrandTotal += $shippingCost;
+            }
+
+            if ($newGrandTotal < 0) $newGrandTotal = 0;
+
+            // Update Transaction Record
+            $this->transactionModel->update($id, [
+                'amount' => $newGrossAmount,
+                'actual_total' => $newGrandTotal,
+                'total_modal' => $newTotalModal
             ]);
 
+            // Update Meta Records
+            $metaToUpdate = [
+                'ppn_value' => $newPpnValue,
+                'item_discount_total' => $newItemDiscountTotal,
+                'tx_discount_value' => $newTxDiscountValue
+            ];
+            foreach ($metaToUpdate as $mk => $mv) {
+                $this->db->table('transaction_meta')
+                    ->where('transaction_id', $id)
+                    ->where('key', $mk)
+                    ->update(['value' => (string)$mv]);
+            }
+
+            // 5. Journal Entries
+            // COGS Reversal
             $totalCogsReversal = $cogsNormal + $cogsCacat;
             if ($totalCogsReversal > 0) {
                 $jid = $this->createJournal('RETUR_COGS', $id, $trx['invoice'], date('Y-m-d'), "Retur COGS Reversal", $trx['id_toko']);
-
-                if ($cogsNormal > 0) {
-                    // Dr Inventory Normal (10x4)
-                    $this->addJournalItem($jid, '10' . $trx['id_toko'] . '4', $cogsNormal, 0, $trx['id_toko']);
-                }
-
-                if ($cogsCacat > 0) {
-                    // Dr Inventory Cacat (10x7)
-                    $this->addJournalItem($jid, '10' . $trx['id_toko'] . '7', $cogsCacat, 0, $trx['id_toko']);
-                }
-
-                // Cr COGS (50x1)
+                if ($cogsNormal > 0) $this->addJournalItem($jid, '10' . $trx['id_toko'] . '4', $cogsNormal, 0, $trx['id_toko']);
+                if ($cogsCacat > 0) $this->addJournalItem($jid, '10' . $trx['id_toko'] . '7', $cogsCacat, 0, $trx['id_toko']);
                 $this->addJournalItem($jid, '50' . $trx['id_toko'] . '1', 0, $totalCogsReversal, $trx['id_toko']);
             }
 
-            if ($revenueReduction > 0) {
+            // Sales Reversal (Reduction in AR and Revenue)
+            // Revenue reduction includes its share of PPN that was charged
+            $totalARReduction = $oldActualTotal - $newGrandTotal;
+            if ($totalARReduction > 0) {
                 $jid = $this->createJournal('RETUR_SALES', $id, $trx['invoice'], date('Y-m-d'), "Retur Sales Reduction", $trx['id_toko']);
-                $this->addJournalItem($jid, '40' . $trx['id_toko'] . '3', $revenueReduction, 0, $trx['id_toko']);
-                $this->addJournalItem($jid, '10' . $trx['id_toko'] . '3', 0, $revenueReduction, $trx['id_toko']);
+                
+                // Dr Revenue (or Retur account 40x3)
+                $revReduction = $revenueReduction; // This is raw sale price reduction
+                $this->addJournalItem($jid, '40' . $trx['id_toko'] . '3', $revReduction, 0, $trx['id_toko']);
+
+                // Dr PPN (Pajak Keluaran reversal 20x5)
+                $ppnReduction = (float)($metaMap['ppn_value'] ?? 0) - $newPpnValue;
+                if ($ppnReduction > 0) {
+                    $this->addJournalItem($jid, '20' . $trx['id_toko'] . '5', $ppnReduction, 0, $trx['id_toko']);
+                }
+
+                // Dr Discount Adjustment if needed (Since we reduced Gross and total discount, it should balance AR)
+                $discReduction = (float)($metaMap['item_discount_total'] ?? 0) + (float)($metaMap['tx_discount_value'] ?? 0) - ($newItemDiscountTotal + $newTxDiscountValue);
+                if ($discReduction > 0) {
+                     $this->addJournalItem($jid, '40' . $trx['id_toko'] . '2', 0, $discReduction, $trx['id_toko']);
+                }
+
+                // Cr AR (10x3)
+                $this->addJournalItem($jid, '10' . $trx['id_toko'] . '3', 0, $totalARReduction, $trx['id_toko']);
+            }
+
+            // 6. Handle Refund needed
+            if (!empty($data->refund_money) && $data->refund_money == true) {
+                $this->transactionModel->update($id, ['status' => 'NEED_REFUND']);
+                // The refund amount is based on the reduction of actual_total
+                $refundTotal = $totalARReduction; 
+                
+                // Update or Insert refund_needed meta
+                $existingRefund = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'refund_needed')->first();
+                if ($existingRefund) {
+                     $newVal = (float)$existingRefund['value'] + $refundTotal;
+                     $this->transactionMetaModel->update($existingRefund['id'], ['value' => (string)$newVal]);
+                } else {
+                     $this->transactionMetaModel->insert([
+                         'transaction_id' => $id,
+                         'key' => 'refund_needed',
+                         'value' => (string)$refundTotal
+                     ]);
+                }
             }
 
             $this->db->transComplete();
 
-            // Transaction-level summary log
-            $summaryText = "Retur Transaksi {$trx['invoice']} - " . count($returnDetails) . " item(s): " . implode(", ", $returnSummary);
-            log_aktivitas([
-                'user_id' => $userId,
-                'action_type' => 'RETUR_TRANSACTION',
-                'target_table' => 'transaction',
-                'target_id' => $id,
-                'description' => $summaryText,
-                'detail' => [
-                    'invoice' => $trx['invoice'],
-                    'total_items' => count($returnDetails),
-                    'items' => $returnDetails,
-                    'total_revenue_reduction' => $revenueReduction,
-                    'refund_money' => $data->refund_money ?? false
-                ]
-            ]);
-
-            // If return involves refund (money back), set status NEED_REFUND
-            $refundMoney = $data->refund_money ?? false;
-
-            if ($refundMoney) {
-                $this->transactionModel->update($id, ['status' => 'NEED_REFUND']);
-                $this->transactionMetaModel->insert([
-                    'transaction_id' => $id,
-                    'key' => 'refund_needed',
-                    'value' => $revenueReduction
-                ]);
-            }
-
             return $this->jsonResponse->oneResp('Retur berhasil diproses', [
                 'items_returned' => count($returnDetails),
-                'total_value' => $revenueReduction
+                'total_ar_reduction' => $totalARReduction,
+                'new_grand_total' => $newGrandTotal
             ], 200);
-        }
-        catch (\Exception $e) {
+
+        } catch (\Exception $e) {
+            $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
