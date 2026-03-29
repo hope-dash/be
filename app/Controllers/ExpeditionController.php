@@ -50,7 +50,7 @@ class ExpeditionController extends ResourceController
 
             // 1. Resolve Tenjo IDs for Origin and Destination
             $originTenjoId = $this->getTenjoIdFromKelurahan($originVillageCode);
-            $destinationTenjoId = $this->getTenjoIdFromKelurahan($destination);
+            $destinationTenjoId = $this->getTenjoIdKecamatan($destination);
 
             // Cache key based on Origin & Destination & Weight
             $cacheKey = "shipping_cost_tenjo_{$originTenjoId}_{$destinationTenjoId}_{$requestedWeight}";
@@ -175,5 +175,19 @@ class ExpeditionController extends ResourceController
         $city = $db->table('kota_kabupaten')->select('tenjo_id')->where('code', $kelurahan['regency_code'])->get()->getRowArray();
 
         return $city['tenjo_id'] ?? null;
+    }
+
+    private function getTenjoIdKecamatan($kelurahanCode)
+    {
+        $db = \Config\Database::connect();
+        $builder = $db->table('kelurahan');
+        $kecamatan = $builder->select('district_code')->where('code', $kelurahanCode)->get()->getRowArray();
+
+        if (!$kecamatan)
+            return null;
+
+        $district = $db->table('kecamatan')->select('tenjo_id')->where('code', $kecamatan['district_code'])->get()->getRowArray();
+
+        return $district['tenjo_id'] ?? null;
     }
 }
