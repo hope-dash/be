@@ -1126,11 +1126,12 @@ class TransactionControllerV2 extends ResourceController
         try {
             $cogsNormal = 0;
             $cogsCacat = 0;
-            $revenueReduction = 0;
+            $oldActualTotal = (float) $trx['actual_total'];
+            $grossRevenueReduction = 0;
+            $itemDiscountReduction = 0;
+            $revenueReduction = 0; // Legacy if needed elsewhere
             $returnDetails = [];
             $returnSummary = [];
-
-            $oldActualTotal = (float) $trx['actual_total'];
 
             foreach ($data->items as $item) {
                 $saleItem = $this->salesProductModel
@@ -1171,8 +1172,10 @@ class TransactionControllerV2 extends ResourceController
                 $this->addStock($item->kode_barang, $trx['id_toko'], $qtyToReturn, $id, "Retur Barang ({$item->condition})", $isDamaged);
 
                 // 3. Update Sales Product Record (Reduce quantity)
-                $modalPerUnit = $saleItem['modal_system'];
-                $pricePerUnit = $saleItem['harga_jual'];
+                $modalPerUnit = (float)$saleItem['modal_system'];
+                $pricePerUnit = (float)$saleItem['harga_jual'];
+                $grossPerUnit = (float)$saleItem['harga_system'];
+                $discountPerUnit = $grossPerUnit - $pricePerUnit;
 
                 $newQty = $saleItem['jumlah'] - $qtyToReturn;
                 if ($newQty > 0) {
@@ -1186,6 +1189,10 @@ class TransactionControllerV2 extends ResourceController
                     $this->salesProductModel->delete($saleItem['id']);
                 }
 
+                // Tracking for Journal
+                $grossRevenueReduction += ($grossPerUnit * $qtyToReturn);
+                $itemDiscountReduction += ($discountPerUnit * $qtyToReturn);
+
                 // Cogs reversal logic
                 $itemModalTotal = ($modalPerUnit * $qtyToReturn);
                 if ($isDamaged) {
@@ -1194,17 +1201,14 @@ class TransactionControllerV2 extends ResourceController
                     $cogsNormal += $itemModalTotal;
                 }
 
-                // Revenue reduction logic (Based on actual per-unit selling price)
-                $revenueReduction += ($pricePerUnit * $qtyToReturn);
-
                 $returnDetails[] = [
                     'kode_barang' => $item->kode_barang,
                     'nama_barang' => $productName,
                     'qty' => $qtyToReturn,
                     'condition' => $item->condition,
                     'is_damaged' => $isDamaged,
-                    'unit_price' => $pricePerUnit,
-                    'total_value' => $pricePerUnit * $qtyToReturn
+                    'gross_price' => $grossPerUnit,
+                    'net_price' => $pricePerUnit
                 ];
 
                 log_aktivitas([
@@ -1232,18 +1236,18 @@ class TransactionControllerV2 extends ResourceController
             $newItemDiscountTotal = 0;
 
             foreach ($remainingItems as $ri) {
-                // actual_per_piece is the price after item discount
-                // but Transaction->amount is gross amount (before item discount)
-                // Let's re-sum everything
-                $grossUnit = $ri['harga_system'];
-                $newGrossAmount += ($grossUnit * $ri['jumlah']);
-                $newTotalModal += $ri['total_modal'];
+                $unitGross = (float)$ri['harga_system'];
+                $unitNet = (float)$ri['harga_jual'];
+                $qty = (int)$ri['jumlah'];
                 
-                // Rederive item discount from meta or difference if not stored per line
-                $unitDiscount = $ri['harga_system'] - $ri['harga_jual'];
-                $newItemDiscountTotal += ($unitDiscount * $ri['jumlah']);
+                $newGrossAmount += ($unitGross * $qty);
+                $newTotalModal += (float)$ri['total_modal'];
+                
+                $unitDiscount = $unitGross - $unitNet;
+                $newItemDiscountTotal += ($unitDiscount * $qty);
             }
 
+            // Dasar Pengenaan Pajak (DPP) = Gross - Item Discount - Tx Discount
             $newActualSubtotal = $newGrossAmount - $newItemDiscountTotal;
 
             // Recalculate Transaction Level Discount
@@ -1255,19 +1259,24 @@ class TransactionControllerV2 extends ResourceController
                 $newTxDiscountValue = ($newActualSubtotal * $txDiscountAmount) / 100;
             } else {
                 $newTxDiscountValue = $txDiscountAmount;
+                // Ensure fixed discount doesn't exceed total
+                if ($newTxDiscountValue > $newActualSubtotal) {
+                    $newTxDiscountValue = $newActualSubtotal;
+                }
             }
 
-            $newAfterDiscountSubtotal = $newActualSubtotal - $newTxDiscountValue;
+            $taxableAmount = $newActualSubtotal - $newTxDiscountValue;
+            if ($taxableAmount < 0) $taxableAmount = 0;
 
             // Recalculate PPN
             $ppnPercent = (float)($metaMap['ppn'] ?? 0);
-            $newPpnValue = ($newAfterDiscountSubtotal * $ppnPercent) / 100;
+            $newPpnValue = ($taxableAmount * $ppnPercent) / 100;
 
             // Re-calculate Grand Total
             $shippingCost = (float)($metaMap['biaya_pengiriman'] ?? 0);
             $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
 
-            $newGrandTotal = $newAfterDiscountSubtotal + $newPpnValue;
+            $newGrandTotal = $taxableAmount + $newPpnValue;
             if (!$isFreeOngkir) {
                 $newGrandTotal += $shippingCost;
             }
@@ -1305,29 +1314,30 @@ class TransactionControllerV2 extends ResourceController
             }
 
             // Sales Reversal (Reduction in AR and Revenue)
-            // Revenue reduction includes its share of PPN that was charged
             $totalARReduction = $oldActualTotal - $newGrandTotal;
             if ($totalARReduction > 0) {
                 $jid = $this->createJournal('RETUR_SALES', $id, $trx['invoice'], date('Y-m-d'), "Retur Sales Reduction", $trx['id_toko']);
                 
-                // Dr Revenue (or Retur account 40x3)
-                $revReduction = $revenueReduction; // This is raw sale price reduction
-                $this->addJournalItem($jid, '40' . $trx['id_toko'] . '3', $revReduction, 0, $trx['id_toko']);
+                // 1. Dr Revenue / Retur (Gross Reduction)
+                $this->addJournalItem($jid, '40' . $trx['id_toko'] . '3', $grossRevenueReduction, 0, $trx['id_toko']);
 
-                // Dr PPN (Pajak Keluaran reversal 20x5)
+                // 2. Dr PPN (Pajak Keluaran reversal 20x5)
                 $ppnReduction = (float)($metaMap['ppn_value'] ?? 0) - $newPpnValue;
                 if ($ppnReduction > 0) {
                     $this->addJournalItem($jid, '20' . $trx['id_toko'] . '5', $ppnReduction, 0, $trx['id_toko']);
                 }
 
-                // Dr Discount Adjustment if needed (Since we reduced Gross and total discount, it should balance AR)
-                $discReduction = (float)($metaMap['item_discount_total'] ?? 0) + (float)($metaMap['tx_discount_value'] ?? 0) - ($newItemDiscountTotal + $newTxDiscountValue);
-                if ($discReduction > 0) {
-                     $this->addJournalItem($jid, '40' . $trx['id_toko'] . '2', 0, $discReduction, $trx['id_toko']);
-                }
-
-                // Cr AR (10x3)
+                // 3. Cr AR (10x3)
                 $this->addJournalItem($jid, '10' . $trx['id_toko'] . '3', 0, $totalARReduction, $trx['id_toko']);
+
+                // 4. Cr Discount Adjustment (Item Discount + Tx Discount reduction)
+                $oldTotalDisc = (float)($metaMap['item_discount_total'] ?? 0) + (float)($metaMap['tx_discount_value'] ?? 0);
+                $newTotalDisc = $newItemDiscountTotal + $newTxDiscountValue;
+                $discReductionAdjustment = $oldTotalDisc - $newTotalDisc;
+                
+                if ($discReductionAdjustment > 0) {
+                     $this->addJournalItem($jid, '40' . $trx['id_toko'] . '2', 0, $discReductionAdjustment, $trx['id_toko']);
+                }
             }
 
             // 6. Handle Refund needed
