@@ -78,13 +78,24 @@ class TokoController extends BaseController
             $tokoId = $this->modelToko->insertID();
 
             // 2. Automatically generate accounts for this new toko
-            $baseAccounts = $this->accountModel->where('id_toko', null)->findAll();
+            // Bypass TenantScopedModel to fetch global templates (tenant_id IS NULL)
+            $tenantId = $token['tenant_id'] ?? null;
+            $baseAccounts = $this->db->table('accounts')
+                ->where('id_toko', null)
+                ->groupStart()
+                    ->where('tenant_id', null)
+                    ->orWhere('tenant_id', $tenantId)
+                ->groupEnd()
+                ->get()
+                ->getResultArray();
+
             foreach ($baseAccounts as $acc) {
                 $baseCode = $acc['base_code'] ?? $acc['code'];
                 $newCode = substr($baseCode, 0, 2) . $tokoId . substr($baseCode, 3);
                 $newName = $acc['name'] . ' ' . $data->toko_name;
 
                 $this->accountModel->insert([
+                    'tenant_id' => $tenantId,
                     'id_toko' => $tokoId,
                     'base_code' => $baseCode,
                     'code' => $newCode,

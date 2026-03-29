@@ -146,7 +146,13 @@ class TenantControllerV2 extends ResourceController
 
             // 3.5 Automatically generate accounts for this new toko
             $accountModel = new \App\Models\AccountModel();
-            $baseAccounts = $accountModel->where('id_toko', null)->findAll();
+            // Bypass TenantScopedModel to fetch global templates (tenant_id IS NULL)
+            $baseAccounts = $db->table('accounts')
+                ->where('id_toko', null)
+                ->where('tenant_id', null)
+                ->get()
+                ->getResultArray();
+
             $tokoName = $input['toko_name'] ?? 'Toko';
             foreach ($baseAccounts as $acc) {
                 $baseCode = $acc['base_code'] ?? $acc['code'];
