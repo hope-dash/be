@@ -1756,6 +1756,25 @@ class TransactionControllerV2 extends ResourceController
 
             $transaction['payments'] = $payments;
 
+            // 5. Get Return Items (Retur)
+            $returns = $db->table('retur r')
+                ->select("
+                    r.*,
+                    p.nama_barang,
+                    mb.nama_model,
+                    s.seri,
+                    CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang
+                ")
+                ->join('product p', 'r.kode_barang = p.id_barang AND p.tenant_id = r.tenant_id', 'left')
+                ->join('model_barang mb', 'p.id_model_barang = mb.id AND mb.tenant_id = r.tenant_id', 'left')
+                ->join('seri s', 'p.id_seri_barang = s.id AND s.tenant_id = r.tenant_id', 'left')
+                ->where('r.transaction_id', $id)
+                ->where('r.tenant_id', TenantContext::id())
+                ->get()
+                ->getResultArray();
+
+            $transaction['returns'] = $returns;
+
             return $this->jsonResponse->oneResp('Sukses', $transaction, 200);
 
         }
