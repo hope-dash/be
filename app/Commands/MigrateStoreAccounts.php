@@ -23,33 +23,6 @@ class MigrateStoreAccounts extends BaseCommand
             return;
         }
 
-        // 2. Define standard template accounts
-        // pattern: (code_prefix) (toko_id) (suffix)
-        $templates = [
-            // ASSETS
-            ['base_code' => '1001', 'name' => 'Cash', 'type' => 'ASSET', 'normal_balance' => 'DEBIT'],
-            ['base_code' => '1002', 'name' => 'Bank', 'type' => 'ASSET', 'normal_balance' => 'DEBIT'],
-            ['base_code' => '1003', 'name' => 'Piutang usaha', 'type' => 'ASSET', 'normal_balance' => 'DEBIT'],
-            ['base_code' => '1004', 'name' => 'Inventaris', 'type' => 'ASSET', 'normal_balance' => 'DEBIT'],
-            ['base_code' => '1007', 'name' => 'Persediaan Barang Cacat', 'type' => 'ASSET', 'normal_balance' => 'DEBIT'],
-            
-            // LIABILITIES
-            ['base_code' => '2001', 'name' => 'Hutang Usaha', 'type' => 'LIABILITY', 'normal_balance' => 'CREDIT'],
-            
-            // EQUITY
-            ['base_code' => '3001', 'name' => 'Ekuitas Pemilik', 'type' => 'EQUITY', 'normal_balance' => 'CREDIT'],
-            ['base_code' => '3002', 'name' => 'Bagi hasil', 'type' => 'EQUITY', 'normal_balance' => 'DEBIT'],
-            
-            // REVENUE
-            ['base_code' => '4001', 'name' => 'Pendapatan Penjualan', 'type' => 'REVENUE', 'normal_balance' => 'CREDIT'],
-            ['base_code' => '4002', 'name' => 'Diskon Penjualan', 'type' => 'REVENUE', 'normal_balance' => 'DEBIT'],
-            ['base_code' => '4003', 'name' => 'Pengembalian Penjualan', 'type' => 'REVENUE', 'normal_balance' => 'DEBIT'],
-            
-            // COGS & EXPENSE
-            ['base_code' => '5001', 'name' => 'Harga Pokok Penjualan', 'type' => 'EXPENSE', 'normal_balance' => 'DEBIT'],
-            ['base_code' => '6001', 'name' => 'Beban Operasional', 'type' => 'EXPENSE', 'normal_balance' => 'DEBIT'],
-        ];
-
         CLI::write("Initializing accounts for " . count($tokoList) . " stores...", 'yellow');
 
         foreach ($tokoList as $toko) {
@@ -59,17 +32,29 @@ class MigrateStoreAccounts extends BaseCommand
 
             CLI::write("Processing Toko: $tokoName (ID: $tokoId)", 'cyan');
 
+            // 2. Fetch templates from database (where tenant_id and id_toko are NULL)
+            $templates = $db->table('accounts')
+                ->where('tenant_id', null)
+                ->where('id_toko', null)
+                ->get()
+                ->getResultArray();
+
+            if (empty($templates)) {
+                CLI::error("  ! No template accounts found in 'accounts' table (tenant_id & id_toko NULL).");
+                continue;
+            }
+
             foreach ($templates as $tpl) {
                 // Generate specific code: first 2 digits + toko_id + last digit
-                // e.g. 10(1)1, 30(1)2
-                $prefix = substr($tpl['base_code'], 0, 2);
-                $suffix = substr($tpl['base_code'], -1);
+                $baseCode = $tpl['base_code'] ?? $tpl['code'];
+                $prefix = substr($baseCode, 0, 2);
+                $suffix = substr($baseCode, 2); // get everything after prefix
                 $specificCode = $prefix . $tokoId . $suffix;
-                $specificName = $tpl['name'] . ' (' . $tokoName . ')';
-
+                $specificName = $tpl['name'] . ' ' . $tokoName;
                 // Check if already exists
                 $exists = $db->table('accounts')
                     ->where('code', $specificCode)
+                    ->where('tenant_id', $tenantId)
                     ->countAllResults();
 
                 if ($exists === 0) {
@@ -77,7 +62,7 @@ class MigrateStoreAccounts extends BaseCommand
                         'tenant_id' => $tenantId,
                         'id_toko' => $tokoId,
                         'code' => $specificCode,
-                        'base_code' => $tpl['base_code'],
+                        'base_code' => $baseCode,
                         'name' => $specificName,
                         'type' => $tpl['type'],
                         'normal_balance' => $tpl['normal_balance'],

@@ -31,6 +31,10 @@ class ProductController extends ResourceController
     protected $customer;
     protected $SalesProductModel;
     protected $transactions;
+    protected $journalModel;
+    protected $journalItemModel;
+    protected $accountModel;
+    protected $stockLedgerModel;
 
     public function __construct()
     {
@@ -45,6 +49,10 @@ class ProductController extends ResourceController
         $this->customer = new CustomerModel();
         $this->transactions = new TransactionModel();
         $this->SalesProductModel = new SalesProductModel();
+        $this->journalModel = new \App\Models\JournalModel();
+        $this->journalItemModel = new \App\Models\JournalItemModel();
+        $this->accountModel = new \App\Models\AccountModel();
+        $this->stockLedgerModel = new \App\Models\StockLedgerModel();
     }
 
     public function createProduct()
@@ -553,63 +561,155 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error("Produk tidak ditemukan", 404);
         }
 
-        $productData = [
-            'nama_barang' => $data->nama_barang ?? "",
-            'description' => $data->description ?? NULL,
-            'id_seri_barang' => $data->id_seri_barang ?? null,
-            'harga_modal' => $data->harga_modal,
-            'harga_jual' => $data->harga_jual,
-            'harga_jual_toko' => $data->harga_jual_toko,
-            'suplier' => $data->suplier ?? null,
-            'id_model_barang' => $data->id_model,
-            'notes' => $data->notes ?? null,
-            'berat' => $data->berat ?? 0,
-            'dropship' => $data->dropship ?? 0,
-            "updated_by" => $token['user_id'],
-        ];
+        $oldModal = (float)($oldProductData['harga_modal'] ?? 0);
+        $newModal = (float)$data->harga_modal;
 
-        $this->productModel->update($id, $productData);
-        $changeLog = $this->generateChangeLogString($oldProductData, $data);
+        $this->db->transStart();
+        try {
+            $productData = [
+                'nama_barang' => $data->nama_barang ?? "",
+                'description' => $data->description ?? NULL,
+                'id_seri_barang' => $data->id_seri_barang ?? null,
+                'harga_modal' => $newModal,
+                'harga_jual' => $data->harga_jual,
+                'harga_jual_toko' => $data->harga_jual_toko,
+                'suplier' => $data->suplier ?? null,
+                'id_model_barang' => $data->id_model,
+                'notes' => $data->notes ?? null,
+                'berat' => $data->berat ?? 0,
+                'dropship' => $data->dropship ?? 0,
+                "updated_by" => $token['user_id'],
+            ];
 
-        log_aktivitas([
-            'user_id' => $token['user_id'],
-            'action_type' => 'UPDATE_V2',
-            'target_table' => 'product',
-            'target_id' => $id,
-            'description' => $changeLog,
-            'detail' => [
-                'old' => $oldProductData,
-                'new' => $data
-            ],
-        ]);
+            $this->productModel->update($id, $productData);
 
-        // V2: Ensure Store Relation Exists (Stock Initialized to 0, No Dropship/Stock Updates)
-        if (isset($data->stock) && is_array($data->stock)) {
-            foreach ($data->stock as $toko) {
-                // Only add if not exists. Do not update anything.
-                if (isset($toko->id) && $this->stockModel->find($toko->id)) {
-                    // Existing relation found, do nothing.
-                    continue;
+            // Handle Journal if Modal changed
+            if ($oldModal !== $newModal) {
+                $diffPerUnit = $newModal - $oldModal;
+                $stocks = $this->stockModel->where('id_barang', $oldProductData['id_barang'] ?? $oldProductData['kode_barang'])->findAll();
+
+                foreach ($stocks as $s) {
+                    $totalQty = (int)$s['stock'] + (int)$s['barang_cacat'];
+                    if ($totalQty == 0) continue;
+
+                    $totalDiff = abs($diffPerUnit * $totalQty);
+                    $tokoId = $s['id_toko'];
+
+                    // 1. Create Journal
+                    $journalData = [
+                        'tenant_id' => TenantContext::id(),
+                        'id_toko' => $tokoId,
+                        'reference_type' => 'REVALUATION',
+                        'reference_id' => $id,
+                        'reference_no' => $oldProductData['id_barang'] ?? $oldProductData['kode_barang'],
+                        'date' => date('Y-m-d'),
+                        'description' => "Penyesuaian Nilai Persediaan (Modal changed from $oldModal to $newModal) - " . ($data->nama_barang ?? $oldProductData['nama_barang']),
+                        'created_at' => date('Y-m-d H:i:s')
+                    ];
+                    $this->journalModel->insert($journalData);
+                    $journalId = $this->journalModel->getInsertID();
+
+                    // 2. Journal Items
+                    // 10x4 = Persediaan/Inventaris, 50x1 = HPP (as offset)
+                    $inventoryCode = '10' . $tokoId . '4';
+                    $offsetCode = '50' . $tokoId . '1';
+
+                    $invAccount = $this->accountModel->getByBaseCode($inventoryCode, $tokoId);
+                    $offsetAccount = $this->accountModel->getByBaseCode($offsetCode, $tokoId);
+
+                    if ($invAccount && $offsetAccount) {
+                        if ($diffPerUnit > 0) {
+                            // Modal naik: Dr Inventaris (Asset naik), Cr HPP (Beban turun/Gain)
+                            $this->journalItemModel->insert([
+                                'journal_id' => $journalId,
+                                'account_id' => $invAccount['id'],
+                                'debit' => $totalDiff,
+                                'credit' => 0
+                            ]);
+                            $this->journalItemModel->insert([
+                                'journal_id' => $journalId,
+                                'account_id' => $offsetAccount['id'],
+                                'debit' => 0,
+                                'credit' => $totalDiff
+                            ]);
+                        } else {
+                            // Modal turun: Dr HPP (Beban naik/Loss), Cr Inventaris (Asset turun)
+                            $this->journalItemModel->insert([
+                                'journal_id' => $journalId,
+                                'account_id' => $offsetAccount['id'],
+                                'debit' => $totalDiff,
+                                'credit' => 0
+                            ]);
+                            $this->journalItemModel->insert([
+                                'journal_id' => $journalId,
+                                'account_id' => $invAccount['id'],
+                                'debit' => 0,
+                                'credit' => $totalDiff
+                            ]);
+                        }
+                    }
+
+                    // 3. Stock Ledger entry for info
+                    $this->stockLedgerModel->insert([
+                        'id_barang' => $oldProductData['id_barang'] ?? $oldProductData['kode_barang'],
+                        'id_toko' => $tokoId,
+                        'qty' => 0,
+                        'balance' => $totalQty,
+                        'reference_type' => 'REVALUATION',
+                        'reference_id' => $id,
+                        'description' => "Harga modal diubah: $oldModal -> $newModal. Nilai berubah: " . ($diffPerUnit * $totalQty)
+                    ]);
                 }
-                else {
-                    $existingStock = $this->stockModel
-                        ->where('id_barang', $id)
-                        ->where('id_toko', $toko->id_toko)
-                        ->first();
+            }
 
-                    if (!$existingStock) {
-                        $this->stockModel->insert([
-                            'id_barang' => $data->id_barang ?? $oldProductData['kode_barang'],
-                            'id_toko' => $toko->id_toko,
-                            'stock' => 0,
-                            'barang_cacat' => 0,
-                        ]);
+            $changeLog = $this->generateChangeLogString($oldProductData, $data);
+
+            log_aktivitas([
+                'user_id' => $token['user_id'],
+                'action_type' => 'UPDATE_V2',
+                'target_table' => 'product',
+                'target_id' => $id,
+                'description' => $changeLog,
+                'detail' => [
+                    'old' => $oldProductData,
+                    'new' => $data
+                ],
+            ]);
+
+            // V2: Ensure Store Relation Exists
+            if (isset($data->stock) && is_array($data->stock)) {
+                foreach ($data->stock as $toko) {
+                    if (isset($toko->id) && $this->stockModel->find($toko->id)) {
+                        continue;
+                    }
+                    else {
+                        $existingStock = $this->stockModel
+                            ->where('id_barang', $id)
+                            ->where('id_toko', $toko->id_toko)
+                            ->first();
+
+                        if (!$existingStock) {
+                            $this->stockModel->insert([
+                                'id_barang' => $data->id_barang ?? $oldProductData['kode_barang'],
+                                'id_toko' => $toko->id_toko,
+                                'stock' => 0,
+                                'barang_cacat' => 0,
+                            ]);
+                        }
                     }
                 }
             }
-        }
 
-        return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id, 'id_barang' => $oldProductData['id_barang']], 200);
+            $this->db->transComplete();
+            if ($this->db->transStatus() === false) {
+                throw new \Exception("Gagal melakukan update produk dan revaluasi jurnal.");
+            }
+
+            return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id, 'id_barang' => $oldProductData['id_barang']], 200);
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
     }
 
     public function adjustStock($id = null)
