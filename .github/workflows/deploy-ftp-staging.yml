@@ -17,9 +17,9 @@ jobs:
       - name: 📂 Deploy selected files to FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.4
         with:
-          server: ${{ secrets.FTP_HOST }}
+          server: ${{ secrets.FTP_HOST_STG }}
           username: ${{ secrets.FTP_USERNAME_STG }}
-          password: ${{ secrets.FTP_PASSWORD }}
+          password: ${{ secrets.FTP_PASSWORD_STG }}
           local-dir: "./"
           server-dir: "/public_html/"
           # hanya upload folder app dan file composer
