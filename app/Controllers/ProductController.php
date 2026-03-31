@@ -1287,6 +1287,7 @@ class ProductController extends ResourceController
             $sortMethod = strtolower($this->request->getGet('sortMethod')) ?? 'asc';
             $namaProduct = $this->request->getGet('namaProduct') ?? '';
             $id_toko = $this->request->getGet('id_toko') ?? '';
+            $stockFilter = $this->request->getGet('stockFilter') ?? '';
             $is_pricelist = $this->request->getGet('is_pricelist') ?? false;
             $customer_id = $this->request->getGet('customer_id') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
@@ -1314,6 +1315,14 @@ class ProductController extends ResourceController
                 'stock.barang_cacat',
                 'toko.toko_name',
                 'product.harga_jual',
+                '(SELECT COALESCE(SUM(sp.jumlah), 0) 
+                  FROM sales_product sp 
+                  JOIN transaction t ON t.id = sp.id_transaction 
+                  WHERE sp.kode_barang = product.id_barang 
+                    AND t.id_toko = stock.id_toko 
+                    AND t.status = "WAITING_PAYMENT" 
+                    AND t.tenant_id = product.tenant_id
+                 ) as hold_stock'
             ];
 
             $builder = $this->productModel
@@ -1351,25 +1360,66 @@ class ProductController extends ResourceController
             }
 
 
-            if ($is_pricelist) {
-                $products = $builder
-                    ->orderBy($sortBy, $sortMethod)
-                    ->limit($limit, $offset);
+            if (!$is_pricelist) {
+                $builder->where('stock.stock >', 0);
             }
-            else {
-                $products = $builder
-                    ->where('stock.stock >', 0)
-                    ->orderBy($sortBy, $sortMethod)
-                    ->limit($limit, $offset);
-            }
-            // Count total data
-            $total_data = $builder->countAllResults(false);
-            $total_page = ceil($total_data / $limit);
 
-            $productList = $products->get()
+            // Fetch results
+            $productList = $builder
+                ->orderBy($sortBy, $sortMethod)
+                ->get()
                 ->getResultArray();
 
-            return $this->jsonResponse->multiResp('', $productList, $total_data, $total_page, $page, $limit, 200);
+            // Format results and apply stockFilter manually because it involves calculated hold_stock
+            $formattedProducts = [];
+            foreach ($productList as $p) {
+                $stock = (int)($p['stock'] ?? 0);
+                $hold = (int)($p['hold_stock'] ?? 0);
+                $total_ready = $stock - $hold;
+
+                $formattedProducts[] = [
+                    'id' => $p['id'],
+                    'berat' => $p['berat'],
+                    'kode_barang' => $p['kode_barang'],
+                    'nama_model' => $p['nama_model'],
+                    'nama_barang' => $p['nama_barang'],
+                    'harga_modal' => $p['harga_modal'],
+                    'nama_lengkap_barang' => $p['nama_lengkap_barang'],
+                    'seri' => $p['seri'],
+                    'stock' => $stock,
+                    'total_stock_ready' => $total_ready,
+                    'hold_stock' => $hold,
+                    'dropship' => $p['dropship'],
+                    'barang_cacat' => $p['barang_cacat'],
+                    'toko_name' => $p['toko_name'],
+                    'harga_jual' => $p['harga_jual'],
+                ];
+            }
+
+            if (!empty($stockFilter)) {
+                $formattedProducts = array_filter($formattedProducts, function ($prod) use ($stockFilter) {
+                    $total = (int)$prod['total_stock_ready'];
+                    switch ($stockFilter) {
+                        case 'available':
+                            return $total > 6;
+                        case 'low_stock':
+                            return $total <= 5 && $total > 0;
+                        case 'out_stock':
+                            return $total === 0;
+                        default:
+                            return true;
+                    }
+                });
+                $formattedProducts = array_values($formattedProducts);
+            }
+
+            $total_data = count($formattedProducts);
+            $total_page = $limit > 0 ? ceil($total_data / $limit) : 0;
+
+            // Apply manual pagination
+            $pagedData = array_slice($formattedProducts, $offset, $limit);
+
+            return $this->jsonResponse->multiResp('', $pagedData, $total_data, $total_page, $page, $limit, 200);
         }
         catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
