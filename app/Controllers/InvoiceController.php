@@ -77,7 +77,10 @@ class InvoiceController extends Controller
         $dompdf->render();
 
         // Generate filename
-        $filename = 'Invoice-' . ($transaction['invoice_number'] ?? 'INV-' . str_pad($id, 6, '0', STR_PAD_LEFT)) . '.pdf';
+        $rawCustName = $transaction['customer']['nama_customer'] ?? $transaction['meta']['customer_name'] ?? '';
+        $customerSuffix = $rawCustName ? '-' . preg_replace('/[^A-Za-z0-9\-]/', '_', trim($rawCustName)) : '';
+        $invNumber = $transaction['invoice_number'] ?? $transaction['invoice'] ?? 'INV-' . str_pad($id, 6, '0', STR_PAD_LEFT);
+        $filename = 'Invoice-' . $invNumber . $customerSuffix . '.pdf';
 
         // Output PDF for download using CI response to ensure filters (CORS) are applied
         return $this->response
@@ -122,7 +125,10 @@ class InvoiceController extends Controller
         $mpdf->WriteHTML($html);
 
         // Generate filename
-        $filename = 'Invoice-' . ($transaction['invoice_number'] ?? 'INV-' . str_pad($id, 6, '0', STR_PAD_LEFT)) . '.pdf';
+        $rawCustName = $transaction['customer']['nama_customer'] ?? $transaction['meta']['customer_name'] ?? '';
+        $customerSuffix = $rawCustName ? '-' . preg_replace('/[^A-Za-z0-9\-]/', '_', trim($rawCustName)) : '';
+        $invNumber = $transaction['invoice_number'] ?? $transaction['invoice'] ?? 'INV-' . str_pad($id, 6, '0', STR_PAD_LEFT);
+        $filename = 'Invoice-' . $invNumber . $customerSuffix . '.pdf';
 
         // Output PDF for download
         return $this->response
@@ -187,7 +193,10 @@ class InvoiceController extends Controller
         $dompdf->render();
 
         // Generate filename
-        $filename = 'Receipt-' . ($transaction['invoice_number'] ?? 'RCP-' . str_pad($id, 6, '0', STR_PAD_LEFT)) . '.pdf';
+        $rawCustName = $transaction['customer']['nama_customer'] ?? $transaction['meta']['customer_name'] ?? '';
+        $customerSuffix = $rawCustName ? '-' . preg_replace('/[^A-Za-z0-9\-]/', '_', trim($rawCustName)) : '';
+        $invNumber = $transaction['invoice_number'] ?? $transaction['invoice'] ?? 'RCP-' . str_pad($id, 6, '0', STR_PAD_LEFT);
+        $filename = 'Receipt-' . $invNumber . $customerSuffix . '.pdf';
 
         // Output PDF for download using CI response to ensure filters (CORS) are applied
         return $this->response
