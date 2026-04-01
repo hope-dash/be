@@ -225,6 +225,27 @@
                     <?= esc($transaction['meta']['kasir'] ?? 'Admin') ?>
                 </span>
             </div>
+            <div class="info-row">
+                <span class="info-label">Ekspedisi:</span>
+                <span>
+                    <?= esc($transaction['meta']['courier'] ?? $transaction['meta']['pengiriman'] ?? '-') ?>
+                </span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Resi:</span>
+                <span>
+                    <?= esc($transaction['meta']['resi'] ?? '-') ?>
+                </span>
+            </div>
+            <?php
+            $delStatus = str_replace('_', ' ', strtoupper($transaction['delivery_status'] ?? $transaction['meta']['shipping_status'] ?? 'BELUM DIKIRIM'));
+            ?>
+            <div class="info-row">
+                <span class="info-label">Status Kirim:</span>
+                <span>
+                    <?= esc($delStatus) ?>
+                </span>
+            </div>
         </div>
 
         <!-- Customer Info -->

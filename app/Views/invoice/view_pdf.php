@@ -90,14 +90,15 @@
         }
 
         .info-table td {
-            width: 50%;
+            width: 33.33%;
             padding: 12px;
             background: #f8f9fa;
             vertical-align: top;
+            border-right: 8px solid #fff;
         }
 
-        .info-table td:first-child {
-            border-right: 8px solid #fff;
+        .info-table td:last-child {
+            border-right: none;
         }
 
         .info-box h3 {
@@ -336,6 +337,21 @@
                         <p>Telp:
                             <?= esc($transaction['meta']['customer_phone'] ?? '') ?>
                         </p>
+                    </div>
+                </td>
+                <td>
+                    <div class="info-box">
+                        <h3>Informasi Pengiriman</h3>
+                        <p style="margin-top: 4px;"><strong>Ekspedisi:</strong> 
+                            <?= esc($transaction['meta']['courier'] ?? $transaction['meta']['pengiriman'] ?? '-') ?>
+                        </p>
+                        <p><strong>No. Resi:</strong> 
+                            <?= esc($transaction['meta']['resi'] ?? '-') ?>
+                        </p>
+                        <?php
+                        $delStatus = str_replace('_', ' ', strtoupper($transaction['delivery_status'] ?? $transaction['meta']['shipping_status'] ?? 'BELUM DIKIRIM'));
+                        ?>
+                        <p><strong>Status:</strong> <?= esc($delStatus) ?></p>
                     </div>
                 </td>
                 <td>

@@ -382,6 +382,20 @@ endif; ?>
             </div>
 
             <div class="info-box">
+                <h3>Informasi Pengiriman</h3>
+                <p style="margin-top: 5px;"><strong>Ekspedisi:</strong> 
+                    <?= esc($transaction['meta']['courier'] ?? $transaction['meta']['pengiriman'] ?? '-') ?>
+                </p>
+                <p><strong>No. Resi:</strong> 
+                    <?= esc($transaction['meta']['resi'] ?? '-') ?>
+                </p>
+                <?php
+                $delStatus = str_replace('_', ' ', strtoupper($transaction['delivery_status'] ?? $transaction['meta']['shipping_status'] ?? 'BELUM DIKIRIM'));
+                ?>
+                <p><strong>Status:</strong> <?= esc($delStatus) ?></p>
+            </div>
+
+            <div class="info-box">
                 <h3>Informasi Pembayaran</h3>
                 <div class="bank-info">
                     <?php if (!empty($transaction['bank'])): ?>
