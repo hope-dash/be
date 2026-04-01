@@ -77,10 +77,10 @@ class InvoiceController extends Controller
         $dompdf->render();
 
         // Generate filename
-        $rawCustName = $transaction['customer']['nama_customer'] ?? $transaction['meta']['customer_name'] ?? '';
+        $rawCustName = $transaction['meta']['customer_name'] ?? '';
         $customerSuffix = $rawCustName ? '-' . preg_replace('/[^A-Za-z0-9\-]/', '_', trim($rawCustName)) : '';
         $invNumber = $transaction['invoice_number'] ?? $transaction['invoice'] ?? 'INV-' . str_pad($id, 6, '0', STR_PAD_LEFT);
-        $filename = 'Invoice-' . $invNumber . $customerSuffix . '.pdf';
+        $filename = $invNumber . ' - ' . $customerSuffix . '.pdf';
 
         // Output PDF for download using CI response to ensure filters (CORS) are applied
         return $this->response
@@ -118,7 +118,7 @@ class InvoiceController extends Controller
             'margin_top' => 0,
             'margin_bottom' => 0,
             'default_font' => 'dejavusans',
-            'tempDir' => WRITEPATH . 'cache'  // Use writable directory to avoid permission issues
+            'tempDir' => WRITEPATH . 'cache' // Use writable directory to avoid permission issues
         ]);
 
         // Write HTML to PDF
@@ -285,4 +285,3 @@ class InvoiceController extends Controller
         return $transaction;
     }
 }
-
