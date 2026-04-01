@@ -1728,6 +1728,22 @@ class TransactionControllerV2 extends ResourceController
                 }
             }
 
+            // Resolve Customer Info if missing from meta
+            if (!empty($metaMap['customer_id']) && empty($metaMap['customer_name'])) {
+                $customerData = $db->table('customer')
+                    ->select('nama_customer, no_hp_customer')
+                    ->where('id', $metaMap['customer_id'])
+                    ->get()
+                    ->getRowArray();
+
+                if ($customerData) {
+                    $metaMap['customer_name'] = $customerData['nama_customer'];
+                    if (empty($metaMap['customer_phone'])) {
+                        $metaMap['customer_phone'] = $customerData['no_hp_customer'];
+                    }
+                }
+            }
+
             $transaction['meta'] = $metaMap;
 
             // Security Check: If hit by Customer, verify ownership
