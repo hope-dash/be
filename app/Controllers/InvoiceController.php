@@ -80,7 +80,7 @@ class InvoiceController extends Controller
         $rawCustName = $transaction['meta']['customer_name'] ?? '';
         $customerSuffix = $rawCustName ? '-' . preg_replace('/[^A-Za-z0-9\-]/', '_', trim($rawCustName)) : '';
         $invNumber = $transaction['invoice_number'] ?? $transaction['invoice'] ?? 'INV-' . str_pad($id, 6, '0', STR_PAD_LEFT);
-        $filename = $invNumber . ' - ' . $customerSuffix . '.pdf';
+        $filename = $invNumber . $customerSuffix . '.pdf';
 
         // Output PDF for download using CI response to ensure filters (CORS) are applied
         return $this->response
