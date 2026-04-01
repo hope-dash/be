@@ -358,6 +358,18 @@ class CustomerControllerV2 extends ResourceController
                     ->where('stock.id_toko', $idToko)
                     ->where('stock.stock >', 0)
                     ->select('stock.stock as current_stock, toko.toko_name');
+            } else {
+                // Multi store mode: only include products that have > 0 stock across all CABANG stores
+                $subquery = $this->db->table('stock s')
+                    ->select('s.id_barang')
+                    ->join('toko t', 't.id = s.id_toko AND t.tenant_id = s.tenant_id')
+                    ->where('t.type', 'CABANG')
+                    ->where('s.tenant_id', TenantContext::id())
+                    ->groupBy('s.id_barang')
+                    ->having('SUM(s.stock) > 0')
+                    ->getCompiledSelect();
+
+                $builder->join("($subquery) stock_filter", "stock_filter.id_barang = product.id_barang", "inner");
             }
 
             // Apply search filter
