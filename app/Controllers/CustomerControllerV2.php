@@ -334,6 +334,8 @@ class CustomerControllerV2 extends ResourceController
 
 
             $idToko = $this->request->getGet('id_toko');
+            $idSeri = $this->request->getGet('seri');
+            $idCategory = $this->request->getGet('id_category'); // Mapping to id_model_barang
             $search = trim($this->request->getGet('search') ?? ''); // Search query
             $limit = (int)$this->request->getGet('limit') ?: 20;
             $page = (int)$this->request->getGet('page') ?: 1;
@@ -358,14 +360,25 @@ class CustomerControllerV2 extends ResourceController
                     ->where('stock.id_toko', $idToko)
                     ->where('stock.stock >', 0)
                     ->select('stock.stock as current_stock, toko.toko_name');
-            } else {
+            }
+            else {
                 // Multi store mode: only include products that have > 0 stock across all CABANG stores
                 $tenantId = TenantContext::id();
                 $escapedTenantId = $this->db->escape($tenantId);
-                
+
                 $subquery = "SELECT s.id_barang FROM stock s JOIN toko t ON t.id = s.id_toko AND t.tenant_id = s.tenant_id WHERE t.type = 'CABANG' AND s.tenant_id = {$escapedTenantId} GROUP BY s.id_barang HAVING SUM(s.stock) > 0";
-                
+
                 $builder->where("product.id_barang IN ($subquery)", null, false);
+            }
+
+            // Apply seri filter
+            if (!empty($idSeri)) {
+                $builder->where('product.id_seri_barang', $idSeri);
+            }
+
+            // Apply category (model) filter
+            if (!empty($idCategory)) {
+                $builder->where('product.id_model_barang', $idCategory);
             }
 
             // Apply search filter
