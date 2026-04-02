@@ -29,6 +29,7 @@ $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
 
 // Webhooks
 $routes->post('api/webhook/whatsapp', 'WebhookController::whatsappGateway');
+$routes->post('api/chat/webhook/(:num)', 'ChatWebhookController::incoming/$1');
 
 // Wilayah Indonesia API
 $routes->group('api/wilayah', function ($routes) {
@@ -84,7 +85,18 @@ $routes->group('api', ['filter' => 'tenant'], function ($routes) {
 
 // --- 4. ADMIN PROTECTED ROUTES (X-Tenant + jwtAuth Required) ---
 $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
-    // WhatsApp Chat Gateway
+    // Chat Session Management
+    $routes->group('chat', function ($routes) {
+        $routes->post('session/start', 'ChatSessionController::start');
+        $routes->get('session/status/(:num)', 'ChatSessionController::status/$1');
+        $routes->get('session/qr/(:num)', 'ChatSessionController::getQr/$1');
+        $routes->post('session/disconnect/(:num)', 'ChatSessionController::disconnect/$1');
+        $routes->post('send', 'ChatSessionController::send');
+        $routes->get('events/(:num)', 'ChatSSEController::subscribe/$1');
+        $routes->get('events/(:num)/chat/(:num)', 'ChatSSEController::subscribeChat/$1/$2');
+    });
+
+    // Existing chat routes (no auth)
     $routes->group('wa', function ($routes) {
         $routes->get('chats', 'WhatsAppChatController::index');
         $routes->get('chats/(:num)', 'WhatsAppChatController::show/$1');
@@ -92,7 +104,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('labels', 'WhatsAppChatController::createLabel');
         $routes->post('chats/(:num)/labels', 'WhatsAppChatController::attachLabel/$1');
     });
-    
+
     // Uploads
     $routes->post('v2/upload/image', 'UploadController::uploadImage');
     $routes->post('upload/image', 'UploadController::uploadImage');

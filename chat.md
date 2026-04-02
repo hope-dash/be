@@ -215,6 +215,11 @@ Content-Type: application/x-www-form-urlencoded
 toko_id=1
 ```
 
+**Required Headers:**
+- `Authorization: Bearer JWT_TOKEN` - JWT authentication token
+- `X-Tenant: 1` - Tenant ID
+- `Content-Type: application/x-www-form-urlencoded`
+
 **Response (200):**
 ```json
 {
@@ -245,7 +250,12 @@ Check current session status
 ```
 GET /api/chat/session/status/1
 Authorization: Bearer JWT_TOKEN
+X-Tenant: 1
 ```
+
+**Required Headers:**
+- `Authorization: Bearer JWT_TOKEN`
+- `X-Tenant: 1`
 
 **Response:**
 ```json
@@ -274,7 +284,12 @@ Get fresh QR code (if original scan failed)
 ```
 GET /api/chat/session/qr/1
 Authorization: Bearer JWT_TOKEN
+X-Tenant: 1
 ```
+
+**Required Headers:**
+- `Authorization: Bearer JWT_TOKEN`
+- `X-Tenant: 1`
 
 **Response:**
 ```json
@@ -297,7 +312,12 @@ Disconnect and close session
 ```
 POST /api/chat/session/disconnect/1
 Authorization: Bearer JWT_TOKEN
+X-Tenant: 1
 ```
+
+**Required Headers:**
+- `Authorization: Bearer JWT_TOKEN`
+- `X-Tenant: 1`
 
 **Response:**
 ```json
@@ -318,6 +338,7 @@ Send text or image message
 ```
 POST /api/chat/send
 Authorization: Bearer JWT_TOKEN
+X-Tenant: 1
 Content-Type: application/x-www-form-urlencoded
 
 toko_id=1&to=6281234567890&text=Hello World!
@@ -325,8 +346,18 @@ toko_id=1&to=6281234567890&text=Hello World!
 
 **Request (Image):**
 ```
+POST /api/chat/send
+Authorization: Bearer JWT_TOKEN
+X-Tenant: 1
+Content-Type: application/x-www-form-urlencoded
+
 toko_id=1&to=6281234567890&image_url=https://example.com/photo.jpg&caption=Check this!
 ```
+
+**Required Headers:**
+- `Authorization: Bearer JWT_TOKEN`
+- `X-Tenant: 1`
+- `Content-Type: application/x-www-form-urlencoded`
 
 **Parameters:**
 - `toko_id` (required) - Store ID
@@ -371,8 +402,12 @@ Subscribe to all store events via Server-Sent Events
 
 **Request:**
 ```javascript
+// JavaScript
 const eventSource = new EventSource('/api/chat/events/1', {
-    headers: { 'Authorization': 'Bearer JWT_TOKEN' }
+    headers: { 
+        'Authorization': 'Bearer JWT_TOKEN',
+        'X-Tenant': '1'
+    }
 });
 
 eventSource.addEventListener('message', (event) => {
@@ -384,6 +419,12 @@ eventSource.addEventListener('error', () => {
     eventSource.close();
 });
 ```
+
+**Required Headers:**
+- `Authorization: Bearer JWT_TOKEN`
+- `X-Tenant: 1`
+
+**Note:** SSE sends `Authorization` header via JavaScript EventSource options. For browser security, some proxies may require additional CORS headers.
 
 **Event Types:**
 
@@ -436,8 +477,12 @@ Subscribe to specific chat events only
 
 **Request:**
 ```javascript
+// JavaScript
 const chatEvents = new EventSource('/api/chat/events/1/chat/123', {
-    headers: { 'Authorization': 'Bearer JWT_TOKEN' }
+    headers: { 
+        'Authorization': 'Bearer JWT_TOKEN',
+        'X-Tenant': '1'
+    }
 });
 
 chatEvents.addEventListener('message', (event) => {
@@ -447,6 +492,10 @@ chatEvents.addEventListener('message', (event) => {
     }
 });
 ```
+
+**Required Headers:**
+- `Authorization: Bearer JWT_TOKEN`
+- `X-Tenant: 1`
 
 Filters events to only those for chat ID 123
 
@@ -620,6 +669,7 @@ curl -X GET http://localhost:3000/api/session/status/test
 # Start session
 curl -X POST http://yourdomain.com/api/chat/session/start \
   -H "Authorization: Bearer TOKEN" \
+  -H "X-Tenant: 1" \
   -d "toko_id=1"
 ```
 
@@ -631,7 +681,8 @@ Response includes QR code (base64). Display it to user for scanning.
 # Check every 2 seconds until status = "ready"
 for i in {1..30}; do
   curl -s -X GET http://yourdomain.com/api/chat/session/status/1 \
-    -H "Authorization: Bearer TOKEN" | jq '.data.status'
+    -H "Authorization: Bearer TOKEN" \
+    -H "X-Tenant: 1" | jq '.data.status'
   sleep 2
 done
 ```
@@ -641,6 +692,7 @@ done
 ```bash
 curl -X POST http://yourdomain.com/api/chat/send \
   -H "Authorization: Bearer TOKEN" \
+  -H "X-Tenant: 1" \
   -d "toko_id=1&to=6281234567890&text=Hello World!"
 ```
 
@@ -649,6 +701,7 @@ curl -X POST http://yourdomain.com/api/chat/send \
 ```bash
 curl -X POST http://yourdomain.com/api/chat/send \
   -H "Authorization: Bearer TOKEN" \
+  -H "X-Tenant: 1" \
   -d "toko_id=1&to=6281234567890&image_url=https://example.com/photo.jpg&caption=Check this!"
 ```
 
@@ -656,7 +709,10 @@ curl -X POST http://yourdomain.com/api/chat/send \
 
 ```javascript
 const eventSource = new EventSource('/api/chat/events/1', {
-    headers: { 'Authorization': 'Bearer TOKEN' }
+    headers: { 
+        'Authorization': 'Bearer TOKEN',
+        'X-Tenant': '1'
+    }
 });
 
 eventSource.addEventListener('message', (event) => {
@@ -679,7 +735,12 @@ eventSource.addEventListener('error', () => {
 ### Example 6: Listen to Specific Chat
 
 ```javascript
-const chatEvents = new EventSource('/api/chat/events/1/chat/123');
+const chatEvents = new EventSource('/api/chat/events/1/chat/123', {
+    headers: { 
+        'Authorization': 'Bearer TOKEN',
+        'X-Tenant': '1'
+    }
+});
 
 chatEvents.addEventListener('message', (event) => {
     const data = JSON.parse(event.data);
@@ -695,6 +756,7 @@ chatEvents.addEventListener('message', (event) => {
 
 ```bash
 # Test webhook receiver (simulate external service sending message)
+# NO AUTH REQUIRED - webhook is public endpoint
 curl -X POST http://yourdomain.com/api/chat/webhook/1 \
   -H "Content-Type: application/json" \
   -d '{
@@ -713,11 +775,13 @@ curl -X POST http://yourdomain.com/api/chat/webhook/1 \
 
 DOMAIN="http://yourdomain.com"
 TOKEN="your_jwt_token"
+TENANT="1"
 TOKO_ID=1
 
 echo "1. Starting session..."
 START=$(curl -s -X POST $DOMAIN/api/chat/session/start \
   -H "Authorization: Bearer $TOKEN" \
+  -H "X-Tenant: $TENANT" \
   -d "toko_id=$TOKO_ID")
 
 SESSION_ID=$(echo $START | jq -r '.data.sessionId')
@@ -729,7 +793,8 @@ echo "Display QR to user (scan with WhatsApp)"
 echo "2. Waiting for connection..."
 for i in {1..60}; do
   STATUS=$(curl -s -X GET $DOMAIN/api/chat/session/status/$TOKO_ID \
-    -H "Authorization: Bearer $TOKEN" | jq -r '.data.status')
+    -H "Authorization: Bearer $TOKEN" \
+    -H "X-Tenant: $TENANT" | jq -r '.data.status')
   
   echo "Status: $STATUS"
   [ "$STATUS" = "ready" ] && break
@@ -739,6 +804,7 @@ done
 echo "3. Session ready! Sending test message..."
 curl -X POST $DOMAIN/api/chat/send \
   -H "Authorization: Bearer $TOKEN" \
+  -H "X-Tenant: $TENANT" \
   -d "toko_id=$TOKO_ID&to=6281234567890&text=Test message from API"
 
 echo "Done!"
