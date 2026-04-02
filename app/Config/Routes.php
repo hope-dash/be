@@ -27,6 +27,9 @@ $routes->get('tiktok_verif/(:num)', 'TiktokController::callback/$1');
 $routes->get('api/cron/process-email', 'CronController::processEmailQueue');
 $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
 
+// Webhooks
+$routes->post('api/webhook/whatsapp', 'WebhookController::whatsappGateway');
+
 // Wilayah Indonesia API
 $routes->group('api/wilayah', function ($routes) {
     $routes->get('provinces', 'WilayahController::getProvinces');
@@ -81,6 +84,14 @@ $routes->group('api', ['filter' => 'tenant'], function ($routes) {
 
 // --- 4. ADMIN PROTECTED ROUTES (X-Tenant + jwtAuth Required) ---
 $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
+    // WhatsApp Chat Gateway
+    $routes->group('wa', function ($routes) {
+        $routes->get('chats', 'WhatsAppChatController::index');
+        $routes->get('chats/(:num)', 'WhatsAppChatController::show/$1');
+        $routes->get('labels', 'WhatsAppChatController::listLabels');
+        $routes->post('labels', 'WhatsAppChatController::createLabel');
+        $routes->post('chats/(:num)/labels', 'WhatsAppChatController::attachLabel/$1');
+    });
     
     // Uploads
     $routes->post('v2/upload/image', 'UploadController::uploadImage');
