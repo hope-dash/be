@@ -1,907 +1,811 @@
-# WhatsApp Chat Feature Documentation
+# WhatsApp Chat Integration - Complete API & SSE Documentation
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
+- [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Database Schema](#database-schema)
-- [Models](#models)
-- [Controllers](#controllers)
-- [Webhook Integration](#webhook-integration)
 - [API Endpoints](#api-endpoints)
-- [Key Features](#key-features)
-- [Setup and Configuration](#setup-and-configuration)
+  - [Session Management](#session-management)
+  - [Message Sending](#message-sending)
+  - [Real-time Events (SSE)](#real-time-events-sse)
+  - [Chat Management](#chat-management)
+  - [Webhooks](#webhooks)
+- [Setup & Configuration](#setup--configuration)
 - [Usage Examples](#usage-examples)
+- [Error Handling](#error-handling)
 
 ---
 
 ## Overview
 
-The WhatsApp Chat feature is a multi-tenant messaging system that integrates with WhatsApp gateway to receive and manage customer messages. The system automatically:
+WhatsApp Chat Integration provides:
 
-- Receives incoming WhatsApp messages via webhook
-- Stores messages and chat conversations
-- Tracks unread message counts
-- Supports message labeling and organization
-- Manages customer associations
-- Handles media attachments (images converted to WebP)
-- Maintains tenant isolation for multi-tenancy
+1. **External Session Management** - Connect WhatsApp accounts via QR code with external service
+2. **Message API** - Send/receive text and image messages
+3. **Real-time Events (SSE)** - Stream incoming messages and status updates to clients
+4. **Local Storage** - Store all chats and messages in database
+5. **Multi-tenant** - Isolated sessions per store/tenant
 
-### Core Components
+### External Service Integration
 
-1. **WebhookController** - Handles incoming webhook payloads from WhatsApp gateway
-2. **WhatsAppChatController** - Manages chat operations (list, show, labels)
-3. **Models** - Data models for chats, messages, and labels
-4. **Database** - 4 main tables for data persistence
+```
+Our API ↔ External WhatsApp Service (e.g., http://localhost:3000)
+  ├─ POST /api/session/start → Get QR code
+  ├─ GET /api/session/status → Check connection status
+  └─ POST /api/session/send → Send message
+       ↓
+   External Service sends webhooks back
+       ↓
+   POST /api/chat/webhook/{tokoId}
+```
+
+---
+
+## Quick Start
+
+### 1. Run Migration
+```bash
+php spark migrate
+```
+
+### 2. Add Routes to app/Config/Routes.php
+
+In protected routes section (with `['filter' => ['tenant', 'jwtAuth']]`):
+```php
+// Chat Session Management
+$routes->group('chat', function ($routes) {
+    $routes->post('session/start', 'ChatSessionController::start');
+    $routes->get('session/status/(:num)', 'ChatSessionController::status/$1');
+    $routes->get('session/qr/(:num)', 'ChatSessionController::getQr/$1');
+    $routes->post('session/disconnect/(:num)', 'ChatSessionController::disconnect/$1');
+    $routes->post('send', 'ChatSessionController::send');
+    $routes->get('events/(:num)', 'ChatSSEController::subscribe/$1');
+    $routes->get('events/(:num)/chat/(:num)', 'ChatSSEController::subscribeChat/$1/$2');
+});
+
+// Existing chat routes (no auth)
+$routes->group('wa', function ($routes) {
+    $routes->get('chats', 'WhatsAppChatController::index');
+    $routes->get('chats/(:num)', 'WhatsAppChatController::show/$1');
+    $routes->get('labels', 'WhatsAppChatController::listLabels');
+    $routes->post('labels', 'WhatsAppChatController::createLabel');
+    $routes->post('chats/(:num)/labels', 'WhatsAppChatController::attachLabel/$1');
+});
+```
+
+In public routes section (before protected routes):
+```php
+// Chat Webhook
+$routes->post('api/chat/webhook/(:num)', 'ChatWebhookController::incoming/$1');
+
+// Existing webhook
+$routes->post('api/webhook/whatsapp', 'WebhookController::whatsappGateway');
+```
+
+### 3. Configure .env
+```env
+CHAT_API_BASE_URL=http://localhost:3000
+# Production:
+# CHAT_API_BASE_URL=https://api.whatsapp-service.com
+```
+
+### 4. Setup External Service Webhook
+Configure external service to POST to:
+```
+https://yourdomain.com/api/chat/webhook/{tokoId}
+```
+
+### 5. Schedule Cleanup (Optional)
+```bash
+# Add to cron (hourly)
+0 * * * * cd /path/to/app && php spark chat:cleanup-sse
+
+# Or run manually
+php spark chat:cleanup-sse
+```
 
 ---
 
 ## Architecture
 
-### High-Level Flow
+### API Flow Diagram
 
 ```
-WhatsApp Gateway
-       ↓
-   Webhook Request
-       ↓
-WebhookController::whatsappGateway()
-       ↓
-Parse & Validate Payload
-       ↓
-Store in Database (Chat & Message)
-       ↓
-Return JSON Response
+[Client] 
+  ├─ POST /api/chat/session/start → Get QR
+  ├─ GET /api/chat/session/status/{id} → Check status
+  ├─ POST /api/chat/send → Send message
+  └─ GET /api/chat/events/{id} → Subscribe (SSE)
+       ↓↑
+   [Our Backend]
+       ↓↑
+   [External Service]
+       ├─ Manages WhatsApp connections
+       ├─ Sends/receives messages
+       └─ Sends webhooks → /api/chat/webhook/{id}
 ```
 
 ### Component Hierarchy
 
 ```
-WhatsAppChatController
-├── WhatsAppChatModel
-├── WhatsAppMessageModel
-├── WhatsAppLabelModel
-└── WhatsAppChatLabelModel
+ChatSessionController (session lifecycle)
+  ├─ ChatServiceAPI (HTTP client)
+  ├─ ChatSessionModel (session storage)
+  └─ WhatsAppChatModel/MessageModel (message storage)
 
-WebhookController
-├── WhatsAppChatModel
-├── WhatsAppMessageModel
-└── TenantContext (for multi-tenancy)
+ChatWebhookController (receive messages)
+  ├─ WhatsAppChatModel
+  ├─ WhatsAppMessageModel
+  └─ SSE broadcast (file-based queue)
+
+ChatSSEController (stream events)
+  └─ Read from sse-messages/toko_{id}.queue
 ```
 
 ---
 
 ## Database Schema
 
-### 1. `whatsapp_chats` Table
-
-Stores conversation threads with customers.
-
-| Column | Type | Nullable | Notes |
-|--------|------|----------|-------|
-| `id` | BIGINT (PK) | No | Auto-increment primary key |
-| `tenant_id` | INT | Yes | For multi-tenancy |
-| `phone` | VARCHAR(30) | No | Normalized customer phone number |
-| `display_name` | VARCHAR(100) | Yes | Customer's display name |
-| `last_message_at` | DATETIME | Yes | Timestamp of last message |
-| `last_message_snippet` | VARCHAR(255) | Yes | Preview of last message (max 120 chars) |
-| `unread_count` | INT | No | Count of unread messages (default: 0) |
-| `created_at` | DATETIME | Yes | Record creation timestamp |
-| `updated_at` | DATETIME | Yes | Record update timestamp |
-
-**Indexes:**
-- Primary: `id`
-- Composite: `(tenant_id, phone)`
-
----
-
-### 2. `whatsapp_messages` Table
-
-Stores individual messages in conversations.
-
-| Column | Type | Nullable | Notes |
-|--------|------|----------|-------|
-| `id` | BIGINT (PK) | No | Auto-increment primary key |
-| `tenant_id` | INT | Yes | For multi-tenancy |
-| `chat_id` | BIGINT | No | Foreign key to `whatsapp_chats.id` |
-| `direction` | ENUM | No | 'in' (received) or 'out' (sent) |
-| `message_type` | ENUM | No | 'text', 'image', 'document', 'other' |
-| `text` | TEXT | Yes | Message text content |
-| `media_path` | VARCHAR(255) | Yes | Path to stored media file |
-| `media_mime` | VARCHAR(100) | Yes | MIME type of media |
-| `received_at` | DATETIME | Yes | When message was received |
-| `created_at` | DATETIME | Yes | Record creation timestamp |
-| `updated_at` | DATETIME | Yes | Record update timestamp |
-
-**Indexes:**
-- Primary: `id`
-- Composite: `(tenant_id, chat_id)`
-
----
-
-### 3. `whatsapp_labels` Table
-
-Stores message labels/categories for chat organization.
-
-| Column | Type | Nullable | Notes |
-|--------|------|----------|-------|
-| `id` | INT (PK) | No | Auto-increment primary key |
-| `tenant_id` | INT | Yes | For multi-tenancy |
-| `name` | VARCHAR(50) | No | Label name (e.g., "Support", "Sales") |
-| `color` | VARCHAR(20) | Yes | Color hex code for UI display |
-| `created_at` | DATETIME | Yes | Record creation timestamp |
-| `updated_at` | DATETIME | Yes | Record update timestamp |
-
-**Indexes:**
-- Primary: `id`
-- Composite: `(tenant_id, name)`
-
----
-
-### 4. `whatsapp_chat_labels` Table
-
-Junction table for many-to-many relationship between chats and labels.
-
-| Column | Type | Nullable | Notes |
-|--------|------|----------|-------|
-| `tenant_id` | INT | Yes | For multi-tenancy |
-| `chat_id` | BIGINT | No | Foreign key to `whatsapp_chats.id` |
-| `label_id` | INT | No | Foreign key to `whatsapp_labels.id` |
-
-**Indexes:**
-- Composite (Primary): `(chat_id, label_id)`
-- Single: `tenant_id`
-
----
-
-## Models
-
-### WhatsAppChatModel
-
-```php
-namespace App\Models;
-
-class WhatsAppChatModel extends Model
-{
-    protected $table = 'whatsapp_chats';
-    protected $primaryKey = 'id';
-    protected $useAutoIncrement = true;
-    protected $allowedFields = [
-        'tenant_id',
-        'phone',
-        'display_name',
-        'last_message_at',
-        'last_message_snippet',
-        'unread_count',
-    ];
-    protected $useTimestamps = true;
-}
+### toko Table (Updated)
+```sql
+ALTER TABLE toko ADD COLUMN chat_session_id VARCHAR(100);
+ALTER TABLE toko ADD COLUMN chat_session_status VARCHAR(50) DEFAULT 'disconnected';
 ```
 
-**Usage:**
-```php
-$chatModel = new WhatsAppChatModel();
-$chats = $chatModel->where('tenant_id', $tenantId)->findAll();
+| Column | Type | Purpose |
+|--------|------|---------|
+| `chat_session_id` | VARCHAR(100) | External service session ID |
+| `chat_session_status` | VARCHAR(50) | Status: disconnected, qr_ready, connecting, ready |
+
+### whatsapp_chats Table
+```sql
+CREATE TABLE whatsapp_chats (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tenant_id INT,
+  phone VARCHAR(30) NOT NULL,
+  display_name VARCHAR(100),
+  last_message_at DATETIME,
+  last_message_snippet VARCHAR(255),
+  unread_count INT DEFAULT 0,
+  created_at DATETIME,
+  updated_at DATETIME,
+  KEY (tenant_id, phone)
+);
 ```
 
----
-
-### WhatsAppMessageModel
-
-```php
-namespace App\Models;
-
-class WhatsAppMessageModel extends Model
-{
-    protected $table = 'whatsapp_messages';
-    protected $primaryKey = 'id';
-    protected $useAutoIncrement = true;
-    protected $allowedFields = [
-        'tenant_id',
-        'chat_id',
-        'direction',
-        'message_type',
-        'text',
-        'media_path',
-        'media_mime',
-        'received_at',
-    ];
-    protected $useTimestamps = true;
-}
+### whatsapp_messages Table
+```sql
+CREATE TABLE whatsapp_messages (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  tenant_id INT,
+  chat_id BIGINT NOT NULL,
+  direction ENUM('in', 'out') DEFAULT 'in',
+  message_type ENUM('text', 'image', 'document', 'other') DEFAULT 'text',
+  text TEXT,
+  media_path VARCHAR(255),
+  media_mime VARCHAR(100),
+  received_at DATETIME,
+  created_at DATETIME,
+  updated_at DATETIME,
+  KEY (tenant_id, chat_id)
+);
 ```
 
-**Usage:**
-```php
-$messageModel = new WhatsAppMessageModel();
-$messages = $messageModel->where('chat_id', $chatId)->orderBy('received_at', 'ASC')->findAll();
-```
-
----
-
-### WhatsAppLabelModel
-
-```php
-namespace App\Models;
-
-class WhatsAppLabelModel extends Model
-{
-    protected $table = 'whatsapp_labels';
-    protected $primaryKey = 'id';
-    protected $useAutoIncrement = true;
-    protected $allowedFields = [
-        'tenant_id',
-        'name',
-        'color',
-    ];
-    protected $useTimestamps = true;
-}
-```
-
----
-
-### WhatsAppChatLabelModel
-
-```php
-namespace App\Models;
-
-class WhatsAppChatLabelModel extends Model
-{
-    protected $table = 'whatsapp_chat_labels';
-    protected $primaryKey = null;
-    protected $useAutoIncrement = false;
-    protected $allowedFields = [
-        'tenant_id',
-        'chat_id',
-        'label_id',
-    ];
-    public $timestamps = false;
-}
-```
-
----
-
-## Controllers
-
-### WebhookController
-
-Handles incoming WhatsApp webhook payloads.
-
-#### `whatsappGateway()` (POST)
-
-**Purpose:** Main webhook endpoint that receives messages from WhatsApp gateway.
-
-**Request Format:**
-- Accepts JSON, form-data, or query parameters
-- Gateway flexibility to support various message formats
-
-**Payload Structure (Expected):**
-```json
-{
-  "tenant_id": 1,
-  "from": "6281234567890",
-  "phone": "6281234567890",
-  "wa_id": "6281234567890",
-  "name": "Customer Name",
-  "text": "Hello, I have a question...",
-  "message": { "body": "Alternative text format" },
-  "media_url": "https://example.com/image.jpg",
-  "image": { "url": "https://example.com/image.jpg", "mime_type": "image/jpeg" },
-  "media_mime": "image/jpeg",
-  "timestamp": 1704067200
-}
-```
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "chat_id": 123,
-  "message_id": 456
-}
-```
-
-**Features:**
-- Handles multiple payload formats
-- Normalizes phone numbers (removes non-digits)
-- Auto-creates chats or updates existing ones
-- Converts images to WebP format
-- Logs all payloads for debugging
-- Multi-tenant support
-
-**Logging:**
-- Application log: `php spark serve` console output
-- Dedicated log file: `writable/logs/whatsapp-gateway.log`
-
----
-
-### WhatsAppChatController
-
-Manages chat operations, viewing, and labeling.
-
-#### `index()` (GET)
-
-**Purpose:** Retrieve all chats for current tenant.
-
-**Response:**
-```json
-{
-  "total_chats": 42,
-  "chats": [
-    {
-      "id": 1,
-      "tenant_id": 1,
-      "phone": "6281234567890",
-      "display_name": "John Doe",
-      "last_message_at": "2026-04-02 10:30:00",
-      "last_message_snippet": "Great! Can you help me with...",
-      "unread_count": 3,
-      "customer_name": "John Doe",
-      "labels": [
-        {
-          "id": 1,
-          "name": "Support",
-          "color": "#FF5733"
-        }
-      ],
-      "created_at": "2026-04-01 09:00:00",
-      "updated_at": "2026-04-02 10:30:00"
-    }
-  ]
-}
-```
-
-**Features:**
-- Lists chats sorted by `last_message_at` (newest first)
-- Joins with `customer` table to get customer names
-- Includes attached labels for each chat
-- Tenant-filtered results
-
----
-
-#### `show($chatId)` (GET)
-
-**Purpose:** Retrieve specific chat with all messages and labels.
-
-**Parameters:**
-- `$chatId` - Chat ID to retrieve
-
-**Response:**
-```json
-{
-  "chat": {
-    "id": 123,
-    "tenant_id": 1,
-    "phone": "6281234567890",
-    "display_name": "John Doe",
-    "last_message_at": "2026-04-02 10:30:00",
-    "last_message_snippet": "Great! Can you help me with...",
-    "unread_count": 0,
-    "customer_name": "John Doe",
-    "created_at": "2026-04-01 09:00:00",
-    "updated_at": "2026-04-02 10:30:00"
-  },
-  "messages": [
-    {
-      "id": 456,
-      "tenant_id": 1,
-      "chat_id": 123,
-      "direction": "in",
-      "message_type": "text",
-      "text": "Hello, I need help",
-      "media_path": null,
-      "media_mime": null,
-      "received_at": "2026-04-02 10:00:00",
-      "created_at": "2026-04-02 10:00:00",
-      "updated_at": "2026-04-02 10:00:00"
-    },
-    {
-      "id": 457,
-      "tenant_id": 1,
-      "chat_id": 123,
-      "direction": "in",
-      "message_type": "image",
-      "text": null,
-      "media_path": "uploads/wa/wa_1704067890.webp",
-      "media_mime": "image/webp",
-      "received_at": "2026-04-02 10:15:00",
-      "created_at": "2026-04-02 10:15:00",
-      "updated_at": "2026-04-02 10:15:00"
-    }
-  ],
-  "labels": [
-    {
-      "id": 1,
-      "name": "Support",
-      "color": "#FF5733"
-    }
-  ]
-}
-```
-
-**Features:**
-- Resets `unread_count` to 0 when chat is viewed
-- Returns all messages sorted chronologically (oldest first)
-- Includes chat metadata and labels
-
----
-
-#### `listLabels()` (GET)
-
-**Purpose:** Retrieve all labels for current tenant.
-
-**Response:**
-```json
-{
-  "labels": [
-    {
-      "id": 1,
-      "tenant_id": 1,
-      "name": "Support",
-      "color": "#FF5733",
-      "created_at": "2026-03-15 09:00:00",
-      "updated_at": "2026-03-15 09:00:00"
-    },
-    {
-      "id": 2,
-      "tenant_id": 1,
-      "name": "Sales",
-      "color": "#33B5FF",
-      "created_at": "2026-03-15 09:15:00",
-      "updated_at": "2026-03-15 09:15:00"
-    }
-  ]
-}
-```
-
----
-
-#### `createLabel()` (POST)
-
-**Purpose:** Create a new label for organizing chats.
-
-**Request Parameters:**
-- `name` (required, string) - Label name (max 50 chars)
-- `color` (optional, string) - Hex color code (e.g., #FF5733)
-
-**Request:**
-```
-POST /whatsappchat/createLabel
-Content-Type: application/x-www-form-urlencoded
-
-name=Support&color=%23FF5733
-```
-
-**Response:**
-```json
-{
-  "id": 1,
-  "name": "Support",
-  "color": "#FF5733"
-}
-```
-
-**Validation:**
-- Returns `400` if `name` is missing or empty
-
----
-
-#### `attachLabel($chatId)` (POST)
-
-**Purpose:** Attach a label to a chat.
-
-**Parameters:**
-- `$chatId` - Chat ID to attach label to
-
-**Request Parameters:**
-- `label_id` (required, integer) - Label ID to attach
-
-**Request:**
-```
-POST /whatsappchat/attachLabel/123
-Content-Type: application/x-www-form-urlencoded
-
-label_id=1
-```
-
-**Response:**
-```json
-{
-  "status": "ok"
-}
-```
-
-**Features:**
-- Prevents duplicate label assignments
-- Validates chat and label existence
-- Returns `404` if chat or label not found
-- Returns `400` if `label_id` is missing
-
----
-
-## Webhook Integration
-
-### Setup
-
-1. **Configure WhatsApp Gateway URL**
-
-   Point your WhatsApp gateway to: `https://yourdomain.com/webhook/whatsappGateway`
-
-2. **Tenant Context**
-
-   The system uses `TenantContext::id()` for multi-tenancy. Ensure your middleware or gateway includes `tenant_id` in the webhook payload.
-
-### Payload Processing Flow
-
-```
-Raw Payload
-    ↓
-Accept multiple formats (JSON, form-data, query)
-    ↓
-Normalize phone number (remove non-digits)
-    ↓
-Extract fields: phone, text, media_url, timestamp
-    ↓
-Handle media (convert to WebP if image)
-    ↓
-Find or create chat
-    ↓
-Update chat metadata (last_message_at, unread_count)
-    ↓
-Store message record
-    ↓
-Return response with IDs
-```
-
-### Error Handling
-
-- Missing phone: Returns `[null, null]` without error
-- Invalid media URL: Logs error, continues without media
-- Image conversion failure: Logs error, message stored without media
-
-### Media Handling
-
-- **Supported:** Images (auto-converted to WebP at 75% quality)
-- **Storage:** `writable/uploads/wa/wa_[uniqid].webp`
-- **MIME Type:** Tracked in database for reference
+### whatsapp_labels & whatsapp_chat_labels
+For chat organization (optional labeling system)
 
 ---
 
 ## API Endpoints
 
-### Summary
+### Session Management
 
-| Method | Endpoint | Controller | Purpose |
-|--------|----------|-----------|---------|
-| POST | `/webhook/whatsappGateway` | WebhookController | Receive messages from gateway |
-| GET | `/whatsappchat` | WhatsAppChatController | List all chats |
-| GET | `/whatsappchat/:id` | WhatsAppChatController | Get specific chat & messages |
-| GET | `/whatsappchat/labels` | WhatsAppChatController | List all labels |
-| POST | `/whatsappchat/createLabel` | WhatsAppChatController | Create new label |
-| POST | `/whatsappchat/:id/attachLabel` | WhatsAppChatController | Attach label to chat |
+#### POST /api/chat/session/start
+Start new WhatsApp session and get QR code
 
----
+**Request:**
+```
+POST /api/chat/session/start
+Authorization: Bearer JWT_TOKEN
+X-Tenant: 1
+Content-Type: application/x-www-form-urlencoded
 
-## Key Features
+toko_id=1
+```
 
-### 1. **Multi-Tenant Support**
+**Response (200):**
+```json
+{
+    "success": true,
+    "data": {
+        "toko_id": 1,
+        "sessionId": "toko_name_abc123_1",
+        "status": "qr_ready",
+        "qr": "data:image/png;base64,iVBORw0KGgo..."
+    }
+}
+```
 
-Each chat and message is isolated by `tenant_id`. The system automatically:
-- Associates data with current tenant context
-- Filters queries by tenant
-- Prevents cross-tenant data access
-
----
-
-### 2. **Message Media Support**
-
-- **Image Conversion:** Automatically converts incoming images to WebP format
-- **MIME Type Tracking:** Stores media type for UI rendering
-- **Storage Path:** Organized in `writable/uploads/wa/` directory
-
----
-
-### 3. **Unread Message Tracking**
-
-- Increments `unread_count` when new message arrives
-- Resets to 0 when chat is viewed via `show()` endpoint
-- Helps identify active conversations
+**Response (400/500):**
+```json
+{
+    "success": false,
+    "message": "Failed to start session: Connection refused"
+}
+```
 
 ---
 
-### 4. **Chat Labeling System**
+#### GET /api/chat/session/status/{tokoId}
+Check current session status
 
-- Create custom labels per tenant
-- Attach multiple labels to single chat
-- Organized by `whatsapp_chat_labels` junction table
-- Supports color coding for UI
+**Request:**
+```
+GET /api/chat/session/status/1
+Authorization: Bearer JWT_TOKEN
+```
 
----
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "toko_id": 1,
+        "sessionId": "akun1_abc123_1",
+        "status": "ready"
+    }
+}
+```
 
-### 5. **Phone Number Normalization**
-
-- Removes all non-digit characters
-- Supports international formats
-- Ensures consistent phone lookups
-
----
-
-### 6. **Message Snippeting**
-
-- Stores first 120 characters of message
-- Shows in chat list preview
-- Truncates long messages automatically
-
----
-
-### 7. **Customer Integration**
-
-- Joins with `customer` table when available
-- Shows `customer_name` in responses
-- Matches by phone number
+**Status Values:**
+- `disconnected` - No active session
+- `qr_ready` - QR generated, waiting for scan
+- `connecting` - Authentication in progress
+- `ready` - Connected and ready to send
 
 ---
 
-### 8. **Comprehensive Logging**
+#### GET /api/chat/session/qr/{tokoId}
+Get fresh QR code (if original scan failed)
 
-- Application logs (visible in console)
-- Dedicated WhatsApp log file
-- Includes full payload for debugging
+**Request:**
+```
+GET /api/chat/session/qr/1
+Authorization: Bearer JWT_TOKEN
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "toko_id": 1,
+        "sessionId": "akun1",
+        "qr": "data:image/png;base64,..."
+    }
+}
+```
 
 ---
 
-## Setup and Configuration
+#### POST /api/chat/session/disconnect/{tokoId}
+Disconnect and close session
 
-### Prerequisites
+**Request:**
+```
+POST /api/chat/session/disconnect/1
+Authorization: Bearer JWT_TOKEN
+```
 
-- CodeIgniter 4.x
-- MySQL/MariaDB
-- PHP 7.4+
+**Response:**
+```json
+{
+    "success": true,
+    "message": "Session disconnected successfully"
+}
+```
+
+---
+
+### Message Sending
+
+#### POST /api/chat/send
+Send text or image message
+
+**Request (Text):**
+```
+POST /api/chat/send
+Authorization: Bearer JWT_TOKEN
+Content-Type: application/x-www-form-urlencoded
+
+toko_id=1&to=6281234567890&text=Hello World!
+```
+
+**Request (Image):**
+```
+toko_id=1&to=6281234567890&image_url=https://example.com/photo.jpg&caption=Check this!
+```
+
+**Parameters:**
+- `toko_id` (required) - Store ID
+- `to` (required) - Phone number (auto-formatted)
+- `text` (optional) - Message text
+- `image_url` (optional) - Image URL
+- `caption` (optional) - Image caption
+
+**Phone Formats (all auto-converted):**
+- `6281234567890` → `6281234567890@c.us` (private)
+- `0812345` → `6281234567890@c.us` (private)
+- `+6281234567890` → `6281234567890@c.us` (private)
+- Auto-appends `@c.us` for private chats (ignores `@g.us` groups)
+
+**Response:**
+```json
+{
+    "success": true,
+    "data": {
+        "toko_id": 1,
+        "to": "6281234567890@c.us",
+        "messageId": "msg_123456",
+        "status": "sent"
+    }
+}
+```
+
+**Errors:**
+```json
+{
+    "success": false,
+    "message": "Session is not ready. Current status: qr_ready"
+}
+```
+
+---
+
+### Real-time Events (SSE)
+
+#### GET /api/chat/events/{tokoId}
+Subscribe to all store events via Server-Sent Events
+
+**Request:**
+```javascript
+const eventSource = new EventSource('/api/chat/events/1', {
+    headers: { 'Authorization': 'Bearer JWT_TOKEN' }
+});
+
+eventSource.addEventListener('message', (event) => {
+    const data = JSON.parse(event.data);
+    console.log('Event:', data.type, data);
+});
+
+eventSource.addEventListener('error', () => {
+    eventSource.close();
+});
+```
+
+**Event Types:**
+
+**1. Connected**
+```json
+{
+    "type": "connected",
+    "message": "Connected to chat stream",
+    "toko_id": 1,
+    "timestamp": "2026-04-02 10:30:00"
+}
+```
+
+**2. New Message (Incoming)**
+```json
+{
+    "type": "new_message",
+    "chat_id": 123,
+    "message_id": 456,
+    "from": "6281234567890@c.us",
+    "text": "Hello, how can I help?",
+    "image_url": null,
+    "timestamp": 1704067200,
+    "unread_count": 3
+}
+```
+
+**3. Message Status**
+```json
+{
+    "type": "message_status",
+    "message_id": 789,
+    "status": "delivered"
+}
+```
+
+**4. Session Status**
+```json
+{
+    "type": "session_status",
+    "status": "ready",
+    "sessionId": "akun1"
+}
+```
+
+---
+
+#### GET /api/chat/events/{tokoId}/chat/{chatId}
+Subscribe to specific chat events only
+
+**Request:**
+```javascript
+const chatEvents = new EventSource('/api/chat/events/1/chat/123', {
+    headers: { 'Authorization': 'Bearer JWT_TOKEN' }
+});
+
+chatEvents.addEventListener('message', (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'new_message') {
+        updateChatUI(data);
+    }
+});
+```
+
+Filters events to only those for chat ID 123
+
+---
+
+### Chat Management (Legacy)
+
+#### GET /api/wa/chats
+List all chats
+
+**Response:**
+```json
+{
+    "total_chats": 2,
+    "chats": [
+        {
+            "id": 1,
+            "phone": "6281234567890",
+            "display_name": "John Doe",
+            "last_message_at": "2026-04-02 10:30:00",
+            "last_message_snippet": "Thank you for your order",
+            "unread_count": 0,
+            "labels": []
+        }
+    ]
+}
+```
+
+---
+
+#### GET /api/wa/chats/{chatId}
+Get specific chat with messages
+
+**Response:**
+```json
+{
+    "chat": {
+        "id": 1,
+        "phone": "6281234567890",
+        "display_name": "John",
+        "unread_count": 0
+    },
+    "messages": [
+        {
+            "id": 1,
+            "direction": "in",
+            "message_type": "text",
+            "text": "Hello!",
+            "received_at": "2026-04-02 10:00:00"
+        }
+    ],
+    "labels": []
+}
+```
+
+---
+
+#### GET /api/wa/labels
+List all labels
+
+#### POST /api/wa/labels
+Create new label
+
+Request:
+```
+name=Support&color=%23FF5733
+```
+
+#### POST /api/wa/chats/{chatId}/labels
+Attach label to chat
+
+Request:
+```
+label_id=1
+```
+
+---
+
+### Webhooks
+
+#### POST /api/chat/webhook/{tokoId}
+Receive incoming messages from external service (no auth required)
+
+**Payload from external service:**
+```json
+{
+    "type": "message",
+    "from": "6281234567890@c.us",
+    "sender_name": "John Doe",
+    "text": "Hello!",
+    "timestamp": 1704067200
+}
+```
+
+**Or Image:**
+```json
+{
+    "type": "message",
+    "from": "6281234567890@c.us",
+    "message_type": "image",
+    "media_url": "https://service.com/image.jpg",
+    "media_mime": "image/jpeg",
+    "timestamp": 1704067200
+}
+```
+
+**Response:**
+```json
+{
+    "success": true,
+    "message": "Webhook processed"
+}
+```
+
+**Automatically:**
+- Creates/updates chat
+- Stores message
+- Broadcasts SSE events
+- Increments unread count
+- Ignores group messages (@g.us)
+- Converts images to WebP
+
+---
+
+## Setup & Configuration
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `app/Controllers/ChatSessionController.php` | Session management API |
+| `app/Controllers/ChatWebhookController.php` | Webhook receiver |
+| `app/Controllers/ChatSSEController.php` | SSE streaming |
+| `app/Libraries/ChatServiceAPI.php` | External service HTTP client |
+| `app/Models/ChatSessionModel.php` | Session data model |
+| `app/Database/Migrations/2026-04-02-000002_AddChatSessionToToko.php` | Database migration |
+| `app/Commands/CleanupSSECommand.php` | SSE cleanup command |
 
 ### Installation Steps
 
-1. **Run Migration**
+1. **Database Migration**
+```bash
+php spark migrate
+```
 
-   ```bash
-   php spark migrate
-   ```
+2. **Add Routes** (see Quick Start)
 
-   This creates 4 tables:
-   - `whatsapp_chats`
-   - `whatsapp_messages`
-   - `whatsapp_labels`
-   - `whatsapp_chat_labels`
+3. **Configure Environment**
+```bash
+echo "CHAT_API_BASE_URL=http://localhost:3000" >> .env
+```
 
-2. **Verify Tables**
+4. **Create Writable Directories**
+```bash
+mkdir -p writable/sse-messages writable/uploads/wa
+chmod 777 writable/sse-messages writable/uploads/wa
+```
 
-   ```bash
-   php spark db:table whatsapp_chats
-   ```
-
-3. **Configure Routes** (if not auto-routed)
-
-   In `app/Config/Routes.php`:
-   ```php
-   $routes->post('webhook/whatsappGateway', 'WebhookController::whatsappGateway');
-   $routes->group('whatsappchat', ['controller' => 'WhatsAppChatController'], function($routes) {
-       $routes->get('/', 'index');
-       $routes->get('(:num)', 'show/$1');
-       $routes->get('labels', 'listLabels');
-       $routes->post('createLabel', 'createLabel');
-       $routes->post('(:num)/attachLabel', 'attachLabel/$1');
-   });
-   ```
-
-4. **Configure Webhook URL**
-
-   In your WhatsApp gateway settings:
-   ```
-   https://yourdomain.com/webhook/whatsappGateway
-   ```
-
-5. **Ensure Writable Directories**
-
-   ```bash
-   chmod 775 writable/logs/
-   chmod 775 writable/uploads/
-   ```
+5. **Test External Service**
+```bash
+curl -X GET http://localhost:3000/api/session/status/test
+```
 
 ---
 
 ## Usage Examples
 
-### Example 1: Webhook Payload
+### Example 1: Start Session & Display QR
 
 ```bash
-curl -X POST https://yourdomain.com/webhook/whatsappGateway \
+# Start session
+curl -X POST http://yourdomain.com/api/chat/session/start \
+  -H "Authorization: Bearer TOKEN" \
+  -d "toko_id=1"
+```
+
+Response includes QR code (base64). Display it to user for scanning.
+
+### Example 2: Poll for Connection Status
+
+```bash
+# Check every 2 seconds until status = "ready"
+for i in {1..30}; do
+  curl -s -X GET http://yourdomain.com/api/chat/session/status/1 \
+    -H "Authorization: Bearer TOKEN" | jq '.data.status'
+  sleep 2
+done
+```
+
+### Example 3: Send Message
+
+```bash
+curl -X POST http://yourdomain.com/api/chat/send \
+  -H "Authorization: Bearer TOKEN" \
+  -d "toko_id=1&to=6281234567890&text=Hello World!"
+```
+
+### Example 4: Send Image
+
+```bash
+curl -X POST http://yourdomain.com/api/chat/send \
+  -H "Authorization: Bearer TOKEN" \
+  -d "toko_id=1&to=6281234567890&image_url=https://example.com/photo.jpg&caption=Check this!"
+```
+
+### Example 5: Subscribe to Events (JavaScript)
+
+```javascript
+const eventSource = new EventSource('/api/chat/events/1', {
+    headers: { 'Authorization': 'Bearer TOKEN' }
+});
+
+eventSource.addEventListener('message', (event) => {
+    const data = JSON.parse(event.data);
+    console.log(`[${data.type}]`, data);
+    
+    if (data.type === 'new_message') {
+        console.log(`Message from ${data.from}: ${data.text}`);
+        addToChat(data);
+    } else if (data.type === 'session_status') {
+        console.log(`Session is now: ${data.status}`);
+    }
+});
+
+eventSource.addEventListener('error', () => {
+    console.log('Connection lost, will auto-reconnect...');
+});
+```
+
+### Example 6: Listen to Specific Chat
+
+```javascript
+const chatEvents = new EventSource('/api/chat/events/1/chat/123');
+
+chatEvents.addEventListener('message', (event) => {
+    const data = JSON.parse(event.data);
+    
+    // Only new messages for this chat will arrive here
+    if (data.type === 'new_message') {
+        updateChatWindow(data.text, data.from);
+    }
+});
+```
+
+### Example 7: Simulate Incoming Webhook
+
+```bash
+# Test webhook receiver (simulate external service sending message)
+curl -X POST http://yourdomain.com/api/chat/webhook/1 \
   -H "Content-Type: application/json" \
   -d '{
-    "tenant_id": 1,
-    "from": "+6281234567890",
-    "name": "John Doe",
-    "text": "Hello, I need help with my order",
-    "timestamp": 1704067200
+    "type": "message",
+    "from": "6281234567890@c.us",
+    "sender_name": "John Doe",
+    "text": "Hi, I have a question about your product",
+    "timestamp": '$(date +%s)'
   }'
 ```
 
-**Response:**
+### Example 8: Complete Flow (Bash)
+
+```bash
+#!/bin/bash
+
+DOMAIN="http://yourdomain.com"
+TOKEN="your_jwt_token"
+TOKO_ID=1
+
+echo "1. Starting session..."
+START=$(curl -s -X POST $DOMAIN/api/chat/session/start \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "toko_id=$TOKO_ID")
+
+SESSION_ID=$(echo $START | jq -r '.data.sessionId')
+QR=$(echo $START | jq -r '.data.qr')
+
+echo "Session ID: $SESSION_ID"
+echo "Display QR to user (scan with WhatsApp)"
+
+echo "2. Waiting for connection..."
+for i in {1..60}; do
+  STATUS=$(curl -s -X GET $DOMAIN/api/chat/session/status/$TOKO_ID \
+    -H "Authorization: Bearer $TOKEN" | jq -r '.data.status')
+  
+  echo "Status: $STATUS"
+  [ "$STATUS" = "ready" ] && break
+  sleep 1
+done
+
+echo "3. Session ready! Sending test message..."
+curl -X POST $DOMAIN/api/chat/send \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "toko_id=$TOKO_ID&to=6281234567890&text=Test message from API"
+
+echo "Done!"
+```
+
+---
+
+## Error Handling
+
+### Common Errors
+
+**External Service Unreachable**
 ```json
 {
-  "status": "ok",
-  "chat_id": 123,
-  "message_id": 456
+    "success": false,
+    "message": "Failed to start session: Connection refused"
 }
 ```
+→ Check `CHAT_API_BASE_URL` in `.env`, ensure service is running
 
----
-
-### Example 2: Retrieve All Chats
-
-```bash
-curl -X GET https://yourdomain.com/whatsappchat \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**Response:**
+**Session Not Ready**
 ```json
 {
-  "total_chats": 2,
-  "chats": [
-    {
-      "id": 123,
-      "phone": "6281234567890",
-      "display_name": "John Doe",
-      "last_message_at": "2026-04-02 10:30:00",
-      "last_message_snippet": "Thank you for your help",
-      "unread_count": 0,
-      "customer_name": "John Doe",
-      "labels": []
-    }
-  ]
+    "success": false,
+    "message": "Session is not ready. Current status: qr_ready"
 }
 ```
+→ Wait for user to scan QR or check status
 
----
+**Invalid Phone Format**
+→ System auto-formats, but ensure valid numbers (with or without country code)
 
-### Example 3: View Chat with Messages
-
-```bash
-curl -X GET https://yourdomain.com/whatsappchat/123 \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**Response:**
+**Store Not Found**
 ```json
 {
-  "chat": {
-    "id": 123,
-    "phone": "6281234567890",
-    "display_name": "John Doe",
-    "unread_count": 0
-  },
-  "messages": [
-    {
-      "id": 456,
-      "direction": "in",
-      "message_type": "text",
-      "text": "Hello!",
-      "received_at": "2026-04-02 10:00:00"
-    }
-  ],
-  "labels": []
+    "success": false,
+    "message": "Store not found"
 }
 ```
+→ Verify `toko_id` exists in database
 
----
+**SSE Connection Timeout**
+→ Normal, client will auto-reconnect. Add error handler in JavaScript
 
-### Example 4: Create and Apply Labels
-
-**Create Label:**
-```bash
-curl -X POST https://yourdomain.com/whatsappchat/createLabel \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "name=Support&color=%23FF5733"
-```
-
-**Attach Label to Chat:**
-```bash
-curl -X POST https://yourdomain.com/whatsappchat/123/attachLabel \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "label_id=1"
-```
-
----
-
-### Example 5: Image Message Webhook
+### Debug Commands
 
 ```bash
-curl -X POST https://yourdomain.com/webhook/whatsappGateway \
+# Check service connectivity
+curl -v http://localhost:3000/api/session/status/test
+
+# View logs
+tail -f writable/logs/
+
+# Check SSE queue files
+ls -lah writable/sse-messages/
+
+# Monitor queue in real-time
+tail -f writable/sse-messages/toko_1.queue
+
+# Test webhook manually
+curl -X POST http://yourdomain.com/api/chat/webhook/1 \
   -H "Content-Type: application/json" \
-  -d '{
-    "tenant_id": 1,
-    "from": "+6281234567890",
-    "name": "Customer",
-    "message_type": "image",
-    "media_url": "https://gateway.example.com/image.jpg",
-    "media_mime": "image/jpeg",
-    "timestamp": 1704067200
-  }'
+  -d '{"type":"message","from":"6281234567890@c.us","text":"Test"}'
+
+# Run cleanup
+php spark chat:cleanup-sse
 ```
-
----
-
-## Troubleshooting
-
-### 1. Messages Not Appearing
-
-**Check:**
-- Webhook endpoint is accessible
-- Tenant ID is being passed correctly
-- Check logs: `tail writable/logs/whatsapp-gateway.log`
-
----
-
-### 2. Image Conversion Fails
-
-**Check:**
-- GD or ImageMagick extension is installed
-- `writable/uploads/wa/` directory is writable
-- Check application logs for error messages
-
----
-
-### 3. Phone Number Issues
-
-- Ensure phone numbers include country code
-- System automatically removes non-digit characters
-
----
-
-### 4. Multi-Tenant Isolation
-
-- Verify `TenantContext::id()` is correctly set
-- All queries should filter by `tenant_id`
-- Check middleware for tenant context setup
-
----
-
-## Performance Considerations
-
-### Indexes
-
-The tables have strategic indexes for common queries:
-- `(tenant_id, phone)` on `whatsapp_chats`
-- `(tenant_id, chat_id)` on `whatsapp_messages`
-- `(tenant_id, name)` on `whatsapp_labels`
-
-### Optimization Tips
-
-1. **Pagination for large chat lists** - Add limit/offset to `index()`
-2. **Message pagination** - Limit messages returned in `show()`
-3. **Archive old chats** - Periodically move inactive chats
-4. **Media cleanup** - Delete old WebP files periodically
-
----
-
-## Future Enhancements
-
-- [ ] Outbound message sending
-- [ ] Message search and filtering
-- [ ] Chat archiving
-- [ ] Typing indicators
-- [ ] Message reactions/emojis
-- [ ] File attachments (non-image)
-- [ ] Message deletion/editing
-- [ ] Bulk label operations
-- [ ] Chat export functionality
-
----
-
-## Related Files
-
-- Migration: `app/Database/Migrations/2026-04-02-000001_CreateWhatsappTables.php`
-- Controllers: `app/Controllers/WebhookController.php`, `app/Controllers/WhatsAppChatController.php`
-- Models: `app/Models/WhatsApp*.php`
-- Logs: `writable/logs/whatsapp-gateway.log`
 
 ---
 
