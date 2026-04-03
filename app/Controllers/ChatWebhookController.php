@@ -57,6 +57,13 @@ class ChatWebhookController extends BaseController
             ]);
 
             // Validate store exists
+            if (!is_numeric($tokoId)) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'success' => false,
+                    'message' => 'Invalid toko_id',
+                ]);
+            }
+
             $toko = $this->sessionModel->find($tokoId);
             if (!$toko) {
                 return $this->response->setStatusCode(404)->setJSON([
@@ -65,22 +72,33 @@ class ChatWebhookController extends BaseController
                 ]);
             }
 
-            // Set tenant context
-            TenantContext::set(1); // Adjust based on your multi-tenancy logic
+            // Set tenant context from store
+            $tenantId = $toko['tenant_id'] ?? 1;
+            TenantContext::set(['id' => $tenantId]);
 
-            // Handle different message types
-            $messageType = $payload['type'] ?? 'message';
+            // Handle different event types from external service
+            $eventType = $payload['event'] ?? null;
 
-            switch ($messageType) {
-                case 'message':
-                    $this->handleIncomingMessage($tokoId, $payload);
+            if (!$eventType) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'success' => false,
+                    'message' => 'Missing event field',
+                ]);
+            }
+
+            switch ($eventType) {
+                case 'message_in':
+                case 'message_out':
+                    $this->handleMessageEvent($tokoId, $payload, $eventType);
                     break;
-                case 'status':
-                    $this->handleStatusUpdate($tokoId, $payload);
+                case 'message_ack':
+                    $this->handleAckEvent($tokoId, $payload);
                     break;
                 case 'session_status':
                     $this->handleSessionStatusChange($tokoId, $payload);
                     break;
+                default:
+                    log_message('warning', 'Unknown webhook event type: {event}', ['event' => $eventType]);
             }
 
             return $this->response->setJSON([
@@ -88,65 +106,138 @@ class ChatWebhookController extends BaseController
                 'message' => 'Webhook processed',
             ]);
         } catch (\Throwable $e) {
-            log_message('error', 'Webhook processing failed: {msg}', ['msg' => $e->getMessage()]);
+            log_message('error', 'Webhook processing failed: {msg} - {trace}', [
+                'msg' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
             return $this->response->setStatusCode(500)->setJSON([
                 'success' => false,
-                'message' => 'Processing failed',
+                'message' => 'Processing failed: ' . $e->getMessage(),
             ]);
         }
     }
 
     /**
-     * Handle incoming message
+     * Handle message event (incoming or outgoing)
      * 
      * @param int $tokoId Store ID
      * @param array $payload Webhook payload
+     * @param string $eventType "message_in" or "message_out"
      */
-    private function handleIncomingMessage(int $tokoId, array $payload): void
+    private function handleMessageEvent(int $tokoId, array $payload, string $eventType): void
     {
         // Extract message data
-        $from = $payload['from'] ?? $payload['sender'] ?? '';
-        $text = $payload['text'] ?? $payload['message'] ?? '';
-        $imageUrl = $payload['image_url'] ?? $payload['mediaUrl'] ?? null;
-        $mediaMime = $payload['media_mime'] ?? $payload['mediaType'] ?? null;
+        $from = $payload['from'] ?? null;
+        $to = $payload['to'] ?? null;
+        $text = $payload['text'] ?? '';
+        $imageUrl = $payload['mediaUrl'] ?? $payload['image_url'] ?? null;
+        $mediaMime = $payload['mediaType'] ?? $payload['media_mime'] ?? null;
         $messageId = $payload['messageId'] ?? $payload['id'] ?? null;
         $timestamp = $payload['timestamp'] ?? time();
         $senderName = $payload['sender_name'] ?? $payload['displayName'] ?? null;
+        $isReply = $payload['isReply'] ?? false;
+        $quoted = $payload['quoted'] ?? null;
 
-        // Ignore group messages (@g.us)
-        if (strpos($from, '@g.us') !== false) {
+        $direction = $eventType === 'message_in' ? 'in' : 'out';
+        
+        // IMPORTANT: Get the customer phone number based on direction
+        // message_in: customer is in the 'from' field
+        // message_out: customer is in the 'to' field
+        if ($direction === 'in') {
+            if (empty($from)) {
+                log_message('warning', 'message_in: missing from field');
+                return;
+            }
+            $customerPhone = $from;
+        } else {
+            if (empty($to)) {
+                log_message('warning', 'message_out: missing to field');
+                return;
+            }
+            $customerPhone = $to;
+        }
+        
+        // Normalize phone number: remove @c.us, @g.us, @lid and other suffixes
+        $customerPhone = trim(preg_replace('/@[a-z0-9.@]+$/', '', $customerPhone));
+        
+        if (empty($customerPhone)) {
+            log_message('warning', 'Empty customer phone after normalization for event {event}', ['event' => $eventType]);
+            return;
+        }
+
+        // Ignore group messages (only for incoming)
+        if ($direction === 'in' && (strpos($from, '@g.us') !== false)) {
             log_message('info', 'Group message ignored from {from}', ['from' => $from]);
             return;
         }
 
-        // Normalize phone number
-        $phone = preg_replace('/@[a-z.us]+$/', '', $from);
+        log_message('info', 'Processing {event}: customer_phone={phone}, direction={dir}', [
+            'event' => $eventType,
+            'phone' => $customerPhone,
+            'dir' => $direction,
+        ]);
 
-        // Find or create chat
+        // Find or create chat with the customer
+        $tenantId = TenantContext::id();
         $chat = $this->chatModel
-            ->where('phone', $phone)
-            ->where('tenant_id', TenantContext::id())
+            ->where('phone', $customerPhone)
+            ->where('tenant_id', $tenantId)
             ->first();
+
+        log_message('debug', 'Chat lookup: phone={phone}, tenant={tenant}, found={found}', [
+            'phone' => $customerPhone,
+            'tenant' => $tenantId,
+            'found' => $chat ? 'yes (id=' . $chat['id'] . ')' : 'no (will create)',
+        ]);
 
         if (!$chat) {
             $chatId = $this->chatModel->insert([
-                'tenant_id' => TenantContext::id(),
-                'phone' => $phone,
+                'tenant_id' => $tenantId,
+                'phone' => $customerPhone,
                 'display_name' => $senderName,
                 'last_message_at' => date('Y-m-d H:i:s', $timestamp),
-                'last_message_snippet' => $text ? mb_substr($text, 0, 120) : '[image]',
-                'unread_count' => 1,
+                'last_message_snippet' => $text ? mb_substr($text, 0, 120) : ($imageUrl ? '[image]' : '[media]'),
+                'unread_count' => $direction === 'in' ? 1 : 0,
             ], true);
+            
+            if ($chatId === false) {
+                log_message('error', 'Failed to create chat: {error}', ['error' => $this->chatModel->errors() ?? 'Unknown']);
+                return;
+            }
+            
             $chat = $this->chatModel->find($chatId);
-        } else {
-            $this->chatModel->update($chat['id'], [
-                'display_name' => $chat['display_name'] ?: $senderName,
-                'last_message_at' => date('Y-m-d H:i:s', $timestamp),
-                'last_message_snippet' => $text ? mb_substr($text, 0, 120) : '[image]',
-                'unread_count' => ($chat['unread_count'] ?? 0) + 1,
+            if (!$chat) {
+                log_message('error', 'Created chat id {id} but could not retrieve it', ['id' => $chatId]);
+                return;
+            }
+            
+            log_message('info', 'Chat created: id={id}, phone={phone}', [
+                'id' => $chat['id'],
+                'phone' => $customerPhone,
             ]);
+        } else {
+            // Update chat - increment unread only for incoming messages
+            $unreadInc = ($direction === 'in') ? 1 : 0;
+            $updateData = [
+                'last_message_at' => date('Y-m-d H:i:s', $timestamp),
+                'last_message_snippet' => $text ? mb_substr($text, 0, 120) : ($imageUrl ? '[image]' : '[media]'),
+                'unread_count' => ($chat['unread_count'] ?? 0) + $unreadInc,
+            ];
+            
+            // Only update display_name if not already set
+            if (empty($chat['display_name']) && $senderName) {
+                $updateData['display_name'] = $senderName;
+            }
+            
+            $this->chatModel->update($chat['id'], $updateData);
             $chat = $this->chatModel->find($chat['id']);
+            
+            log_message('info', 'Chat updated: id={id}, direction={dir}, unread_inc={inc}', [
+                'id' => $chat['id'],
+                'dir' => $direction,
+                'inc' => $unreadInc,
+            ]);
         }
 
         // Handle media
@@ -159,13 +250,20 @@ class ChatWebhookController extends BaseController
         $messageData = [
             'tenant_id' => TenantContext::id(),
             'chat_id' => $chat['id'],
-            'direction' => 'in',
+            'direction' => $direction,
             'message_type' => $imageUrl ? 'image' : 'text',
             'text' => $text,
             'media_path' => $mediaPath,
             'media_mime' => $mediaMime,
+            'external_message_id' => $messageId,
             'received_at' => date('Y-m-d H:i:s', $timestamp),
         ];
+
+        // Add reply info if available
+        if ($isReply && $quoted) {
+            $messageData['quoted_message_id'] = $quoted['messageId'] ?? null;
+            $messageData['quoted_text'] = $quoted['text'] ?? null;
+        }
 
         $messageSaved = $this->messageModel->insert($messageData, true);
 
@@ -174,45 +272,59 @@ class ChatWebhookController extends BaseController
             'type' => 'new_message',
             'chat_id' => $chat['id'],
             'message_id' => $messageSaved,
+            'external_message_id' => $messageId,
             'from' => $from,
+            'to' => $to,
             'text' => $text,
             'image_url' => $mediaPath,
+            'direction' => $direction,
             'timestamp' => $timestamp,
-            'unread_count' => $chat['unread_count'] + 1,
+            'is_reply' => $isReply,
         ]);
 
-        log_message('info', 'Message stored: chat_id={chat_id}, message_id={msg_id}', [
+        log_message('info', 'Message stored: chat_id={chat_id}, msg_id={msg_id}, direction={dir}', [
             'chat_id' => $chat['id'],
             'msg_id' => $messageSaved,
+            'dir' => $direction,
         ]);
     }
 
     /**
-     * Handle message status update (delivery, read, etc.)
+     * Handle message acknowledgment
      * 
      * @param int $tokoId Store ID
      * @param array $payload Webhook payload
      */
-    private function handleStatusUpdate(int $tokoId, array $payload): void
+    private function handleAckEvent(int $tokoId, array $payload): void
     {
         $messageId = $payload['messageId'] ?? null;
-        $status = $payload['status'] ?? null; // delivered, read, failed, etc.
+        $ack = $payload['ack'] ?? null; // 1=sent, 2=delivered, 3=read
+        $status = $payload['status'] ?? null; // "sent", "delivered", "failed", etc.
 
-        if (!$messageId || !$status) {
+        if (!$messageId) {
             return;
         }
 
-        log_message('info', 'Message status update: {msg_id} -> {status}', [
+        // Get actual status value for consistency
+        $statusMap = [
+            1 => 'sent',
+            2 => 'delivered',
+            3 => 'read',
+        ];
+
+        $finalStatus = $status ?? ($statusMap[$ack] ?? 'unknown');
+
+        log_message('info', 'Message ack: {msg_id} -> {status}', [
             'msg_id' => $messageId,
-            'status' => $status,
+            'status' => $finalStatus,
         ]);
 
-        // Could store status in database if needed
-        // For now, just broadcast to SSE
+        // Broadcast to SSE (all subscribers)
         $this->broadcastSSEEvent($tokoId, null, [
-            'type' => 'message_status',
+            'type' => 'message_ack',
             'message_id' => $messageId,
-            'status' => $status,
+            'status' => $finalStatus,
+            'ack' => $ack,
         ]);
     }
 

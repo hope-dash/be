@@ -19,6 +19,9 @@ class WhatsAppMessageModel extends Model
         'text',
         'media_path',
         'media_mime',
+        'external_message_id',
+        'quoted_message_id',
+        'quoted_text',
         'received_at',
     ];
     protected $useTimestamps = true;
