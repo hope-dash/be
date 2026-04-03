@@ -94,6 +94,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('session/disconnect/(:num)', 'ChatSessionController::disconnect/$1');
         $routes->post('send', 'ChatSessionController::send');
         $routes->get('events/(:num)', 'ChatSSEController::subscribe/$1');
+        $routes->get('poll/(:num)', 'ChatSSEController::poll/$1');
         $routes->get('events/(:num)/chat/(:num)', 'ChatSSEController::subscribeChat/$1/$2');
     });
 

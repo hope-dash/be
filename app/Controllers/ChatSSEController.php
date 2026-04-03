@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Libraries\TenantContext;
+use CodeIgniter\HTTP\ResponseInterface;
 
 /**
  * ChatSSEController
@@ -37,26 +38,34 @@ class ChatSSEController extends BaseController
             ]);
         }
 
-        // Set headers for SSE
-        $this->response->setHeader('Content-Type', 'text/event-stream');
-        $this->response->setHeader('Cache-Control', 'no-cache');
-        $this->response->setHeader('Connection', 'keep-alive');
-        $this->response->setHeader('Access-Control-Allow-Origin', '*');
-        $this->response->setHeader('X-Accel-Buffering', 'no');
+        // Prevent session locking
+        if (session_id()) {
+            session_write_close();
+        }
 
-        // Disable output buffering
-        if (ob_get_level() > 0) {
+        // Set headers for SSE natively to ensure immediate flush
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('Connection: keep-alive');
+        header('Access-Control-Allow-Origin: *');
+        header('X-Accel-Buffering: no');
+        header('Content-Encoding: none');
+
+        // Disable any existing output buffering
+        while (ob_get_level() > 0) {
             ob_end_flush();
         }
         ob_implicit_flush(true);
 
-        // Send initial connection message
+        // Send initial connection message immediately
         echo "data: " . json_encode([
             'type' => 'connected',
             'message' => 'Connected to chat stream',
             'toko_id' => $tokoId,
             'timestamp' => date('Y-m-d H:i:s'),
         ]) . "\n\n";
+        
+        if (ob_get_level() > 0) ob_flush();
         flush();
 
         // Track start time for timeout
@@ -114,9 +123,62 @@ class ChatSSEController extends BaseController
     }
 
     /**
-     * Subscribe to specific chat updates
+     * Poll for chat updates (HTTP alternative to SSE)
      * 
-     * GET /api/chat/events/:tokoId/chat/:chatId
+     * GET /api/chat/poll/:tokoId?last_pos=0
+     * 
+     * Returns:
+     * { "events": [...], "next_pos": 1234 }
+     * 
+     * @param int $tokoId Store ID
+     * @return ResponseInterface
+     */
+    public function poll($tokoId)
+    {
+        $lastPos = (int)($this->request->getGet('last_pos') ?? 0);
+        $queueFile = self::SSE_FILE_DIR . "toko_{$tokoId}.queue";
+        $events = [];
+        $nextPos = $lastPos;
+
+        if (file_exists($queueFile)) {
+            $currentSize = filesize($queueFile);
+            
+            if ($currentSize > $lastPos) {
+                // If lastPos is too old (file was cleaned/truncated), start from current end
+                // We'll assume if lastPos is more than 1MB behind, it's effectively 0 or we just send tail
+                if ($currentSize - $lastPos > 1024 * 1024) {
+                    $lastPos = max(0, $currentSize - 1024);
+                }
+
+                $handle = fopen($queueFile, 'r');
+                if ($handle) {
+                    fseek($handle, $lastPos);
+                    $newData = fread($handle, $currentSize - $lastPos);
+                    fclose($handle);
+
+                    if (!empty($newData)) {
+                        $lines = explode("\n", trim($newData));
+                        foreach ($lines as $line) {
+                            if (!empty($line)) {
+                                $data = json_decode($line, true);
+                                if ($data) $events[] = $data;
+                            }
+                        }
+                        $nextPos = $currentSize;
+                    }
+                }
+            }
+        }
+
+        return $this->response->setJSON([
+            'success' => true,
+            'events' => $events,
+            'next_pos' => $nextPos,
+            'server_time' => date('Y-m-d H:i:s'),
+        ]);
+    }
+    /**
+     * Subscribe to specific chat updates
      * 
      * Real-time updates for a specific chat conversation
      * 
@@ -143,19 +205,25 @@ class ChatSSEController extends BaseController
             ]);
         }
 
-        // Set headers for SSE
-        $this->response->setHeader('Content-Type', 'text/event-stream');
-        $this->response->setHeader('Cache-Control', 'no-cache');
-        $this->response->setHeader('Connection', 'keep-alive');
-        $this->response->setHeader('Access-Control-Allow-Origin', '*');
-        $this->response->setHeader('X-Accel-Buffering', 'no');
+        // Prevent session locking
+        if (session_id()) {
+            session_write_close();
+        }
 
-        if (ob_get_level() > 0) {
+        // Set headers for SSE natively to ensure immediate flush
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('Connection: keep-alive');
+        header('Access-Control-Allow-Origin: *');
+        header('X-Accel-Buffering: no');
+        header('Content-Encoding: none');
+
+        while (ob_get_level() > 0) {
             ob_end_flush();
         }
         ob_implicit_flush(true);
 
-        // Send initial connection message
+        // Send initial connection message immediately
         echo "data: " . json_encode([
             'type' => 'connected',
             'message' => 'Connected to chat stream',
@@ -163,6 +231,8 @@ class ChatSSEController extends BaseController
             'chat_id' => $chatId,
             'timestamp' => date('Y-m-d H:i:s'),
         ]) . "\n\n";
+        
+        if (ob_get_level() > 0) ob_flush();
         flush();
 
         $startTime = time();
