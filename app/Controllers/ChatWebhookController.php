@@ -184,6 +184,7 @@ class ChatWebhookController extends BaseController
             $chat = $this->chatModel
                 ->where('jid', $customerJid)
                 ->where('tenant_id', $tenantId)
+                ->where('id_toko', $tokoId)
                 ->first();
             if ($chat) log_message('debug', "Chat found by JID: id={$chat['id']}");
         }
@@ -193,6 +194,7 @@ class ChatWebhookController extends BaseController
             $chat = $this->chatModel
                 ->where('phone', $customerPhone)
                 ->where('tenant_id', $tenantId)
+                ->where('id_toko', $tokoId)
                 ->first();
                 
             // If found by phone, update its JID now to link subsequent messages
@@ -208,6 +210,7 @@ class ChatWebhookController extends BaseController
         if (!$chat) {
             $chatData = [
                 'tenant_id' => $tenantId,
+                'id_toko'   => $tokoId,
                 'jid' => $customerJid,
                 'phone' => $customerPhone ?? $customerJid, // Prefer phone for display, fallback to JID
                 'session_id' => $sessionId,
@@ -272,6 +275,7 @@ class ChatWebhookController extends BaseController
         // Store message
         $messageData = [
             'tenant_id' => TenantContext::id(),
+            'id_toko'   => $tokoId,
             'chat_id' => $chat['id'],
             'direction' => $direction,
             'from_me' => $fromMe,

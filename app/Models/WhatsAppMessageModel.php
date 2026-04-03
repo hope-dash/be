@@ -13,6 +13,7 @@ class WhatsAppMessageModel extends Model
     protected $protectFields = true;
     protected $allowedFields = [
         'tenant_id',
+        'id_toko',
         'chat_id',
         'direction',
         'from_me',
