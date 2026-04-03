@@ -147,7 +147,7 @@ class ChatServiceAPI
     }
 
     /**
-     * Send image message
+     * Send image message via URL
      * 
      * @param string $sessionId Session ID
      * @param string $to Recipient phone (format: 6281234567890@c.us)
@@ -187,6 +187,49 @@ class ChatServiceAPI
             throw $e;
         }
     }
+
+    /**
+     * Send base64 image message
+     * 
+     * @param string $sessionId Session ID
+     * @param string $to Recipient phone (format: 6281234567890@c.us)
+     * @param string $imageBase64 Base64 string of image
+     * @param string|null $caption Optional caption for image
+     * @param int $delayMs Delay before sending (milliseconds)
+     * @return array Response with messageId
+     * @throws Exception
+     */
+    public function sendImageBase64Message(
+        string $sessionId,
+        string $to,
+        string $imageBase64,
+        ?string $caption = null,
+        int $delayMs = 1000
+    ): array {
+        try {
+            $response = $this->client->request('POST', "{$this->baseUrl}/api/session/send", [
+                'json' => [
+                    'sessionId' => $sessionId,
+                    'to' => $to,
+                    'imageBase64' => $imageBase64,
+                    'caption' => $caption,
+                    'delayMs' => $delayMs,
+                ],
+            ]);
+
+            $body = json_decode($response->getBody(), true);
+
+            if ($response->getStatusCode() !== 200) {
+                throw new \Exception($body['message'] ?? 'Failed to send base64 image');
+            }
+
+            return $body;
+        } catch (\Throwable $e) {
+            log_message('error', 'ChatServiceAPI::sendImageBase64Message failed: {msg}', ['msg' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
 
     /**
      * Mark chat as read

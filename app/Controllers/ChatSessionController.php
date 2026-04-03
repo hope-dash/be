@@ -261,91 +261,76 @@ class ChatSessionController extends BaseController
     }
 
     /**
-     * Send message
+     * Send message (Text, Image URL, or Image Base64)
      * 
      * POST /api/chat/send
+     * 
+     * Body JSON:
+     * {
+     *   "sessionId": "akun1",
+     *   "to": "6281234567890@c.us",
+     *   "text": "Halo!",
+     *   "imageUrl": "...",
+     *   "imageBase64": "...",
+     *   "caption": "..."
+     * }
      * 
      * @return ResponseInterface
      */
     public function send()
     {
         try {
-            $tokoId = (int)($this->request->getPost('toko_id') ?? 0);
-            $to = $this->request->getPost('to') ?? '';
-            $text = $this->request->getPost('text') ?? '';
-            $imageUrl = $this->request->getPost('image_url') ?? null;
-            $caption = $this->request->getPost('caption') ?? null;
+            $json = $this->request->getJSON(true);
+            $sessionId = $json['sessionId'] ?? $this->request->getPost('sessionId') ?? '';
+            $to = $json['to'] ?? $this->request->getPost('to') ?? '';
+            
+            $text = $json['text'] ?? $this->request->getPost('text') ?? null;
+            $imageUrl = $json['imageUrl'] ?? $this->request->getPost('imageUrl') ?? null;
+            $imageBase64 = $json['imageBase64'] ?? $this->request->getPost('imageBase64') ?? null;
+            $caption = $json['caption'] ?? $this->request->getPost('caption') ?? null;
+            
+            $delayMs = (int)($json['delayMs'] ?? $this->request->getPost('delayMs') ?? 0);
+            $typingDurationMs = (int)($json['typingDurationMs'] ?? $this->request->getPost('typingDurationMs') ?? 2000);
 
-            if (!$tokoId) {
-                return $this->response->setStatusCode(400)->setJSON([
-                    'success' => false,
-                    'message' => 'toko_id is required',
-                ]);
+            if (!$sessionId) {
+                return $this->response->setStatusCode(400)->setJSON(['success' => false, 'message' => 'sessionId is required']);
             }
 
             if (!$to) {
-                return $this->response->setStatusCode(400)->setJSON([
-                    'success' => false,
-                    'message' => 'to (phone number) is required',
-                ]);
-            }
-
-            $toko = $this->sessionModel->find($tokoId);
-            if (!$toko || !$toko['chat_session_id']) {
-                return $this->response->setStatusCode(404)->setJSON([
-                    'success' => false,
-                    'message' => 'Session not found or not connected',
-                ]);
-            }
-
-            if ($toko['chat_session_status'] !== 'ready') {
-                return $this->response->setStatusCode(400)->setJSON([
-                    'success' => false,
-                    'message' => 'Session is not ready. Current status: ' . $toko['chat_session_status'],
-                ]);
+                return $this->response->setStatusCode(400)->setJSON(['success' => false, 'message' => 'to (phone number) is required']);
             }
 
             // Format phone number to WhatsApp format
-            $to = ChatServiceAPI::formatPhoneNumber($to);
+            $toHost = ChatServiceAPI::formatPhoneNumber($to);
 
             // Send message based on type
             if ($imageUrl) {
-                $result = $this->chatService->sendImageMessage(
-                    $toko['chat_session_id'],
-                    $to,
-                    $imageUrl,
-                    $caption
-                );
+                $result = $this->chatService->sendImageMessage($sessionId, $toHost, $imageUrl, $caption, $delayMs);
+            }
+            elseif ($imageBase64) {
+                $result = $this->chatService->sendImageBase64Message($sessionId, $toHost, $imageBase64, $caption, $delayMs);
+            }
+            elseif ($text) {
+                $result = $this->chatService->sendTextMessage($sessionId, $toHost, $text, $delayMs, $typingDurationMs);
             }
             else {
-                if (!$text) {
-                    return $this->response->setStatusCode(400)->setJSON([
-                        'success' => false,
-                        'message' => 'text or image_url is required',
-                    ]);
-                }
-
-                $result = $this->chatService->sendTextMessage(
-                    $toko['chat_session_id'],
-                    $to,
-                    $text
-                );
+                return $this->response->setStatusCode(400)->setJSON([
+                    'success' => false,
+                    'message' => 'text, imageUrl, or imageBase64 is required',
+                ]);
             }
 
-            // Store message in database
-            //$this->storeOutgoingMessage($tokoId, $to, $text, $imageUrl, $caption);
-
-            //log_message('info', 'Message sent from toko {toko_id} to {to}', [
-            //    'toko_id' => $tokoId,
-            //    'to' => $to,
-            //]);
+            log_message('info', 'Message sent via session {session} to {to}', [
+                'session' => $sessionId,
+                'to' => $toHost,
+            ]);
 
             return $this->response->setJSON([
                 'success' => true,
                 'data' => [
-                    'toko_id' => $tokoId,
-                    'to' => $to,
-                    'messageId' => $result['messageId'] ?? null,
+                    'sessionId' => $sessionId,
+                    'to' => $toHost,
+                    'messageId' => $result['messageId'] ?? ($result['data']['id'] ?? null),
                     'status' => 'sent',
                 ],
             ]);
