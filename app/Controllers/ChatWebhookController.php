@@ -177,12 +177,15 @@ class ChatWebhookController extends BaseController
         $tenantId = TenantContext::id();
         $chat = null;
 
+        log_message('debug', "Chat lookup: tenant_id={$tenantId}, jid={$customerJid}, phone={$customerPhone}");
+
         // 1. Try finding by JID (the most stable ID)
         if ($customerJid) {
             $chat = $this->chatModel
                 ->where('jid', $customerJid)
                 ->where('tenant_id', $tenantId)
                 ->first();
+            if ($chat) log_message('debug', "Chat found by JID: id={$chat['id']}");
         }
 
         // 2. Fallback to phone if not found by JID (links existing records)
@@ -193,14 +196,17 @@ class ChatWebhookController extends BaseController
                 ->first();
                 
             // If found by phone, update its JID now to link subsequent messages
-            if ($chat && $customerJid) {
-                $this->chatModel->update($chat['id'], ['jid' => $customerJid]);
-                $chat['jid'] = $customerJid;
+            if ($chat) {
+                log_message('debug', "Chat found by Phone: id={$chat['id']}. Linking JID: {$customerJid}");
+                if ($customerJid) {
+                    $this->chatModel->update($chat['id'], ['jid' => $customerJid]);
+                    $chat['jid'] = $customerJid;
+                }
             }
         }
 
         if (!$chat) {
-            $chatId = $this->chatModel->insert([
+            $chatData = [
                 'tenant_id' => $tenantId,
                 'jid' => $customerJid,
                 'phone' => $customerPhone ?? $customerJid, // Prefer phone for display, fallback to JID
@@ -209,10 +215,16 @@ class ChatWebhookController extends BaseController
                 'last_message_at' => date('Y-m-d H:i:s', $timestamp),
                 'last_message_snippet' => $text ? mb_substr($text, 0, 120) : ($imageUrl ? '[image]' : '[media]'),
                 'unread_count' => (!$fromMe) ? 1 : 0,
-            ], true);
+            ];
             
-            if ($chatId === false) {
-                log_message('error', 'Failed to create chat: {error}', ['error' => $this->chatModel->errors() ?? 'Unknown']);
+            $chatId = $this->chatModel->insert($chatData, true);
+            
+            if ($chatId === false || $chatId === 0) {
+                $errors = $this->chatModel->errors() ?: 'Database error or validation failed';
+                log_message('error', 'Failed to create chat. Errors: {error}. Data: {data}', [
+                    'error' => is_array($errors) ? json_encode($errors) : $errors,
+                    'data'  => json_encode($chatData)
+                ]);
                 return;
             }
             
@@ -244,7 +256,10 @@ class ChatWebhookController extends BaseController
             
             if (empty($chat['display_name']) && $senderName) $updateData['display_name'] = $senderName;
             
-            $this->chatModel->update($chat['id'], $updateData);
+            $updateOk = $this->chatModel->update($chat['id'], $updateData);
+            if (!$updateOk) {
+                log_message('error', 'Failed to update chat: {errors}', ['errors' => json_encode($this->chatModel->errors())]);
+            }
             $chat = $this->chatModel->find($chat['id']);
         }
 
@@ -276,8 +291,16 @@ class ChatWebhookController extends BaseController
         }
 
         $messageSaved = $this->messageModel->insert($messageData, true);
+        
+        if (!$messageSaved) {
+            log_message('error', 'Failed to save message. Errors: {errors}. Data: {data}', [
+                'errors' => json_encode($this->messageModel->errors()),
+                'data' => json_encode($messageData)
+            ]);
+            return;
+        }
 
-        // Broadcast via SSE
+        // Broadcast via SSE/Polling
         $this->broadcastSSEEvent($tokoId, $chat['id'], [
             'type' => 'new_message',
             'chat_id' => $chat['id'],
@@ -331,6 +354,10 @@ class ChatWebhookController extends BaseController
             'status' => $finalStatus,
         ]);
 
+        // Find the chat_id for this message so we can broadcast to the right room
+        $messageRecord = $this->messageModel->where('external_message_id', $messageId)->first();
+        $chatId = $messageRecord ? $messageRecord['chat_id'] : null;
+
         // 1. Update message status in database
         $this->messageModel->set(['status' => $finalStatus])
             ->where('external_message_id', $messageId)
@@ -352,10 +379,11 @@ class ChatWebhookController extends BaseController
             log_message('debug', 'Cleared unread_count for chat {jid} due to message_ack', ['jid' => $jid]);
         }
 
-        // Broadcast to SSE (all subscribers)
-        $this->broadcastSSEEvent($tokoId, null, [
+        // Broadcast to WebSocket (include chatId for room filtering)
+        $this->broadcastSSEEvent($tokoId, $chatId, [
             'type' => 'message_ack',
             'message_id' => $messageId,
+            'chat_id' => $chatId,
             'status' => $finalStatus,
             'ack' => $ack,
         ]);
@@ -393,25 +421,57 @@ class ChatWebhookController extends BaseController
     }
 
     /**
-     * Broadcast SSE event to clients
-     * 
-     * @param int $tokoId Store ID
-     * @param int|null $chatId Chat ID (optional, for chat-specific events)
-     * @param array $eventData Event data to broadcast
+     * Broadcast event to external WebSocket service
      */
     private function broadcastSSEEvent(int $tokoId, ?int $chatId = null, array $eventData = []): void
     {
         try {
-            // Create separate queue files for different subscribers
+            $eventData['toko_id'] = $tokoId;
+            $eventData['chat_id'] = $chatId; // For room filtering in FE
+            
+            // 1. Local Fallback (Traditional Polling)
             $sseFile = self::SSE_FILE_DIR . "toko_{$tokoId}.queue";
+            $eventJsonStr = json_encode($eventData);
+            @file_put_contents($sseFile, $eventJsonStr . "\n", FILE_APPEND);
 
-            // Append event to queue
-            $event = json_encode($eventData) . "\n";
-            @file_put_contents($sseFile, $event, FILE_APPEND);
+            // 2. EXTERNAL WEBSOCKET BROADCAST
+            $url = "http://localhost:3009/api/ws/room/{$tokoId}/broadcast";
+            
+            $channels = ['general'];
+            if ($chatId) {
+                $channels[] = "room_{$chatId}";
+            }
 
-            log_message('debug', 'SSE event queued for toko {toko_id}', ['toko_id' => $tokoId]);
+            foreach ($channels as $channel) {
+                $payload = json_encode([
+                    'event'   => 'message',
+                    'channel' => $channel,
+                    'data'    => $eventData,
+                    'chat_id' => $chatId
+                ]);
+
+                $ch = curl_init($url);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    'Content-Type: application/json',
+                    'Content-Length: ' . strlen($payload)
+                ]);
+                curl_setopt($ch, CURLOPT_TIMEOUT_MS, 150); // Short timeout
+
+                curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                if ($httpCode < 200 || $httpCode >= 300) {
+                    log_message('warning', "WS Broadcast failed to {$url} on channel {$channel} with status {$httpCode}");
+                } else {
+                    log_message('debug', "WS Broadcast success to {$url} on channel {$channel}");
+                }
+            }
         } catch (\Throwable $e) {
-            log_message('error', 'Failed to broadcast SSE event: {msg}', ['msg' => $e->getMessage()]);
+            log_message('error', 'Failed to broadcast event: {msg}', ['msg' => $e->getMessage()]);
         }
     }
 
