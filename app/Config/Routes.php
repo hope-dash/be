@@ -88,6 +88,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     // Chat Session Management
     $routes->group('chat', function ($routes) {
         $routes->post('session/start', 'ChatSessionController::start');
+        $routes->post('session/read', 'ChatSessionController::readChat');
         $routes->get('session/status/(:num)', 'ChatSessionController::status/$1');
         $routes->get('session/qr/(:num)', 'ChatSessionController::getQr/$1');
         $routes->post('session/disconnect/(:num)', 'ChatSessionController::disconnect/$1');

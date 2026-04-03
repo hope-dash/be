@@ -14,6 +14,8 @@ class WhatsAppChatModel extends Model
     protected $allowedFields = [
         'tenant_id',
         'phone',
+        'jid',
+        'session_id',
         'display_name',
         'last_message_at',
         'last_message_snippet',

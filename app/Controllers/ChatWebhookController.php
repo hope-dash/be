@@ -130,6 +130,11 @@ class ChatWebhookController extends BaseController
         // Extract message data
         $from = $payload['from'] ?? null;
         $to = $payload['to'] ?? null;
+        $rawFrom = $payload['rawFrom'] ?? null;
+        $rawTo = $payload['rawTo'] ?? null;
+        $fromMe = $payload['fromMe'] ?? $payload['from_me'] ?? ($eventType === 'message_out');
+        $sessionId = $payload['sessionId'] ?? null;
+        
         $text = $payload['text'] ?? '';
         $imageUrl = $payload['mediaUrl'] ?? $payload['image_url'] ?? null;
         $mediaMime = $payload['mediaType'] ?? $payload['media_mime'] ?? null;
@@ -139,66 +144,71 @@ class ChatWebhookController extends BaseController
         $isReply = $payload['isReply'] ?? false;
         $quoted = $payload['quoted'] ?? null;
 
-        $direction = $eventType === 'message_in' ? 'in' : 'out';
+        $direction = ($eventType === 'message_in') ? 'in' : 'out';
         
-        // IMPORTANT: Get the customer phone number based on direction
-        // message_in: customer is in the 'from' field
-        // message_out: customer is in the 'to' field
-        if ($direction === 'in') {
-            if (empty($from)) {
-                log_message('warning', 'message_in: missing from field');
-                return;
-            }
-            $customerPhone = $from;
-        } else {
-            if (empty($to)) {
-                log_message('warning', 'message_out: missing to field');
-                return;
-            }
-            $customerPhone = $to;
-        }
-        
-        // Normalize phone number: remove @c.us, @g.us, @lid and other suffixes
-        $customerPhone = trim(preg_replace('/@[a-z0-9.@]+$/', '', $customerPhone));
-        
-        if (empty($customerPhone)) {
-            log_message('warning', 'Empty customer phone after normalization for event {event}', ['event' => $eventType]);
+        // IMPORTANT: Identify the customer (either the sender or recipient)
+        // If fromMe is true, the customer is the recipient (rawTo).
+        // If fromMe is false, the customer is the sender (rawFrom).
+        $customerJid = $fromMe ? $rawTo : $rawFrom;
+        $fallbackPhone = $fromMe ? $to : $from;
+
+        if (empty($customerJid) && empty($fallbackPhone)) {
+            log_message('warning', "{$eventType}: missing both JID and phone identifiers");
             return;
         }
 
-        // Ignore group messages (only for incoming)
-        if ($direction === 'in' && (strpos($from, '@g.us') !== false)) {
-            log_message('info', 'Group message ignored from {from}', ['from' => $from]);
+        // Normalize JID and phone
+        $customerJid = $customerJid ? trim(preg_replace('/@[a-z0-9.@]+$/', '', $customerJid)) : null;
+        $customerPhone = $fallbackPhone ? trim(preg_replace('/@[a-z0-9.@]+$/', '', $fallbackPhone)) : null;
+
+        // Ignore group messages
+        if (($rawFrom && strpos($rawFrom, '@g.us') !== false) || ($rawTo && strpos($rawTo, '@g.us') !== false)) {
+            log_message('info', 'Group message ignored');
             return;
         }
 
-        log_message('info', 'Processing {event}: customer_phone={phone}, direction={dir}', [
+        log_message('info', 'Processing {event}: customer_jid={jid}, direction={dir}', [
             'event' => $eventType,
-            'phone' => $customerPhone,
+            'jid' => $customerJid,
             'dir' => $direction,
         ]);
 
         // Find or create chat with the customer
         $tenantId = TenantContext::id();
-        $chat = $this->chatModel
-            ->where('phone', $customerPhone)
-            ->where('tenant_id', $tenantId)
-            ->first();
+        $chat = null;
 
-        log_message('debug', 'Chat lookup: phone={phone}, tenant={tenant}, found={found}', [
-            'phone' => $customerPhone,
-            'tenant' => $tenantId,
-            'found' => $chat ? 'yes (id=' . $chat['id'] . ')' : 'no (will create)',
-        ]);
+        // 1. Try finding by JID (the most stable ID)
+        if ($customerJid) {
+            $chat = $this->chatModel
+                ->where('jid', $customerJid)
+                ->where('tenant_id', $tenantId)
+                ->first();
+        }
+
+        // 2. Fallback to phone if not found by JID (links existing records)
+        if (!$chat && $customerPhone) {
+            $chat = $this->chatModel
+                ->where('phone', $customerPhone)
+                ->where('tenant_id', $tenantId)
+                ->first();
+                
+            // If found by phone, update its JID now to link subsequent messages
+            if ($chat && $customerJid) {
+                $this->chatModel->update($chat['id'], ['jid' => $customerJid]);
+                $chat['jid'] = $customerJid;
+            }
+        }
 
         if (!$chat) {
             $chatId = $this->chatModel->insert([
                 'tenant_id' => $tenantId,
-                'phone' => $customerPhone,
+                'jid' => $customerJid,
+                'phone' => $customerPhone ?? $customerJid, // Prefer phone for display, fallback to JID
+                'session_id' => $sessionId,
                 'display_name' => $senderName,
                 'last_message_at' => date('Y-m-d H:i:s', $timestamp),
                 'last_message_snippet' => $text ? mb_substr($text, 0, 120) : ($imageUrl ? '[image]' : '[media]'),
-                'unread_count' => $direction === 'in' ? 1 : 0,
+                'unread_count' => (!$fromMe) ? 1 : 0,
             ], true);
             
             if ($chatId === false) {
@@ -207,37 +217,35 @@ class ChatWebhookController extends BaseController
             }
             
             $chat = $this->chatModel->find($chatId);
-            if (!$chat) {
-                log_message('error', 'Created chat id {id} but could not retrieve it', ['id' => $chatId]);
-                return;
-            }
-            
-            log_message('info', 'Chat created: id={id}, phone={phone}', [
-                'id' => $chat['id'],
-                'phone' => $customerPhone,
-            ]);
+            log_message('info', 'Chat created: id={id}, jid={jid}', ['id' => $chat['id'], 'jid' => $customerJid]);
         } else {
-            // Update chat - increment unread only for incoming messages
-            $unreadInc = ($direction === 'in') ? 1 : 0;
+            // Unread logic: Reset to 0 for outgoing messages (we've replied), 
+            // increment by 1 for incoming messages from the customer.
+            $newUnreadCounter = $fromMe ? 0 : ($chat['unread_count'] ?? 0) + 1;
+
             $updateData = [
                 'last_message_at' => date('Y-m-d H:i:s', $timestamp),
                 'last_message_snippet' => $text ? mb_substr($text, 0, 120) : ($imageUrl ? '[image]' : '[media]'),
-                'unread_count' => ($chat['unread_count'] ?? 0) + $unreadInc,
+                'unread_count' => $newUnreadCounter,
+                'session_id' => $sessionId,
             ];
             
-            // Only update display_name if not already set
-            if (empty($chat['display_name']) && $senderName) {
-                $updateData['display_name'] = $senderName;
+            // Link JID if it was missing
+            if (empty($chat['jid']) && $customerJid) {
+                $updateData['jid'] = $customerJid;
             }
+
+            // Sync phone if it looks like a real phone and current is an LID or empty
+            if ($customerPhone && (empty($chat['phone']) || is_numeric($chat['phone']) && strlen($chat['phone']) > 15)) {
+                 if (strlen($customerPhone) < 15) { // LID are usually long strings
+                     $updateData['phone'] = $customerPhone;
+                 }
+            }
+            
+            if (empty($chat['display_name']) && $senderName) $updateData['display_name'] = $senderName;
             
             $this->chatModel->update($chat['id'], $updateData);
             $chat = $this->chatModel->find($chat['id']);
-            
-            log_message('info', 'Chat updated: id={id}, direction={dir}, unread_inc={inc}', [
-                'id' => $chat['id'],
-                'dir' => $direction,
-                'inc' => $unreadInc,
-            ]);
         }
 
         // Handle media
@@ -251,11 +259,13 @@ class ChatWebhookController extends BaseController
             'tenant_id' => TenantContext::id(),
             'chat_id' => $chat['id'],
             'direction' => $direction,
+            'from_me' => $fromMe,
             'message_type' => $imageUrl ? 'image' : 'text',
             'text' => $text,
             'media_path' => $mediaPath,
             'media_mime' => $mediaMime,
             'external_message_id' => $messageId,
+            'session_id' => $sessionId,
             'received_at' => date('Y-m-d H:i:s', $timestamp),
         ];
 
@@ -300,6 +310,8 @@ class ChatWebhookController extends BaseController
         $messageId = $payload['messageId'] ?? null;
         $ack = $payload['ack'] ?? null; // 1=sent, 2=delivered, 3=read
         $status = $payload['status'] ?? null; // "sent", "delivered", "failed", etc.
+        $fromMe = $payload['fromMe'] ?? $payload['from_me'] ?? true;
+        $rawTo = $payload['rawTo'] ?? null;
 
         if (!$messageId) {
             return;
@@ -318,6 +330,27 @@ class ChatWebhookController extends BaseController
             'msg_id' => $messageId,
             'status' => $finalStatus,
         ]);
+
+        // 1. Update message status in database
+        $this->messageModel->set(['status' => $finalStatus])
+            ->where('external_message_id', $messageId)
+            ->update();
+
+        // 2. Adjust unread count if needed
+        // If we acknowledge an outgoing message (especially a read/back ack), 
+        // it often implies the chat is being handled, so we can clear unread count.
+        if ($fromMe && $rawTo) {
+            $tenantId = TenantContext::id();
+            $jid = trim(preg_replace('/@[a-z0-9.@]+$/', '', $rawTo));
+            
+            // Only clear if the current ack shows we are interacting
+            $this->chatModel->set(['unread_count' => 0])
+                ->where('jid', $jid)
+                ->where('tenant_id', $tenantId)
+                ->update();
+            
+            log_message('debug', 'Cleared unread_count for chat {jid} due to message_ack', ['jid' => $jid]);
+        }
 
         // Broadcast to SSE (all subscribers)
         $this->broadcastSSEEvent($tokoId, null, [

@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Libraries\ChatServiceAPI;
 use App\Models\ChatSessionModel;
 use App\Libraries\TenantContext;
+use CodeIgniter\HTTP\ResponseInterface;
 
 /**
  * ChatSessionController
@@ -79,7 +80,8 @@ class ChatSessionController extends BaseController
                     'qr' => $result['qr'] ?? null,
                 ],
             ]);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             log_message('error', 'Failed to start chat session: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
@@ -136,7 +138,8 @@ class ChatSessionController extends BaseController
                     'webhookUrl' => $statusData['webhookUrl'] ?? site_url('api/chat/webhook/' . $tokoId),
                 ],
             ]);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             log_message('error', 'Failed to get session status: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
@@ -176,12 +179,83 @@ class ChatSessionController extends BaseController
                     'status' => $qrData['status'] ?? $toko['chat_session_status'],
                 ],
             ]);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             log_message('error', 'Failed to get QR code: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
                 'success' => false,
                 'message' => 'Failed to get QR code: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Mark chat as read
+     * 
+     * POST /api/chat/session/read
+     * 
+     * @return ResponseInterface
+     */
+    public function readChat()
+    {
+        try {
+            $json = $this->request->getJSON(true);
+            $sessionId = $json['sessionId'] ?? '';
+            $chatIdInput = $json['chatId'] ?? '';
+
+            if (!$sessionId || !$chatIdInput) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'success' => false,
+                    'message' => 'sessionId and chatId are required',
+                ]);
+            }
+
+            // Find current store to get tokoId (for SSE and database)
+            $toko = $this->sessionModel->where('chat_session_id', $sessionId)->first();
+            if (!$toko) {
+                 return $this->response->setStatusCode(404)->setJSON(['success'=>false, 'message'=>'Session not found']);
+            }
+            $tokoId = $toko['id'];
+
+            // Format chatId (JID)
+            $chatJid = ChatServiceAPI::formatPhoneNumber($chatIdInput);
+            $cleanPhone = preg_replace('/@[a-z0-9.@]+$/', '', $chatJid);
+
+            // 1. Call external service
+            $this->chatService->markChatAsRead($sessionId, $chatJid);
+
+            // 2. Update database unread count
+            $chatModel = new \App\Models\WhatsAppChatModel();
+            $chatModel->set(['unread_count' => 0])
+                ->groupStart()
+                    ->where('jid', $cleanPhone)
+                    ->orWhere('phone', $cleanPhone)
+                ->groupEnd()
+                ->where('tenant_id', TenantContext::id())
+                ->update();
+
+            log_message('info', 'Chat marked as read: {phone} in session {session}', [
+                'phone' => $cleanPhone,
+                'session' => $sessionId,
+            ]);
+
+            // 3. Broadcast SSE
+            $this->broadcastSSEEvent($tokoId, null, [
+                'type' => 'chat_read',
+                'chat_id' => $cleanPhone,
+            ]);
+
+            return $this->response->setJSON([
+                'success' => true,
+                'message' => 'Chat marked as read successfully',
+            ]);
+        } catch (\Throwable $e) {
+            log_message('error', 'Failed to read chat: {msg}', ['msg' => $e->getMessage()]);
+
+            return $this->response->setStatusCode(500)->setJSON([
+                'success' => false,
+                'message' => 'Failed to read chat: ' . $e->getMessage(),
             ]);
         }
     }
@@ -242,7 +316,8 @@ class ChatSessionController extends BaseController
                     $imageUrl,
                     $caption
                 );
-            } else {
+            }
+            else {
                 if (!$text) {
                     return $this->response->setStatusCode(400)->setJSON([
                         'success' => false,
@@ -258,12 +333,12 @@ class ChatSessionController extends BaseController
             }
 
             // Store message in database
-            $this->storeOutgoingMessage($tokoId, $to, $text, $imageUrl, $caption);
+            //$this->storeOutgoingMessage($tokoId, $to, $text, $imageUrl, $caption);
 
-            log_message('info', 'Message sent from toko {toko_id} to {to}', [
-                'toko_id' => $tokoId,
-                'to' => $to,
-            ]);
+            //log_message('info', 'Message sent from toko {toko_id} to {to}', [
+            //    'toko_id' => $tokoId,
+            //    'to' => $to,
+            //]);
 
             return $this->response->setJSON([
                 'success' => true,
@@ -274,7 +349,8 @@ class ChatSessionController extends BaseController
                     'status' => 'sent',
                 ],
             ]);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             log_message('error', 'Failed to send message: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
@@ -299,7 +375,8 @@ class ChatSessionController extends BaseController
         ?string $text = null,
         ?string $imageUrl = null,
         ?string $caption = null
-    ): void {
+        ): void
+    {
         try {
             $messageModel = new \App\Models\WhatsAppMessageModel();
 
@@ -323,7 +400,8 @@ class ChatSessionController extends BaseController
                     'unread_count' => 0,
                 ], true);
                 $chat = $chatModel->find($chatId);
-            } else {
+            }
+            else {
                 $chatModel->update($chat['id'], [
                     'last_message_at' => date('Y-m-d H:i:s'),
                     'last_message_snippet' => $text ? mb_substr($text, 0, 120) : '[image]',
@@ -342,7 +420,8 @@ class ChatSessionController extends BaseController
                 'media_mime' => $imageUrl ? 'image/jpeg' : null,
                 'received_at' => date('Y-m-d H:i:s'),
             ]);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             log_message('error', 'Failed to store outgoing message: {msg}', ['msg' => $e->getMessage()]);
         }
     }
@@ -378,13 +457,41 @@ class ChatSessionController extends BaseController
                 'success' => true,
                 'message' => 'Session disconnected successfully',
             ]);
-        } catch (\Throwable $e) {
+        }
+        catch (\Throwable $e) {
             log_message('error', 'Failed to disconnect session: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
                 'success' => false,
                 'message' => 'Failed to disconnect session: ' . $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Broadcast SSE event to clients
+     * 
+     * @param int $tokoId Store ID
+     * @param int|null $chatId Chat ID (optional, for chat-specific events)
+     * @param array $eventData Event data to broadcast
+     */
+    private function broadcastSSEEvent(int $tokoId, ?int $chatId = null, array $eventData = []): void
+    {
+        try {
+            $sseDir = WRITEPATH . 'sse-messages/';
+            if (!is_dir($sseDir)) {
+                @mkdir($sseDir, 0775, true);
+            }
+
+            $sseFile = $sseDir . "toko_{$tokoId}.queue";
+
+            // Append event to queue
+            $event = json_encode($eventData) . "\n";
+            @file_put_contents($sseFile, $event, FILE_APPEND);
+
+            log_message('debug', 'SSE event queued for toko {toko_id} from ChatSessionController', ['toko_id' => $tokoId]);
+        } catch (\Throwable $e) {
+            log_message('error', 'Failed to broadcast SSE event: {msg}', ['msg' => $e->getMessage()]);
         }
     }
 }

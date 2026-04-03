@@ -15,13 +15,16 @@ class WhatsAppMessageModel extends Model
         'tenant_id',
         'chat_id',
         'direction',
+        'from_me',
         'message_type',
         'text',
         'media_path',
         'media_mime',
         'external_message_id',
+        'session_id',
         'quoted_message_id',
         'quoted_text',
+        'status',
         'received_at',
     ];
     protected $useTimestamps = true;

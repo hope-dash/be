@@ -189,6 +189,37 @@ class ChatServiceAPI
     }
 
     /**
+     * Mark chat as read
+     * 
+     * @param string $sessionId Session ID
+     * @param string $chatJid Chat JID (e.g., 6281234567890@c.us)
+     * @return array Response status
+     * @throws Exception
+     */
+    public function markChatAsRead(string $sessionId, string $chatJid): array
+    {
+        try {
+            $response = $this->client->request('POST', "{$this->baseUrl}/api/session/read", [
+                'json' => [
+                    'sessionId' => $sessionId,
+                    'chatId' => $chatJid,
+                ],
+            ]);
+
+            $body = json_decode($response->getBody(), true);
+
+            if ($response->getStatusCode() !== 200) {
+                throw new \Exception($body['message'] ?? 'Failed to mark chat as read');
+            }
+
+            return $body;
+        } catch (\Throwable $e) {
+            log_message('error', 'ChatServiceAPI::markChatAsRead failed: {msg}', ['msg' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    /**
      * Disconnect session
      * 
      * @param string $sessionId Session ID to disconnect
