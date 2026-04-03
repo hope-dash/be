@@ -28,8 +28,7 @@ $routes->get('api/cron/process-email', 'CronController::processEmailQueue');
 $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
 
 // Webhooks
-$routes->post('api/webhook/whatsapp', 'WebhookController::whatsappGateway');
-$routes->post('api/chat/webhook/(:num)', 'ChatWebhookController::incoming/$1');
+// (Routes removed for rebuild)
 
 // Wilayah Indonesia API
 $routes->group('api/wilayah', function ($routes) {
