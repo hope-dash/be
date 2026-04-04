@@ -92,7 +92,7 @@ class ProductController extends ResourceController
         $kodeAwal = $model['kode_awal'];
 
         $lastProduct = $this->productModel->withDeleted()->orderBy('id', 'DESC')->first();
-        $nextId = $lastProduct ? (int)$lastProduct['id'] + 1 : 1;
+        $nextId = $lastProduct ? (int) $lastProduct['id'] + 1 : 1;
         $productId = $kodeAwal . str_pad($nextId, 3, '0', STR_PAD_LEFT);
 
         $productData = [
@@ -133,7 +133,7 @@ class ProductController extends ResourceController
                         'id_toko' => $toko->id_toko,
                         'stock' => $toko->stock,
                         'barang_cacat' => $toko->barang_cacat,
-                        'dropship' => isset($toko->dropship) ? (int)$toko->dropship : 0,
+                        'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
                     ];
                 }
             }
@@ -184,7 +184,7 @@ class ProductController extends ResourceController
         $kodeAwal = $model['kode_awal'];
 
         $lastProduct = $this->productModel->withDeleted()->orderBy('id', 'DESC')->first();
-        $nextId = $lastProduct ? (int)$lastProduct['id'] + 1 : 1;
+        $nextId = $lastProduct ? (int) $lastProduct['id'] + 1 : 1;
         $productId = $kodeAwal . str_pad($nextId, 3, '0', STR_PAD_LEFT);
 
         $productData = [
@@ -284,8 +284,7 @@ class ProductController extends ResourceController
                         case 'image/avif':
                             if (function_exists('imagecreatefromavif')) {
                                 $source = imagecreatefromavif($tempPath);
-                            }
-                            else {
+                            } else {
                                 return $this->jsonResponse->oneResp('AVIF not supported on this server', [], 400);
                             }
                             break;
@@ -313,8 +312,7 @@ class ProductController extends ResourceController
                             'url' => $finalImagePath,
                         ]);
                     }
-                }
-                else {
+                } else {
                     return $this->jsonResponse->oneResp('Invalid image file', [], 400);
                 }
             }
@@ -331,8 +329,7 @@ class ProductController extends ResourceController
                             'url' => $imagePath,
                         ]);
                     }
-                }
-                else {
+                } else {
                     return $this->jsonResponse->oneResp('Invalid image path: ' . $imagePath, [], 400);
                 }
             }
@@ -378,8 +375,8 @@ class ProductController extends ResourceController
             }
 
             if ($oldValue != $newValue) {
-                $oldValStr = $oldValue === null ? 'null' : (string)$oldValue;
-                $newValStr = $newValue === null ? 'null' : (string)$newValue;
+                $oldValStr = $oldValue === null ? 'null' : (string) $oldValue;
+                $newValStr = $newValue === null ? 'null' : (string) $newValue;
                 $changes[] = "Data $field diubah dari '$oldValStr' menjadi '$newValStr'";
             }
         }
@@ -399,8 +396,7 @@ class ProductController extends ResourceController
             if (!$oldStock) {
 
                 $changes[] = "Stock baru ditambahkan untuk toko ID {$newStock->id_toko} dengan stock {$newStock->stock}, barang cacat {$newStock->barang_cacat}, dropship " . ($newStock->dropship ? 'true' : 'false');
-            }
-            else {
+            } else {
 
                 foreach (['stock', 'barang_cacat', 'dropship'] as $stockField) {
                     $oldVal = $oldStock[$stockField] ?? null;
@@ -408,8 +404,8 @@ class ProductController extends ResourceController
 
 
                     if ($stockField === 'dropship') {
-                        $oldVal = (bool)$oldVal;
-                        $newVal = (bool)$newVal;
+                        $oldVal = (bool) $oldVal;
+                        $newVal = (bool) $newVal;
                     }
 
                     if ($oldVal != $newVal) {
@@ -498,11 +494,10 @@ class ProductController extends ResourceController
                 $stockData = [
                     'stock' => $toko->stock,
                     'barang_cacat' => $toko->barang_cacat,
-                    'dropship' => isset($toko->dropship) ? (int)$toko->dropship : 0,
+                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
                 ];
                 $this->stockModel->update($toko->id, $stockData);
-            }
-            else {
+            } else {
                 $existingStock = $this->stockModel
                     ->where('id_barang', $id)
                     ->where('id_toko', $toko->id_toko)
@@ -511,13 +506,12 @@ class ProductController extends ResourceController
                 $stockData = [
                     'stock' => $toko->stock,
                     'barang_cacat' => $toko->barang_cacat,
-                    'dropship' => isset($toko->dropship) ? (int)$toko->dropship : 0,
+                    'dropship' => isset($toko->dropship) ? (int) $toko->dropship : 0,
                 ];
 
                 if ($existingStock) {
                     $this->stockModel->update($existingStock['id'], $stockData);
-                }
-                else {
+                } else {
                     $stockData['id_barang'] = $data->id_barang;
                     $stockData['id_toko'] = $toko->id_toko;
                     $this->stockModel->insert($stockData);
@@ -561,8 +555,8 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error("Produk tidak ditemukan", 404);
         }
 
-        $oldModal = (float)($oldProductData['harga_modal'] ?? 0);
-        $newModal = (float)$data->harga_modal;
+        $oldModal = (float) ($oldProductData['harga_modal'] ?? 0);
+        $newModal = (float) $data->harga_modal;
 
         $this->db->transStart();
         try {
@@ -589,8 +583,9 @@ class ProductController extends ResourceController
                 $stocks = $this->stockModel->where('id_barang', $oldProductData['id_barang'] ?? $oldProductData['kode_barang'])->findAll();
 
                 foreach ($stocks as $s) {
-                    $totalQty = (int)$s['stock'] + (int)$s['barang_cacat'];
-                    if ($totalQty == 0) continue;
+                    $totalQty = (int) $s['stock'] + (int) $s['barang_cacat'];
+                    if ($totalQty == 0)
+                        continue;
 
                     $totalDiff = abs($diffPerUnit * $totalQty);
                     $tokoId = $s['id_toko'];
@@ -681,8 +676,7 @@ class ProductController extends ResourceController
                 foreach ($data->stock as $toko) {
                     if (isset($toko->id) && $this->stockModel->find($toko->id)) {
                         continue;
-                    }
-                    else {
+                    } else {
                         $existingStock = $this->stockModel
                             ->where('id_barang', $id)
                             ->where('id_toko', $toko->id_toko)
@@ -756,11 +750,10 @@ class ProductController extends ResourceController
                 ];
                 $this->stockModel->insert($stockData);
                 $stockId = $this->stockModel->getInsertID();
-            }
-            else {
+            } else {
                 $stockId = $existingStock['id'];
-                $oldStock = (int)$existingStock['stock'];
-                $oldCacat = (int)$existingStock['barang_cacat'];
+                $oldStock = (int) $existingStock['stock'];
+                $oldCacat = (int) $existingStock['barang_cacat'];
 
                 $stockData = [
                     'stock' => $data->stock,
@@ -770,12 +763,12 @@ class ProductController extends ResourceController
             }
 
             // --- Journal Entry for Adjustment ---
-            $diffStock = (int)$data->stock - $oldStock;
-            $diffCacat = (int)$data->barang_cacat - $oldCacat;
+            $diffStock = (int) $data->stock - $oldStock;
+            $diffCacat = (int) $data->barang_cacat - $oldCacat;
             $alasan = $data->alasan ?? 'Penyesuaian manual (Opname)';
 
             $oldTotal = $oldStock + $oldCacat;
-            $newTotal = (int)$data->stock + (int)$data->barang_cacat;
+            $newTotal = (int) $data->stock + (int) $data->barang_cacat;
             $totalDiff = $newTotal - $oldTotal;
 
             if ($diffStock != 0 || $diffCacat != 0) {
@@ -786,7 +779,7 @@ class ProductController extends ResourceController
                     // --- Reklasifikasi saja (total tidak berubah) ---
                     // Hanya normal & cacat yang bergeser, tidak ada barang yg hilang/tambah
                     $moveQty = abs($diffCacat); // bisa pakai diff mana saja, keduanya counterpart
-                    $moveValue = $moveQty * (float)$product['harga_modal'];
+                    $moveValue = $moveQty * (float) $product['harga_modal'];
 
                     if ($moveValue > 0) {
                         if ($diffCacat > 0) {
@@ -794,30 +787,27 @@ class ProductController extends ResourceController
                             // Dr Inventory Cacat (10x7), Cr Inventory Normal (10x4)
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $moveValue, 0, $data->id_toko);
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $moveValue, $data->id_toko);
-                        }
-                        else {
+                        } else {
                             // Cacat berkurang, Normal bertambah → Cacat ke Normal
                             // Dr Inventory Normal (10x4), Cr Inventory Cacat (10x7)
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $moveValue, 0, $data->id_toko);
                             $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $moveValue, $data->id_toko);
                         }
                     }
-                }
-                else {
+                } else {
                     // --- Total berubah: ada selisih stok nyata ---
 
                     // 1. Adjustment Normal Stock
                     if ($diffStock != 0) {
-                        $valueStock = abs($diffStock * (float)$product['harga_modal']);
+                        $valueStock = abs($diffStock * (float) $product['harga_modal']);
                         if ($valueStock > 0) {
                             if ($diffStock > 0) {
-                                // Surplus: Dr Inventory Normal (10x4), Cr Ekuitas (30x1)
+                                // Surplus: Dr Inventory Normal (10x4), Cr Write Off (10x8)
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', $valueStock, 0, $data->id_toko);
-                                $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueStock, $data->id_toko);
-                            }
-                            else {
-                                // Shortage: Dr HPP (50x1), Cr Inventory Normal (10x4)
-                                $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueStock, 0, $data->id_toko);
+                                $this->internalAddJournalItem($jid, '10' . $data->id_toko . '8', 0, $valueStock, $data->id_toko);
+                            } else {
+                                // Shortage: Dr Write Off (10x8), Cr Inventory Normal (10x4)
+                                $this->internalAddJournalItem($jid, '10' . $data->id_toko . '8', $valueStock, 0, $data->id_toko);
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '4', 0, $valueStock, $data->id_toko);
                             }
                         }
@@ -825,14 +815,13 @@ class ProductController extends ResourceController
 
                     // 2. Adjustment Cacat Stock
                     if ($diffCacat != 0) {
-                        $valueCacat = abs($diffCacat * (float)$product['harga_modal']);
+                        $valueCacat = abs($diffCacat * (float) $product['harga_modal']);
                         if ($valueCacat > 0) {
                             if ($diffCacat > 0) {
                                 // Surplus Cacat: Dr Inventory Cacat (10x7), Cr Ekuitas (30x1)
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', $valueCacat, 0, $data->id_toko);
                                 $this->internalAddJournalItem($jid, '30' . $data->id_toko . '1', 0, $valueCacat, $data->id_toko);
-                            }
-                            else {
+                            } else {
                                 // Shortage Cacat: Dr HPP (50x1), Cr Inventory Cacat (10x7)
                                 $this->internalAddJournalItem($jid, '50' . $data->id_toko . '1', $valueCacat, 0, $data->id_toko);
                                 $this->internalAddJournalItem($jid, '10' . $data->id_toko . '7', 0, $valueCacat, $data->id_toko);
@@ -867,8 +856,7 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp('Penyesuaian stok berhasil', ['id' => $id, 'id_barang' => $id_barang, 'id_toko' => $data->id_toko], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -893,7 +881,7 @@ class ProductController extends ResourceController
             return null;
         }
 
-        $p = (array)$product;
+        $p = (array) $product;
 
         // 🔹 Tambahkan kode_barang dan nama_lengkap_barang
         $p['kode_barang'] = $p['id_barang'] ?? null;
@@ -906,17 +894,17 @@ class ProductController extends ResourceController
         // 🔹 Ambil stok (langsung dari tabel stock untuk efisiensi)
         $p['stock'] = array_map(
             function ($s) {
-            return [
-            'id' => $s['id'],
-            'stock' => $s['stock'],
-            'dropship' => (bool)$s['dropship'],
-            'id_toko' => $s['id_toko'],
-            'barang_cacat' => $s['barang_cacat'],
-            'toko_name' => $s['toko_name']
-            ];
-        },
+                return [
+                    'id' => $s['id'],
+                    'stock' => $s['stock'],
+                    'dropship' => (bool) $s['dropship'],
+                    'id_toko' => $s['id_toko'],
+                    'barang_cacat' => $s['barang_cacat'],
+                    'toko_name' => $s['toko_name']
+                ];
+            },
             $this->db->table('stock')
-            ->select('
+                ->select('
             stock.id,
             stock.stock,
             stock.dropship,
@@ -924,32 +912,32 @@ class ProductController extends ResourceController
             stock.barang_cacat,
             toko.toko_name
         ')
-            ->join('toko', 'toko.id = stock.id_toko', 'left')
-            ->where('stock.id_barang', $p['id_barang'])
-            ->where('stock.tenant_id', \App\Libraries\TenantContext::id())
-            ->get()
-            ->getResultArray()
+                ->join('toko', 'toko.id = stock.id_toko', 'left')
+                ->where('stock.id_barang', $p['id_barang'])
+                ->where('stock.tenant_id', \App\Libraries\TenantContext::id())
+                ->get()
+                ->getResultArray()
         );
 
         // 🔹 Ambil gambar (hanya ambil URL langsung)
         $p['images'] = array_column(
             $this->imageModel
-            ->where(['type' => 'product', 'kode' => $id])
-            ->findAll(),
+                ->where(['type' => 'product', 'kode' => $id])
+                ->findAll(),
             'url'
         );
 
         // 🔹 Normalisasi field dropship & supplier
-        $p['dropship'] = (bool)($p['dropship'] ?? false);
+        $p['dropship'] = (bool) ($p['dropship'] ?? false);
 
         // 🔹 Ambil supplier details (jika ada)
         $p['supplier_details'] = !empty($p['suplier'])
             ? $this->db->table('suplier')
-            ->select('id, suplier_name as name')
-            ->where('id', $p['suplier'])
-            ->where('tenant_id', \App\Libraries\TenantContext::id())
-            ->get()
-            ->getRowArray()
+                ->select('id, suplier_name as name')
+                ->where('id', $p['suplier'])
+                ->where('tenant_id', \App\Libraries\TenantContext::id())
+                ->get()
+                ->getRowArray()
             : [];
 
         return $p;
@@ -964,8 +952,7 @@ class ProductController extends ResourceController
                 return $this->jsonResponse->oneResp('Data berhasil diambil', $product);
             }
             return $this->jsonResponse->error('Product Not Found', 404);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -987,9 +974,9 @@ class ProductController extends ResourceController
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->select([
-                'seri.seri as label',
-                'product.id_seri_barang as value',
-            ]);
+                    'seri.seri as label',
+                    'product.id_seri_barang as value',
+                ]);
 
             $builder->where('seri.seri IS NOT NULL')
                 ->where('model_barang.nama_model IS NOT NULL')
@@ -1012,8 +999,7 @@ class ProductController extends ResourceController
             cache()->save($cacheKey, array_values($products), 600);
 
             return $this->jsonResponse->oneResp('', array_values($products), 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -1027,14 +1013,12 @@ class ProductController extends ResourceController
 
             if (!empty($modelId)) {
                 $builder->where('id_model_barang', $modelId);
-            }
-            else {
+            } else {
                 return $this->jsonResponse->error('Parameter model_id is required', 400);
             }
             $total = $builder->countAllResults(false);
             return $this->jsonResponse->oneResp('Total data retrieved successfully', $total, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -1048,14 +1032,12 @@ class ProductController extends ResourceController
 
             if (!empty($seriId)) {
                 $builder->where('id_seri_barang', $seriId);
-            }
-            else {
+            } else {
                 return $this->jsonResponse->error('Parameter model_id is required', 400);
             }
             $total = $builder->countAllResults(false);
             return $this->jsonResponse->oneResp('Total data retrieved successfully', $total, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -1067,8 +1049,7 @@ class ProductController extends ResourceController
             $sortBy = $this->request->getGet('sortBy');
             if ($sortBy === 'kode_barang') {
                 $sortBy = 'product.id_barang';
-            }
-            elseif (!$sortBy) {
+            } elseif (!$sortBy) {
                 $sortBy = 'product.id';
             }
 
@@ -1081,35 +1062,35 @@ class ProductController extends ResourceController
             $suplier = trim($this->request->getGet('suplier') ?? '');
             $stockFilter = trim($this->request->getGet('stock') ?? '');
             $id_toko = trim($this->request->getGet('id_toko') ?? '');
-            $limit = max((int)($this->request->getGet('limit') ?: 25), 1);
-            $page = max((int)($this->request->getGet('page') ?: 1), 1);
+            $limit = max((int) ($this->request->getGet('limit') ?: 25), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
             // === Bangun query dasar ===
             $builder = $this->productModel
                 ->select([
-                'product.id',
-                'product.id_barang',
-                'product.notes',
-                'product.nama_barang',
-                'product.harga_modal',
-                'product.harga_jual',
-                'product.harga_jual_toko',
-                'product.description',
-                'product.id_model_barang',
-                'product.id_seri_barang',
-                'product.suplier',
-                'product.dropship',
-                'product.berat',
-                'model_barang.nama_model',
-                'seri.seri',
-            ])
+                    'product.id',
+                    'product.id_barang',
+                    'product.notes',
+                    'product.nama_barang',
+                    'product.harga_modal',
+                    'product.harga_jual',
+                    'product.harga_jual_toko',
+                    'product.description',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
+                    'product.suplier',
+                    'product.dropship',
+                    'product.berat',
+                    'model_barang.nama_model',
+                    'seri.seri',
+                ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
             // Filter by toko: only show products that have stock in this toko
             if (!empty($id_toko)) {
-                $builder->join('stock', 'stock.id_barang = product.id_barang AND stock.id_toko = ' . (int)$id_toko, 'inner');
+                $builder->join('stock', 'stock.id_barang = product.id_barang AND stock.id_toko = ' . (int) $id_toko, 'inner');
             }
 
             $builder->where('product.tenant_id', \App\Libraries\TenantContext::id())
@@ -1235,11 +1216,11 @@ class ProductController extends ResourceController
                     $tId = $row['id_toko'];
 
                     if ($row['terjual'] > 0) {
-                        $terjualMap[$kode] = ($terjualMap[$kode] ?? 0) + (int)$row['terjual'];
+                        $terjualMap[$kode] = ($terjualMap[$kode] ?? 0) + (int) $row['terjual'];
                     }
                     if ($row['hold'] > 0) {
-                        $holdMap[$kode][$tId] = (int)$row['hold'];
-                        $holdTotalMap[$kode] = ($holdTotalMap[$kode] ?? 0) + (int)$row['hold'];
+                        $holdMap[$kode][$tId] = (int) $row['hold'];
+                        $holdTotalMap[$kode] = ($holdTotalMap[$kode] ?? 0) + (int) $row['hold'];
                     }
                 }
             }
@@ -1258,7 +1239,7 @@ class ProductController extends ResourceController
                     ->get()->getResultArray();
                 foreach ($rows as $row) {
                     $kode = strtoupper(trim($row['kode_barang']));
-                    $comingSoonTotalMap[$kode] = (int)$row['total'];
+                    $comingSoonTotalMap[$kode] = (int) $row['total'];
                 }
             }
 
@@ -1295,10 +1276,10 @@ class ProductController extends ResourceController
                     $tokoId = $s['id_toko'];
                     $tokoName = $tokoMap[$tokoId] ?? 'Tidak diketahui';
                     $dropship = in_array($s['dropship'], ['1', 1, true], true);
-                    $stockReady = (int)($s['stock'] ?? 0);
-                    $cacatVal = (int)($s['barang_cacat'] ?? 0);
-                    $holdVal = (int)($holdMap[$kodeBarang][$tokoId] ?? 0);
-                    $comingSoonVal = (int)($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0);
+                    $stockReady = (int) ($s['stock'] ?? 0);
+                    $cacatVal = (int) ($s['barang_cacat'] ?? 0);
+                    $holdVal = (int) ($holdMap[$kodeBarang][$tokoId] ?? 0);
+                    $comingSoonVal = (int) ($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0);
 
                     $stockList[] = [
                         'stock_ready' => $stockReady,
@@ -1326,7 +1307,7 @@ class ProductController extends ResourceController
                     }
                 }
 
-                $totalHold = (int)($holdTotalMap[$kodeBarang] ?? 0);
+                $totalHold = (int) ($holdTotalMap[$kodeBarang] ?? 0);
                 $formattedProducts[] = [
                     'id' => $p['id'],
                     'kode_barang' => $kodeBarang,
@@ -1346,9 +1327,9 @@ class ProductController extends ResourceController
                     'total_stock_ready' => $totalStockReady,
                     'total_stock' => $totalStockReady + $totalHold, // total ready + hold
                     'total_cacat' => $totalCacat,
-                    'total_terjual' => (int)($terjualMap[$kodeBarang] ?? 0),
+                    'total_terjual' => (int) ($terjualMap[$kodeBarang] ?? 0),
                     'total_hold' => $totalHold,
-                    'total_coming_soon' => (int)($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0),
+                    'total_coming_soon' => (int) ($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0),
                     'images' => $imageMap[$p['id']] ?? []
                 ];
             }
@@ -1356,7 +1337,7 @@ class ProductController extends ResourceController
             // === Filter berdasarkan stok ===
             if (!empty($stockFilter)) {
                 $formattedProducts = array_filter($formattedProducts, function ($prod) use ($stockFilter) {
-                    $total = (int)$prod['total_stock_ready'];
+                    $total = (int) $prod['total_stock_ready'];
                     switch ($stockFilter) {
                         case 'available':
                             return $total > 6;
@@ -1374,8 +1355,7 @@ class ProductController extends ResourceController
             }
 
             return $this->jsonResponse->multiResp('', $formattedProducts, $total_data, $total_page, $page, $limit, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             log_message('error', '[getAllProduct] Error at ' . $e->getFile() . ':' . $e->getLine() . ' - ' . $e->getMessage());
             return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data produk.', 500);
         }
@@ -1392,8 +1372,8 @@ class ProductController extends ResourceController
             $customer_id = $this->request->getGet('customer_id') ?? '';
             $seri = $this->request->getGet('seri') ?? '';
             $model = $this->request->getGet('model') ?? '';
-            $limit = max((int)($this->request->getGet('limit') ?: 10), 1);
-            $page = max((int)($this->request->getGet('page') ?: 1), 1);
+            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
             // Ambil data dari body request
@@ -1473,8 +1453,8 @@ class ProductController extends ResourceController
             // Format results and apply stockFilter manually because it involves calculated hold_stock
             $formattedProducts = [];
             foreach ($productList as $p) {
-                $stock = (int)($p['stock'] ?? 0);
-                $hold = (int)($p['hold_stock'] ?? 0);
+                $stock = (int) ($p['stock'] ?? 0);
+                $hold = (int) ($p['hold_stock'] ?? 0);
                 $total_ready = $stock - $hold;
 
                 $formattedProducts[] = [
@@ -1498,7 +1478,7 @@ class ProductController extends ResourceController
 
             if (!empty($stockFilter)) {
                 $formattedProducts = array_filter($formattedProducts, function ($prod) use ($stockFilter) {
-                    $total = (int)$prod['total_stock_ready'];
+                    $total = (int) $prod['total_stock_ready'];
                     switch ($stockFilter) {
                         case 'available':
                             return $total > 6;
@@ -1520,8 +1500,7 @@ class ProductController extends ResourceController
             $pagedData = array_slice($formattedProducts, $offset, $limit);
 
             return $this->jsonResponse->multiResp('', $pagedData, $total_data, $total_page, $page, $limit, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -1538,8 +1517,8 @@ class ProductController extends ResourceController
             $customer_id = trim($this->request->getGet('customer_id') ?? '');
             $seri = trim($this->request->getGet('seri') ?? '');
             $model = trim($this->request->getGet('model') ?? '');
-            $limit = max((int)($this->request->getGet('limit') ?: 10), 1);
-            $page = max((int)($this->request->getGet('page') ?: 1), 1);
+            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
             // Cache key
@@ -1557,7 +1536,7 @@ class ProductController extends ResourceController
             if (!empty($customer_id) && is_numeric($customer_id)) {
                 $customer = $this->db->table('customer')
                     ->select('type')
-                    ->where('id', (int)$customer_id)
+                    ->where('id', (int) $customer_id)
                     ->where('tenant_id', \App\Libraries\TenantContext::id())
                     ->where('deleted_at', null)
                     ->get()
@@ -1571,20 +1550,20 @@ class ProductController extends ResourceController
             // === LANGKAH 1: Ambil produk ===
             $productBuilder = $this->productModel
                 ->select([
-                'product.id',
-                'product.id_barang',
-                'product.nama_barang',
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
 
-                'product.harga_modal',
-                'product.harga_jual',
-                'product.harga_jual_toko',
-                'product.description',
-                'product.id_model_barang',
-                'product.id_seri_barang',
-                'product.berat',
-                'model_barang.nama_model as nama_model',
-                'seri.seri as seri',
-            ])
+                    'product.harga_modal',
+                    'product.harga_jual',
+                    'product.harga_jual_toko',
+                    'product.description',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
+                    'product.berat',
+                    'model_barang.nama_model as nama_model',
+                    'seri.seri as seri',
+                ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                 ->where('product.tenant_id', \App\Libraries\TenantContext::id());
@@ -1607,18 +1586,17 @@ class ProductController extends ResourceController
             if (!empty($id_toko) && is_numeric($id_toko)) {
                 $productBuilder->whereIn('product.id_barang', function ($sub) use ($id_toko) {
                     return $sub->select('id_barang')
-                    ->from('stock')
-                    ->where('id_toko', (int)$id_toko)
-                    ->where('tenant_id', \App\Libraries\TenantContext::id())
-                    ->where('stock >', 0);
+                        ->from('stock')
+                        ->where('id_toko', (int) $id_toko)
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
+                        ->where('stock >', 0);
                 });
-            }
-            else {
+            } else {
                 $productBuilder->whereIn('product.id_barang', function ($sub) {
                     return $sub->select('id_barang')
-                    ->from('stock')
-                    ->where('tenant_id', \App\Libraries\TenantContext::id())
-                    ->where('stock >', 0);
+                        ->from('stock')
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
+                        ->where('stock >', 0);
                 });
             }
 
@@ -1650,7 +1628,7 @@ class ProductController extends ResourceController
                     ->where('stock >', 0);
 
                 if (!empty($id_toko) && is_numeric($id_toko)) {
-                    $stockQuery->where('id_toko', (int)$id_toko);
+                    $stockQuery->where('id_toko', (int) $id_toko);
                 }
 
                 $allStocks = $stockQuery->get()->getResultArray();
@@ -1668,8 +1646,8 @@ class ProductController extends ResourceController
 
                 foreach ($allStocks as $s) {
                     $stockByProduct[$s['id_barang']][] = [
-                        'stock' => (int)$s['stock'],
-                        'barang_cacat' => (int)$s['barang_cacat'],
+                        'stock' => (int) $s['stock'],
+                        'barang_cacat' => (int) $s['barang_cacat'],
                         'toko_name' => $tokoMap[$s['id_toko']] ?? 'Toko Tidak Diketahui',
                         'dropship' => in_array($s['dropship'], ['1', 1, true], true),
                     ];
@@ -1725,8 +1703,7 @@ class ProductController extends ResourceController
             ], 300);
 
             return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             log_message('error', '[getProductStockForPricelist] Error: ' . $e->getMessage());
             return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data.', 500);
         }
@@ -1750,8 +1727,8 @@ class ProductController extends ResourceController
             $id_toko = trim($this->request->getGet('id_toko') ?? '');
             $seri = trim($this->request->getGet('seri') ?? '');
             $model = trim($this->request->getGet('model') ?? '');
-            $limit = max((int)($this->request->getGet('limit') ?: 10), 1);
-            $page = max((int)($this->request->getGet('page') ?: 1), 1);
+            $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
             // === Get customer discount from JWT token (if authenticated) ===
@@ -1761,7 +1738,7 @@ class ProductController extends ResourceController
 
             if ($customer) {
                 $discountType = $customer['discount_type'] ?? null;
-                $discountValue = (float)($customer['discount_value'] ?? 0);
+                $discountValue = (float) ($customer['discount_value'] ?? 0);
             }
 
             // Cache key (include customer discount in cache key)
@@ -1777,17 +1754,17 @@ class ProductController extends ResourceController
             // === LANGKAH 1: Ambil produk ===
             $productBuilder = $this->productModel
                 ->select([
-                'product.id',
-                'product.id_barang',
-                'product.nama_barang',
-                'product.harga_modal',
-                'product.harga_jual',
-                'product.description',
-                'product.id_model_barang',
-                'product.id_seri_barang',
-                'model_barang.nama_model as nama_model',
-                'seri.seri as seri',
-            ])
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
+                    'product.harga_modal',
+                    'product.harga_jual',
+                    'product.description',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
+                    'model_barang.nama_model as nama_model',
+                    'seri.seri as seri',
+                ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                 ->where('product.tenant_id', \App\Libraries\TenantContext::id());
@@ -1810,18 +1787,17 @@ class ProductController extends ResourceController
             if (!empty($id_toko) && is_numeric($id_toko)) {
                 $productBuilder->whereIn('product.id_barang', function ($sub) use ($id_toko) {
                     return $sub->select('id_barang')
-                    ->from('stock')
-                    ->where('id_toko', (int)$id_toko)
-                    ->where('tenant_id', \App\Libraries\TenantContext::id())
-                    ->where('stock >', 0);
+                        ->from('stock')
+                        ->where('id_toko', (int) $id_toko)
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
+                        ->where('stock >', 0);
                 });
-            }
-            else {
+            } else {
                 $productBuilder->whereIn('product.id_barang', function ($sub) {
                     return $sub->select('id_barang')
-                    ->from('stock')
-                    ->where('tenant_id', \App\Libraries\TenantContext::id())
-                    ->where('stock >', 0);
+                        ->from('stock')
+                        ->where('tenant_id', \App\Libraries\TenantContext::id())
+                        ->where('stock >', 0);
                 });
             }
 
@@ -1853,7 +1829,7 @@ class ProductController extends ResourceController
                     ->where('stock >', 0);
 
                 if (!empty($id_toko) && is_numeric($id_toko)) {
-                    $stockQuery->where('id_toko', (int)$id_toko);
+                    $stockQuery->where('id_toko', (int) $id_toko);
                 }
 
                 $allStocks = $stockQuery->get()->getResultArray();
@@ -1871,8 +1847,8 @@ class ProductController extends ResourceController
 
                 foreach ($allStocks as $s) {
                     $stockByProduct[$s['id_barang']][] = [
-                        'stock' => (int)$s['stock'],
-                        'barang_cacat' => (int)$s['barang_cacat'],
+                        'stock' => (int) $s['stock'],
+                        'barang_cacat' => (int) $s['barang_cacat'],
                         'toko_name' => $tokoMap[$s['id_toko']] ?? 'Toko Tidak Diketahui',
                         'dropship' => in_array($s['dropship'], ['1', 1, true], true),
                     ];
@@ -1903,7 +1879,7 @@ class ProductController extends ResourceController
                 ])));
 
                 // Harga jual original
-                $hargaJualOriginal = (float)$p['harga_jual'];
+                $hargaJualOriginal = (float) $p['harga_jual'];
                 $hargaJualFinal = $hargaJualOriginal;
                 $discountAmount = 0;
 
@@ -1914,8 +1890,7 @@ class ProductController extends ResourceController
                         // Discount percentage
                         $discountAmount = $hargaJualOriginal * ($discountValue / 100);
                         $hargaJualFinal = $hargaJualOriginal - $discountAmount;
-                    }
-                    elseif ($type === 'fixed') {
+                    } elseif ($type === 'fixed') {
                         // Discount fixed amount
                         $discountAmount = $discountValue;
                         $hargaJualFinal = max(0, $hargaJualOriginal - $discountValue);
@@ -1930,7 +1905,7 @@ class ProductController extends ResourceController
                     'nama_model' => $p['nama_model'] ?? null,
                     'seri' => $p['seri'] ?? null,
                     'description' => $p['description'] ?? null,
-                    'harga_jual' => (int)round($hargaJualFinal), // Harga setelah discount
+                    'harga_jual' => (int) round($hargaJualFinal), // Harga setelah discount
                     'stock' => $stockByProduct[$p['id_barang']] ?? [],
                     'images' => $imageMap[$p['id']] ?? [],
                 ];
@@ -1943,8 +1918,7 @@ class ProductController extends ResourceController
             ], 300);
 
             return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             log_message('error', '[getProductStockForPricelistV2] Error: ' . $e->getMessage());
             return $this->jsonResponse->error('Terjadi kesalahan saat mengambil data.', 500);
         }
@@ -1957,8 +1931,7 @@ class ProductController extends ResourceController
             $sortBy = $this->request->getGet('sortBy');
             if ($sortBy === 'kode_barang') {
                 $sortBy = 'product.id_barang';
-            }
-            elseif (!$sortBy) {
+            } elseif (!$sortBy) {
                 $sortBy = 'product.id';
             }
 
@@ -1966,22 +1939,22 @@ class ProductController extends ResourceController
             $sortMethod = in_array(strtolower($sortMethodRaw), ['asc', 'desc']) ? strtolower($sortMethodRaw) : 'desc';
 
             $namaProduct = trim($this->request->getGet('namaProduct') ?? '');
-            $limit = max((int)($this->request->getGet('limit') ?: 25), 1);
-            $page = max((int)($this->request->getGet('page') ?: 1), 1);
+            $limit = max((int) ($this->request->getGet('limit') ?: 25), 1);
+            $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
 
             // === Bangun query dasar ===
             $builder = $this->productModel
                 ->select([
-                'product.id',
-                'product.id_barang',
-                'product.nama_barang',
-                'product.harga_modal',
-                'product.id_model_barang',
-                'product.id_seri_barang',
-                'model_barang.nama_model',
-                'seri.seri',
-            ])
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
+                    'product.harga_modal',
+                    'product.id_model_barang',
+                    'product.id_seri_barang',
+                    'model_barang.nama_model',
+                    'seri.seri',
+                ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                 ->where('product.tenant_id', \App\Libraries\TenantContext::id());
@@ -2032,16 +2005,16 @@ class ProductController extends ResourceController
                             'detail_stock_cacat' => []
                         ];
                     }
-                    $stockData[$kode]['total_stock'] += (int)$stock['total_stock'];
-                    $stockData[$kode]['total_cacat'] += (int)$stock['total_cacat'];
+                    $stockData[$kode]['total_stock'] += (int) $stock['total_stock'];
+                    $stockData[$kode]['total_cacat'] += (int) $stock['total_cacat'];
 
                     $stockData[$kode]['detail_stock_normal'][] = [
-                        'id_toko' => (int)$stock['id_toko'],
-                        'jumlah' => (int)$stock['total_stock']
+                        'id_toko' => (int) $stock['id_toko'],
+                        'jumlah' => (int) $stock['total_stock']
                     ];
                     $stockData[$kode]['detail_stock_cacat'][] = [
-                        'id_toko' => (int)$stock['id_toko'],
-                        'jumlah' => (int)$stock['total_cacat']
+                        'id_toko' => (int) $stock['id_toko'],
+                        'jumlah' => (int) $stock['total_cacat']
                     ];
                 }
             }
@@ -2067,10 +2040,10 @@ class ProductController extends ResourceController
                             'detail_stock_gantung' => []
                         ];
                     }
-                    $pendingStockData[$kode]['total_pending'] += (int)$pending['total_pending'];
+                    $pendingStockData[$kode]['total_pending'] += (int) $pending['total_pending'];
                     $pendingStockData[$kode]['detail_stock_gantung'][] = [
-                        'id_toko' => (int)$pending['id_toko'],
-                        'jumlah' => (int)$pending['total_pending']
+                        'id_toko' => (int) $pending['id_toko'],
+                        'jumlah' => (int) $pending['total_pending']
                     ];
                 }
             }
@@ -2095,7 +2068,7 @@ class ProductController extends ResourceController
                 ];
 
                 $totalStock = $stock['total_stock'] + $stock['total_cacat'] + $pending['total_pending'];
-                $hargaModal = (float)$product['harga_modal'];
+                $hargaModal = (float) $product['harga_modal'];
                 $estimasiModal = $totalStock * $hargaModal;
 
                 // Format nama lengkap barang
@@ -2137,9 +2110,9 @@ class ProductController extends ResourceController
             // === HITUNG SUMMARY GLOBAL (SEMUA DATA TANPA PAGINATION) ===
             $globalBuilder = $this->productModel
                 ->select([
-                'product.id_barang',
-                'product.harga_modal',
-            ])
+                    'product.id_barang',
+                    'product.harga_modal',
+                ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang', 'left')
                 ->where('product.tenant_id', \App\Libraries\TenantContext::id());
@@ -2167,8 +2140,8 @@ class ProductController extends ResourceController
 
                 foreach ($globalStocks as $stock) {
                     $globalStockData[$stock['id_barang']] = [
-                        'total_stock' => (int)$stock['total_stock'],
-                        'total_cacat' => (int)$stock['total_cacat']
+                        'total_stock' => (int) $stock['total_stock'],
+                        'total_cacat' => (int) $stock['total_cacat']
                     ];
                 }
             }
@@ -2187,7 +2160,7 @@ class ProductController extends ResourceController
                     ->getResultArray();
 
                 foreach ($globalPendingStocks as $pending) {
-                    $globalPendingStockData[$pending['kode_barang']] = (int)$pending['total_pending'];
+                    $globalPendingStockData[$pending['kode_barang']] = (int) $pending['total_pending'];
                 }
             }
 
@@ -2202,7 +2175,7 @@ class ProductController extends ResourceController
                 $pendingStock = $globalPendingStockData[$kodeBarang] ?? 0;
 
                 $totalStock = $stock['total_stock'] + $stock['total_cacat'] + $pendingStock;
-                $hargaModal = (float)$product['harga_modal'];
+                $hargaModal = (float) $product['harga_modal'];
                 $estimasiModal = $totalStock * $hargaModal;
 
                 $globalTotalStock += $totalStock;
@@ -2234,8 +2207,7 @@ class ProductController extends ResourceController
                 200
             );
 
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             log_message('error', '[getProductStockSummary] Error: ' . $e->getMessage());
             return $this->jsonResponse->error('Terjadi kesalahan saat mengambil summary modal produk.', 500);
         }
@@ -2276,8 +2248,7 @@ class ProductController extends ResourceController
 
             return $this->jsonResponse->oneResp("Data Deleted Successfully", "", 200);
 
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             $this->db->transRollback();
 
             return $this->jsonResponse->error("Failed to delete data due to a server error: " . $e->getMessage(), 500);
@@ -2331,7 +2302,7 @@ class ProductController extends ResourceController
             ->limit(1)
             ->get()
             ->getRowArray();
-        $lastId = $lastProduct ? (int)preg_replace('/[^0-9]/', '', $lastProduct['id']) : 0;
+        $lastId = $lastProduct ? (int) preg_replace('/[^0-9]/', '', $lastProduct['id']) : 0;
 
         foreach ($excelData as $row) {
             $lastId++;
@@ -2348,8 +2319,7 @@ class ProductController extends ResourceController
                     ->getRowArray();
                 if ($category) {
                     $categoryMap[$categoryName] = $category['id'];
-                }
-                else {
+                } else {
                     log_message('error', "Category '$categoryName' not found in database.");
                     return $this->jsonResponse->error("Category '$categoryName' not found.", 400);
                 }
@@ -2363,8 +2333,7 @@ class ProductController extends ResourceController
                     ->get()->getRowArray();
                 if ($series) {
                     $seriesMap[$seriesName] = $series['id'];
-                }
-                else {
+                } else {
                     $this->db->table('seri')->insert([
                         'tenant_id' => \App\Libraries\TenantContext::id(),
                         'seri' => $seriesName
@@ -2384,8 +2353,7 @@ class ProductController extends ResourceController
                         ->get()->getRowArray();
                     if ($existingSupplier) {
                         $supplierMap[$supplier] = $existingSupplier['id'];
-                    }
-                    else {
+                    } else {
                         $this->db->table('suplier')->insert([
                             'tenant_id' => \App\Libraries\TenantContext::id(),
                             'suplier_name' => $supplier
@@ -2404,21 +2372,21 @@ class ProductController extends ResourceController
                 'id_barang' => $id_barang,
                 'nama_barang' => trim($row['A']),
                 'id_seri_barang' => $seriesMap[$seriesName] ?? null,
-                'harga_modal' => isset($row['F']) ? (float)str_replace(',', '', $row['F']) : 0,
-                'harga_jual' => isset($row['G']) ? (float)str_replace(',', '', $row['G']) : 0,
-                'harga_jual_toko' => isset($row['H']) ? (float)str_replace(',', '', $row['H']) : 0,
+                'harga_modal' => isset($row['F']) ? (float) str_replace(',', '', $row['F']) : 0,
+                'harga_jual' => isset($row['G']) ? (float) str_replace(',', '', $row['G']) : 0,
+                'harga_jual_toko' => isset($row['H']) ? (float) str_replace(',', '', $row['H']) : 0,
                 'suplier' => implode(',', array_filter($suplierIds)),
                 'id_model_barang' => $categoryMap[$categoryName],
                 'dropship' => $row['E'] === "TRUE" ? 1 : 0,
-                'berat' => isset($row['I']) ? (float)$row['I'] : 0, // Assuming column I is Berat
+                'berat' => isset($row['I']) ? (float) $row['I'] : 0, // Assuming column I is Berat
                 'created_by' => $token['user_id'],
             ];
             $dataToInsert[] = $productData;
 
             foreach ($storeNames as $storeName => $columnName) {
                 if (isset($storeMap[$storeName])) {
-                    $barang_cacat = array_key_exists($columnName, $row) && is_numeric($row[$columnName]) ? (int)$row[$columnName] : 0;
-                    $stock = array_key_exists(chr(ord($columnName) - 1), $row) && is_numeric($row[chr(ord($columnName) - 1)]) ? (int)$row[chr(ord($columnName) - 1)] : 0;
+                    $barang_cacat = array_key_exists($columnName, $row) && is_numeric($row[$columnName]) ? (int) $row[$columnName] : 0;
+                    $stock = array_key_exists(chr(ord($columnName) - 1), $row) && is_numeric($row[chr(ord($columnName) - 1)]) ? (int) $row[chr(ord($columnName) - 1)] : 0;
 
                     $stockToInsert[] = [
                         'tenant_id' => \App\Libraries\TenantContext::id(),
@@ -2434,16 +2402,14 @@ class ProductController extends ResourceController
         // Insert produk
         if (!empty($dataToInsert)) {
             $this->db->table('product')->insertBatch($dataToInsert);
-        }
-        else {
+        } else {
             return $this->jsonResponse->error("No valid data to insert.", 400);
         }
 
         // Insert stok jika ada data
         if (!empty($stockToInsert)) {
             $this->db->table('stock')->insertBatch($stockToInsert);
-        }
-        else {
+        } else {
             return $this->jsonResponse->error("Stock data is empty.", 400);
         }
 
@@ -2453,7 +2419,7 @@ class ProductController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
-        $qty = (int)($data->qty ?? 0);
+        $qty = (int) ($data->qty ?? 0);
         $idToko = $data->id_toko ?? null;
         $notes = $data->notes ?? 'Pindah ke Cacat';
 
@@ -2499,8 +2465,7 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang cacat", null, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -2510,7 +2475,7 @@ class ProductController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
-        $qty = (int)($data->qty ?? 0);
+        $qty = (int) ($data->qty ?? 0);
         $idToko = $data->id_toko ?? null;
         $notes = $data->notes ?? 'Pindah ke Normal';
 
@@ -2555,8 +2520,7 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang normal", null, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
@@ -2566,7 +2530,7 @@ class ProductController extends ResourceController
     {
         $token = $this->request->user;
         $data = $this->request->getJSON();
-        $qty = (int)($data->qty ?? 0);
+        $qty = (int) ($data->qty ?? 0);
         $idToko = $data->id_toko ?? null;
         $notes = $data->notes ?? 'Pembersihan Barang Cacat (Rugi)';
 
@@ -2610,8 +2574,7 @@ class ProductController extends ResourceController
 
             $this->db->transComplete();
             return $this->jsonResponse->oneResp("Berhasil melakukan write-off barang cacat", null, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
