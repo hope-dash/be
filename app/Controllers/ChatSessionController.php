@@ -285,6 +285,8 @@ class ChatSessionController extends BaseController
             $imageUrl = $json['imageUrl'] ?? $this->request->getPost('imageUrl') ?? null;
             $imageBase64 = $json['documentUrl'] ?? $this->request->getPost('documentUrl') ?? null;
             $caption = $json['caption'] ?? $this->request->getPost('caption') ?? null;
+            $filename = $json['filename'] ?? $this->request->getPost('filename') ?? null;
+
 
             $delayMs = (int) ($json['delayMs'] ?? $this->request->getPost('delayMs') ?? 0);
             $typingDurationMs = (int) ($json['typingDurationMs'] ?? $this->request->getPost('typingDurationMs') ?? 2000);
@@ -302,9 +304,9 @@ class ChatSessionController extends BaseController
 
             // Send message based on type
             if ($imageUrl) {
-                $result = $this->chatService->sendImageMessage($sessionId, $toHost, $imageUrl, $caption, $delayMs);
+                $result = $this->chatService->sendImageMessage($sessionId, $toHost, $imageUrl,$filename, $caption, $delayMs);
             } elseif ($imageBase64) {
-                $result = $this->chatService->sendImageBase64Message($sessionId, $toHost, $imageBase64, $caption, $delayMs);
+                $result = $this->chatService->sendImageBase64Message($sessionId, $toHost, $imageBase64,$filename $caption, $delayMs);
             } elseif ($text) {
                 $result = $this->chatService->sendTextMessage($sessionId, $toHost, $text, $delayMs, $typingDurationMs);
             } else {

@@ -161,6 +161,7 @@ class ChatServiceAPI
         string $sessionId,
         string $to,
         string $imageUrl,
+        ?string $filename = null,
         ?string $caption = null,
         int $delayMs = 1000
     ): array {
@@ -170,6 +171,7 @@ class ChatServiceAPI
                     'sessionId' => $sessionId,
                     'to' => $to,
                     'imageUrl' => $imageUrl,
+                    'filename' => $filename,
                     'caption' => $caption,
                     'delayMs' => $delayMs,
                 ],
@@ -203,6 +205,7 @@ class ChatServiceAPI
         string $sessionId,
         string $to,
         string $imageBase64,
+        ?string $filename = null,
         ?string $caption = null,
         int $delayMs = 1000
     ): array {
@@ -212,6 +215,7 @@ class ChatServiceAPI
                     'sessionId' => $sessionId,
                     'to' => $to,
                     'imageBase64' => $imageBase64,
+                    'filename' => $filename,
                     'caption' => $caption,
                     'delayMs' => $delayMs,
                 ],
