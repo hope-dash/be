@@ -43,7 +43,7 @@ class CustomerControllerV2 extends ResourceController
 
             // Validation
             $validation = \Config\Services::validation();
-            
+
             $rules = [
                 'nama_customer' => 'required',
                 'email' => 'required|valid_email',
@@ -66,7 +66,7 @@ class CustomerControllerV2 extends ResourceController
                 ->where('email', $data->email)
                 ->where('tenant_id', TenantContext::id())
                 ->first();
-                
+
             if ($existingByEmail) {
                 // If they have a password or firebase_id, they are already registered
                 if (!empty($existingByEmail['password']) || !empty($existingByEmail['firebase_id'])) {
@@ -108,7 +108,7 @@ class CustomerControllerV2 extends ResourceController
             ];
 
             if (!empty($data->password)) {
-                 $customerData['password'] = password_hash($data->password, PASSWORD_DEFAULT);
+                $customerData['password'] = password_hash($data->password, PASSWORD_DEFAULT);
             }
 
             if ($firebaseId) {
@@ -124,8 +124,7 @@ class CustomerControllerV2 extends ResourceController
             if ($existingCustomer) {
                 $this->customerModel->update($existingCustomer['id'], $customerData);
                 $customerId = $existingCustomer['id'];
-            }
-            else {
+            } else {
                 $customerId = $this->customerModel->insert($customerData);
             }
 
@@ -167,8 +166,7 @@ class CustomerControllerV2 extends ResourceController
                 'email' => $data->email,
                 'email_sent' => $emailSent
             ], 201);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -236,8 +234,7 @@ class CustomerControllerV2 extends ResourceController
                     'discount_value' => $customer['discount_value'],
                 ]
             ], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -291,8 +288,7 @@ class CustomerControllerV2 extends ResourceController
             return $this->jsonResponse->oneResp('Kode OTP baru telah dikirim ke email Anda.', [
                 'email_sent' => $emailSent
             ], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -320,7 +316,7 @@ class CustomerControllerV2 extends ResourceController
                 ->first();
 
             if (!$customer) {
-                return $this->jsonResponse->error("Kredensial tidak valid", 401);
+                return $this->jsonResponse->error("Akun anda belum terdaftar, silahkan daftar terlebih dahulu!", 401);
             }
 
             if ($type === 'google') {
@@ -357,8 +353,7 @@ class CustomerControllerV2 extends ResourceController
                     'discount_value' => $customer['discount_value'] ?? 0,
                 ]
             ], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -390,8 +385,8 @@ class CustomerControllerV2 extends ResourceController
             $idSeri = $this->request->getGet('seri');
             $idCategory = $this->request->getGet('id_category'); // Mapping to id_model_barang
             $search = trim($this->request->getGet('search') ?? ''); // Search query
-            $limit = (int)$this->request->getGet('limit') ?: 20;
-            $page = (int)$this->request->getGet('page') ?: 1;
+            $limit = (int) $this->request->getGet('limit') ?: 20;
+            $page = (int) $this->request->getGet('page') ?: 1;
             $offset = ($page - 1) * $limit;
 
             $builder = $this->productModel->select([
@@ -413,8 +408,7 @@ class CustomerControllerV2 extends ResourceController
                     ->where('stock.id_toko', $idToko)
                     ->where('stock.stock >', 0)
                     ->select('stock.stock as current_stock, toko.toko_name');
-            }
-            else {
+            } else {
                 // Multi store mode: only include products that have > 0 stock across all CABANG stores
                 $tenantId = TenantContext::id();
                 $escapedTenantId = $this->db->escape($tenantId);
@@ -463,18 +457,17 @@ class CustomerControllerV2 extends ResourceController
                 if ($idToko) {
                     foreach ($products as $p) {
                         $stockMap[$p['id_barang']] = [
-                            'total' => (int)$p['current_stock'],
+                            'total' => (int) $p['current_stock'],
                             'details' => [
                                 [
                                     'id_toko' => $idToko,
                                     'toko_name' => $p['toko_name'] ?? 'Unknown Store',
-                                    'stock' => (int)$p['current_stock']
+                                    'stock' => (int) $p['current_stock']
                                 ]
                             ]
                         ];
                     }
-                }
-                else {
+                } else {
                     // Multi store mode: Fetch all CABANG stocks
                     $stockBuilder = $this->db->table('stock')
                         ->select('stock.*, toko.toko_name')
@@ -493,11 +486,11 @@ class CustomerControllerV2 extends ResourceController
                             ];
                         }
 
-                        $stockMap[$s['id_barang']]['total'] += (int)$s['stock'];
+                        $stockMap[$s['id_barang']]['total'] += (int) $s['stock'];
                         $stockMap[$s['id_barang']]['details'][] = [
                             'id_toko' => $s['id_toko'],
                             'toko_name' => $s['toko_name'] ?? 'Unknown Store',
-                            'stock' => (int)$s['stock']
+                            'stock' => (int) $s['stock']
                         ];
                     }
                 }
@@ -532,7 +525,7 @@ class CustomerControllerV2 extends ResourceController
                     $product['seri'] ?? ''
                 ])));
 
-                $basePrice = (float)$product['harga_jual'];
+                $basePrice = (float) $product['harga_jual'];
                 $customerPrice = $basePrice;
                 $discountApplied = 0;
 
@@ -543,9 +536,9 @@ class CustomerControllerV2 extends ResourceController
                     'id_barang' => $product['id_barang'],
                     'nama_barang' => $product['nama_barang'],
                     'nama_lengkap_barang' => $namaLengkap,
-                    'harga_jual' => (int)$basePrice,
-                    'customer_price' => (int)$customerPrice,
-                    'discount_applied' => (int)$discountApplied,
+                    'harga_jual' => (int) $basePrice,
+                    'customer_price' => (int) $customerPrice,
+                    'discount_applied' => (int) $discountApplied,
                     'stock_total' => $stockInfo['total'],
                     'stock_details' => $stockInfo['details'],
                 ];
@@ -557,8 +550,7 @@ class CustomerControllerV2 extends ResourceController
             }
 
             return $this->jsonResponse->multiResp('', $finalProducts, $totalData, $totalPage, $page, $limit, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -590,14 +582,14 @@ class CustomerControllerV2 extends ResourceController
             // Fetch product basic info (Select specific fields only!)
             $product = $this->productModel
                 ->select([
-                'product.id',
-                'product.id_barang',
-                'product.nama_barang',
-                'product.harga_jual',
-                'product.description',
-                'model_barang.nama_model',
-                'seri.seri'
-            ])
+                    'product.id',
+                    'product.id_barang',
+                    'product.nama_barang',
+                    'product.harga_jual',
+                    'product.description',
+                    'model_barang.nama_model',
+                    'seri.seri'
+                ])
                 ->join('model_barang', 'model_barang.id = product.id_model_barang AND model_barang.tenant_id = product.tenant_id', 'left')
                 ->join('seri', 'seri.id = product.id_seri_barang AND seri.tenant_id = product.tenant_id', 'left')
                 ->where('product.id', $id)
@@ -615,20 +607,19 @@ class CustomerControllerV2 extends ResourceController
             ])));
 
             // Calculate Customer Price
-            $basePrice = (float)$product['harga_jual'];
+            $basePrice = (float) $product['harga_jual'];
             $customerPrice = $basePrice;
             $discountApplied = 0;
 
             if ($customer && !empty($customer['discount_type'])) {
                 $discountType = strtolower($customer['discount_type']);
-                $discountValue = (float)$customer['discount_value'];
+                $discountValue = (float) $customer['discount_value'];
 
                 if ($discountType === 'percentage') {
                     $discount = ($basePrice * $discountValue) / 100;
                     $customerPrice = max(0, $basePrice - $discount);
                     $discountApplied = $discount;
-                }
-                elseif ($discountType === 'fixed') {
+                } elseif ($discountType === 'fixed') {
                     $discountApplied = min($basePrice, $discountValue);
                     $customerPrice = max(0, $basePrice - $discountValue);
                 }
@@ -661,9 +652,9 @@ class CustomerControllerV2 extends ResourceController
                 $formattedStock[] = [
                     'id_toko' => $s['id_toko'],
                     'toko_name' => $s['toko_name'] ?? 'Unknown Store',
-                    'stock' => (int)$s['stock']
+                    'stock' => (int) $s['stock']
                 ];
-                $totalStock += (int)$s['stock'];
+                $totalStock += (int) $s['stock'];
             }
 
             // Construct Response
@@ -675,9 +666,9 @@ class CustomerControllerV2 extends ResourceController
                 'nama_model' => $product['nama_model'] ?? null,
                 'seri' => $product['seri'] ?? null,
                 'description' => $product['description'] ?? null,
-                'harga_jual' => (int)$basePrice,
-                'customer_price' => (int)$customerPrice,
-                'discount_applied' => (int)$discountApplied,
+                'harga_jual' => (int) $basePrice,
+                'customer_price' => (int) $customerPrice,
+                'discount_applied' => (int) $discountApplied,
                 'stock_total' => $totalStock,
                 'stock_details' => $formattedStock,
                 'images' => $imageUrls
@@ -685,8 +676,7 @@ class CustomerControllerV2 extends ResourceController
 
             return $this->jsonResponse->oneResp('Data berhasil diambil', $response);
 
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -739,8 +729,7 @@ class CustomerControllerV2 extends ResourceController
                 if ($voucher['max_discount'] && $discount > $voucher['max_discount']) {
                     $discount = $voucher['max_discount'];
                 }
-            }
-            else {
+            } else {
                 $discount = $voucher['discount_value'];
             }
 
@@ -749,8 +738,7 @@ class CustomerControllerV2 extends ResourceController
                 'discount_amount' => $discount,
                 'final_amount' => $purchaseAmount - $discount
             ], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -769,8 +757,7 @@ class CustomerControllerV2 extends ResourceController
             ]);
 
             return $this->jsonResponse->oneResp('Voucher applied successfully', [], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -792,8 +779,7 @@ class CustomerControllerV2 extends ResourceController
                 ->getRowArray();
 
             return $this->jsonResponse->oneResp('', $profile, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -862,7 +848,7 @@ class CustomerControllerV2 extends ResourceController
                 $updateData['email_verified_at'] = null;
                 $updateData['email_verification_token'] = $verificationToken;
 
-            // TODO: Send verification email to new email address
+                // TODO: Send verification email to new email address
             }
 
             if (empty($updateData)) {
@@ -877,8 +863,7 @@ class CustomerControllerV2 extends ResourceController
             }
 
             return $this->jsonResponse->oneResp($message, [], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
