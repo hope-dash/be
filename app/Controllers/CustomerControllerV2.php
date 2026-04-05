@@ -39,15 +39,23 @@ class CustomerControllerV2 extends ResourceController
     {
         try {
             $data = $this->request->getJSON();
+            $firebaseId = $data->firebase_id ?? null;
 
             // Validation
             $validation = \Config\Services::validation();
-            $validation->setRules([
+            
+            $rules = [
                 'nama_customer' => 'required',
                 'email' => 'required|valid_email',
-                'password' => 'required|min_length[6]',
                 'no_hp_customer' => 'required',
-            ]);
+            ];
+
+            // If not google registration, password is required
+            if (!$firebaseId) {
+                $rules['password'] = 'required|min_length[6]';
+            }
+
+            $validation->setRules($rules);
 
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
@@ -58,11 +66,15 @@ class CustomerControllerV2 extends ResourceController
                 ->where('email', $data->email)
                 ->where('tenant_id', TenantContext::id())
                 ->first();
-            if ($existingByEmail && !empty($existingByEmail['password'])) {
-                if (empty($existingByEmail['email_verified_at'])) {
-                    return $this->jsonResponse->error("Lakukan Verifikasi Email", 400);
+                
+            if ($existingByEmail) {
+                // If they have a password or firebase_id, they are already registered
+                if (!empty($existingByEmail['password']) || !empty($existingByEmail['firebase_id'])) {
+                    if (empty($existingByEmail['email_verified_at']) && !$firebaseId) {
+                        return $this->jsonResponse->error("Lakukan Verifikasi Email", 400);
+                    }
+                    return $this->jsonResponse->error("Email sudah terdaftar", 400);
                 }
-                return $this->jsonResponse->error("Email sudah terdaftar", 400);
             }
 
             // Check if customer already exists by phone number (Scoped by tenant_id)
@@ -70,7 +82,7 @@ class CustomerControllerV2 extends ResourceController
                 ->where('no_hp_customer', $data->no_hp_customer)
                 ->where('tenant_id', TenantContext::id())
                 ->first();
-            if ($existingByPhone && !empty($existingByPhone['password'])) {
+            if ($existingByPhone && (!empty($existingByPhone['password']) || !empty($existingByPhone['firebase_id']))) {
                 return $this->jsonResponse->error("Nomor HP sudah terdaftar", 400);
             }
 
@@ -84,7 +96,6 @@ class CustomerControllerV2 extends ResourceController
             $customerData = [
                 'nama_customer' => $data->nama_customer,
                 'email' => $data->email,
-                'password' => password_hash($data->password, PASSWORD_DEFAULT),
                 'no_hp_customer' => $data->no_hp_customer,
                 'alamat' => $data->alamat ?? '',
                 'provinsi' => $data->provinsi ?? '',
@@ -93,10 +104,22 @@ class CustomerControllerV2 extends ResourceController
                 'kelurahan' => $data->kelurahan ?? '',
                 'kode_pos' => $data->kode_pos ?? '',
                 'type' => 'regular',
-                'otp_code' => $otpCode,
-                'otp_expires_at' => $otpExpiresAt,
-                'email_verified_at' => null,
+                'firebase_id' => $firebaseId,
             ];
+
+            if (!empty($data->password)) {
+                 $customerData['password'] = password_hash($data->password, PASSWORD_DEFAULT);
+            }
+
+            if ($firebaseId) {
+                $customerData['email_verified_at'] = date('Y-m-d H:i:s');
+                $customerData['otp_code'] = null;
+                $customerData['otp_expires_at'] = null;
+            } else {
+                $customerData['otp_code'] = $otpCode;
+                $customerData['otp_expires_at'] = $otpExpiresAt;
+                $customerData['email_verified_at'] = null;
+            }
 
             if ($existingCustomer) {
                 $this->customerModel->update($existingCustomer['id'], $customerData);
@@ -110,7 +133,29 @@ class CustomerControllerV2 extends ResourceController
                 return $this->jsonResponse->error("Registration failed", 500);
             }
 
-            // Send OTP email
+            if ($firebaseId) {
+                // Return token directly for Google registration
+                $jwt = new Jwtoken();
+                $token = $jwt->generateToken([
+                    'customer_id' => $customerId,
+                    'email' => $data->email,
+                    'type' => 'customer'
+                ]);
+
+                return $this->jsonResponse->oneResp('Registrasi via Google berhasil', [
+                    'token' => $token,
+                    'customer' => [
+                        'id' => $customerId,
+                        'nama_customer' => $data->nama_customer,
+                        'email' => $data->email,
+                        'no_hp_customer' => $data->no_hp_customer,
+                        'discount_type' => $existingCustomer['discount_type'] ?? 'NONE',
+                        'discount_value' => $existingCustomer['discount_value'] ?? 0,
+                    ]
+                ], 201);
+            }
+
+            // Send OTP email for regular registration
             $emailSent = send_otp_email(
                 $data->email,
                 $data->nama_customer,
@@ -257,6 +302,7 @@ class CustomerControllerV2 extends ResourceController
     {
         try {
             $data = $this->request->getJSON();
+            $type = $data->type ?? 'password'; // 'password' or 'google'
 
             $validation = \Config\Services::validation();
             $validation->setRules([
@@ -274,15 +320,22 @@ class CustomerControllerV2 extends ResourceController
                 ->first();
 
             if (!$customer) {
-                return $this->jsonResponse->error("Invalid credentials", 401);
+                return $this->jsonResponse->error("Kredensial tidak valid", 401);
             }
 
-            if (!password_verify($data->password, $customer['password'])) {
-                return $this->jsonResponse->error("Invalid credentials", 401);
+            if ($type === 'google') {
+                if (empty($customer['firebase_id']) || $customer['firebase_id'] !== $data->password) {
+                    return $this->jsonResponse->error("Kredensial Google tidak valid", 401);
+                }
+            } else {
+                if (!password_verify($data->password, $customer['password'])) {
+                    return $this->jsonResponse->error("Kredensial tidak valid", 401);
+                }
             }
 
             if (!$customer['email_verified_at']) {
-                return $this->jsonResponse->error("Please verify your email first", 403);
+                // For Google login, we could auto-verify here too if needed, but usually register handles it
+                return $this->jsonResponse->error("Silakan verifikasi email Anda terlebih dahulu", 403);
             }
 
             // Generate JWT token
@@ -300,8 +353,8 @@ class CustomerControllerV2 extends ResourceController
                     'nama_customer' => $customer['nama_customer'],
                     'email' => $customer['email'],
                     'no_hp_customer' => $customer['no_hp_customer'],
-                    'discount_type' => $customer['discount_type'],
-                    'discount_value' => $customer['discount_value'],
+                    'discount_type' => $customer['discount_type'] ?? 'NONE',
+                    'discount_value' => $customer['discount_value'] ?? 0,
                 ]
             ], 200);
         }

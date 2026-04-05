@@ -469,15 +469,24 @@ class TransactionControllerV2 extends ResourceController
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
 
-        $trx = $this->transactionModel->find($id);
-        if (!$trx)
-            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
-
-        $amount = $data->amount;
-        $method = $data->payment_method ?? 'CASH';
-
         $this->db->transStart();
         try {
+            // Use RAW SQL to ensure 'FOR UPDATE' locking across all versions/drivers
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            // GUARD: Don't allow payment on cancelled or already paid transaction
+            if ($trx['status'] === 'CANCEL' || $trx['status'] === 'PAID') {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Status transaksi ({$trx['status']}) tidak memungkinkan penambahan pembayaran", 400);
+            }
+
+            $amount = (float)($data->amount ?? 0);
+            $method = $data->payment_method ?? 'CASH';
+
             $this->paymentModel->insert([
                 'transaction_id' => $id,
                 'amount' => $amount,
@@ -492,8 +501,8 @@ class TransactionControllerV2 extends ResourceController
             $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Cash
             $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
 
-            $newTotalPaid = $trx['total_payment'] + $amount;
-            $newStatus = ($newTotalPaid >= $trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
+            $newTotalPaid = (float)$trx['total_payment'] + $amount;
+            $newStatus = ($newTotalPaid >= (float)$trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
 
             $this->transactionModel->update($id, [
                 'total_payment' => $newTotalPaid,
@@ -530,23 +539,26 @@ class TransactionControllerV2 extends ResourceController
             return $this->jsonResponse->error("ID wajib diisi", 400);
         }
 
-        $trx = $this->transactionModel->find($id);
-        if (!$trx) {
-            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
-        }
-
-        // Find the pending payment for this transaction
-        $payment = $this->paymentModel->where('transaction_id', $id)
-            ->where('status', 'PENDING')
-            ->orderBy('id', 'DESC')
-            ->first();
-
-        if (!$payment) {
-            return $this->jsonResponse->error("Tidak ada pembayaran tertunda yang ditemukan untuk transaksi ini", 404);
-        }
-
         $this->db->transStart();
         try {
+            // Lock record
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            // Find the pending payment for this transaction
+            $payment = $this->paymentModel->where('transaction_id', $id)
+                ->where('status', 'PENDING')
+                ->orderBy('id', 'DESC')
+                ->get()->getRowArray(); // Use get()->getRowArray() to ensure fresh state inside transaction
+
+            if (!$payment) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Tidak ada pembayaran tertunda yang ditemukan untuk transaksi ini", 404);
+            }
+
             if ($action === 'REJECT') {
                 // Update payment status
                 $this->paymentModel->update($payment['id'], ['status' => 'REJECTED']);
@@ -567,6 +579,12 @@ class TransactionControllerV2 extends ResourceController
                 ]);
             }
             else if ($action === 'ACCEPT') {
+                // GUARD: Already verified?
+                if ($payment['status'] === 'VERIFIED') {
+                    $this->db->transRollback();
+                    return $this->jsonResponse->oneResp("Pembayaran sudah diverifikasi sebelumnya", ['new_status' => $trx['status']], 200);
+                }
+
                 // Update payment status
                 $this->paymentModel->update($payment['id'], ['status' => 'VERIFIED']);
 
@@ -642,10 +660,6 @@ class TransactionControllerV2 extends ResourceController
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
 
-        $trx = $this->transactionModel->find($id);
-        if (!$trx)
-            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
-
         // Expecting $data->adjustments = [{ category: 'Diskon', component_name: 'Diskon Tambahan', type: 'addition', amount: 1000 }, ...]
         // For backwards compatibility, allow single object too
         $adjustments = [];
@@ -667,6 +681,19 @@ class TransactionControllerV2 extends ResourceController
 
         $this->db->transStart();
         try {
+            // Lock record
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            // GUARD: Already cancelled?
+            if ($trx['status'] === 'CANCEL') {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi sudah dibatalkan, tidak bisa dilakukan penyesuaian", 400);
+            }
+
             $actualTotal = (float)$trx['actual_total'];
             $newActualTotal = $actualTotal;
 
@@ -981,12 +1008,21 @@ class TransactionControllerV2 extends ResourceController
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
 
-        $trx = $this->transactionModel->find($id);
-        if (!$trx)
-            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
-
         $this->db->transStart();
         try {
+            // Use RAW SQL to ensure 'FOR UPDATE' locking across all versions/drivers
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            // GUARD: Check if already cancelled or in other final state
+            if ($trx['status'] === 'CANCEL') {
+                $this->db->transRollback();
+                return $this->jsonResponse->oneResp('Transaksi sudah dibatalkan sebelumnya', ['status' => 'CANCEL'], 200);
+            }
+
             // Restore Stock
             $items = $this->salesProductModel->where('id_transaction', $id)->findAll();
             log_message('debug', '[CancelTransaction] Found ' . count($items) . ' items to restore for transaction ID: ' . $id);
@@ -1110,26 +1146,33 @@ class TransactionControllerV2 extends ResourceController
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
 
-        $trx = $this->transactionModel->find($id);
-        if (!$trx) {
-            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
-        }
-
-        // Fetch meta for recalculation
-        $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
-        $metaMap = [];
-        foreach ($metas as $m) {
-            $metaMap[$m['key']] = $m['value'];
-        }
-
         $this->db->transStart();
         try {
+            // Lock record
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            // GUARD: If cancelled?
+            if ($trx['status'] === 'CANCEL') {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Tidak bisa retur pada transaksi yang sudah dibatalkan", 400);
+            }
+
+            // Fetch meta for recalculation
+            $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+            $metaMap = [];
+            foreach ($metas as $m) {
+                $metaMap[$m['key']] = $m['value'];
+            }
+
             $cogsNormal = 0;
             $cogsCacat = 0;
             $oldActualTotal = (float) $trx['actual_total'];
             $grossRevenueReduction = 0;
             $itemDiscountReduction = 0;
-            $revenueReduction = 0; // Legacy if needed elsewhere
             $returnDetails = [];
             $returnSummary = [];
 
@@ -1161,6 +1204,7 @@ class TransactionControllerV2 extends ResourceController
 
                 // 1. Insert into Retur Table
                 $this->returModel->insert([
+                    'tenant_id' => $trx['tenant_id'],
                     'transaction_id' => $id,
                     'kode_barang' => $item->kode_barang,
                     'barang_cacat' => $isDamaged ? 1 : 0,
@@ -1380,15 +1424,23 @@ class TransactionControllerV2 extends ResourceController
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
 
-        $amount = $data->amount;
+        $amount = (float)($data->amount ?? 0);
         $reason = $data->reason ?? 'Refund';
-
-        $trx = $this->transactionModel->find($id);
-        if (!$trx)
-            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
 
         $this->db->transStart();
         try {
+            // Lock record
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            // GUARD: Check if status allows refund
+            if ($trx['status'] === 'REFUNDED') {
+                 $this->db->transRollback();
+                 return $this->jsonResponse->oneResp('Refund sudah selesai diproses sebelumnya', ['status' => 'REFUNDED'], 200);
+            }
             $this->paymentModel->insert([
                 'transaction_id' => $id,
                 'amount' => -$amount,
@@ -1454,20 +1506,35 @@ class TransactionControllerV2 extends ResourceController
     {
         $data = $this->request->getJSON();
 
-        $trx = $this->transactionModel->find($id);
-        if (!$trx)
-            return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
-
-        $status = $data->status ?? null;
-        $resi = $data->resi ?? null;
-        $courier = $data->courier ?? null;
-
-        if (!$status && !$resi && !$courier) {
-            return $this->jsonResponse->error("Parameter status, resi, atau kurir wajib diisi", 400);
-        }
-
         $this->db->transStart();
         try {
+            // Lock record
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            $status = $data->status ?? null;
+            $resi = $data->resi ?? null;
+            $courier = $data->courier ?? null;
+
+            if (!$status && !$resi && !$courier) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Parameter status, resi, atau kurir wajib diisi", 400);
+            }
+
+            // GUARD: If updating status, check if it's already the same or if transaction is cancelled
+            if ($status && (strtoupper($status) === strtoupper($trx['delivery_status'] ?? ''))) {
+                 // Already in this status, just complete and return success
+                 $this->db->transComplete();
+                 return $this->jsonResponse->oneResp("Status pengiriman sudah diperbarui sebelumnya", [], 200);
+            }
+            
+            if ($trx['status'] === 'CANCEL') {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Tidak bisa update pengiriman untuk transaksi yang sudah dibatalkan", 400);
+            }
             // Update Delivery Status locally in transaction table (if using that column)
             // or just in Meta. Documentation says Meta.
             // But we also added `delivery_status` column in migration calling it "Shipping Status"

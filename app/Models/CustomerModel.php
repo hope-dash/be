@@ -24,6 +24,7 @@ class CustomerModel extends TenantScopedModel
         'username',
         'email',
         'password',
+        'firebase_id',
         'email_verified_at',
         'email_verification_token',
         'otp_code',
