@@ -605,9 +605,9 @@ class ProductController extends ResourceController
                     $journalId = $this->journalModel->getInsertID();
 
                     // 2. Journal Items
-                    // 10x4 = Persediaan/Inventaris, 50x1 = HPP (as offset)
+                    // 10x4 = Persediaan/Inventaris, 10x1 = Akun Sementara (as offset)
                     $inventoryCode = '10' . $tokoId . '4';
-                    $offsetCode = '50' . $tokoId . '1';
+                    $offsetCode = '10' . $tokoId . '8';
 
                     $invAccount = $this->accountModel->getByBaseCode($inventoryCode, $tokoId);
                     $offsetAccount = $this->accountModel->getByBaseCode($offsetCode, $tokoId);
