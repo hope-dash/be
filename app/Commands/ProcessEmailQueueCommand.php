@@ -101,12 +101,15 @@ class ProcessEmailQueueCommand extends BaseCommand
                 ]);
                 CLI::write("Email sent successfully.", 'green');
             } else {
+                $emailService = \Config\Services::email();
+                $errorMessage = $emailService->printDebugger(['headers', 'subject', 'body']);
+                
                 $queueModel->update($email['id'], [
                     'status' => 'FAILED',
                     'attempts' => $email['attempts'] + 1,
-                    'error_message' => 'Internal email library error'
+                    'error_message' => substr($errorMessage, 0, 1000) // Truncate if too long
                 ]);
-                CLI::error("Failed to send email.");
+                CLI::error("Failed to send email ID: {$email['id']}");
             }
         }
     }

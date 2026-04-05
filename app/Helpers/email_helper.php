@@ -12,23 +12,9 @@ if (!function_exists('send_email')) {
     function send_email($to, $subject, $message)
     {
         $email = \Config\Services::email();
+        $emailConfig = config('Email');
 
-        $config = [
-            'protocol' => 'smtp',
-            'SMTPHost' => env('email.SMTPHost'),
-            'SMTPUser' => env('email.SMTPUser'),
-            'SMTPPass' => env('email.SMTPPass'),
-            'SMTPPort' => (int) env('email.SMTPPort'),
-            'SMTPCrypto' => env('email.SMTPCrypto'),
-            'mailType' => 'html',
-            'charset' => 'utf-8',
-            'newline' => "\r\n",
-            'wordWrap' => true,
-        ];
-
-        $email->initialize($config);
-
-        $senderEmail = env('email.SMTPUser');
+        $senderEmail = $emailConfig->SMTPUser;
         $senderName = \App\Libraries\TenantContext::name();
 
         $email->setFrom($senderEmail, $senderName);
@@ -56,23 +42,9 @@ if (!function_exists('send_system_email')) {
     function send_system_email($to, $subject, $message, $fromEmail = null, $fromName = null)
     {
         $email = \Config\Services::email();
+        $emailConfig = config('Email');
 
-        $config = [
-            'protocol' => 'smtp',
-            'SMTPHost' => env('email.SMTPHost'),
-            'SMTPUser' => env('email.SMTPUser'),
-            'SMTPPass' => env('email.SMTPPass'),
-            'SMTPPort' => (int) env('email.SMTPPort'),
-            'SMTPCrypto' => env('email.SMTPCrypto'),
-            'mailType' => 'html',
-            'charset' => 'utf-8',
-            'newline' => "\r\n",
-            'wordWrap' => true,
-        ];
-
-        $email->initialize($config);
-
-        $fromEmail = env('email.SMTPUser');
+        $fromEmail = $emailConfig->SMTPUser;
         $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
 
         $email->setFrom($fromEmail, $fromName);
@@ -103,24 +75,10 @@ if (!function_exists('send_email_with_attachments')) {
     function send_email_with_attachments($to, $subject, $message, array $attachments = [])
     {
         $email = \Config\Services::email();
-
-        $config = [
-            'protocol' => 'smtp',
-            'SMTPHost' => env('email.SMTPHost'),
-            'SMTPUser' => env('email.SMTPUser'),
-            'SMTPPass' => env('email.SMTPPass'),
-            'SMTPPort' => (int) env('email.SMTPPort'),
-            'SMTPCrypto' => env('email.SMTPCrypto'),
-            'mailType' => 'html',
-            'charset' => 'utf-8',
-            'newline' => "\r\n",
-            'wordWrap' => true,
-        ];
-
-        $email->initialize($config);
+        $emailConfig = config('Email');
 
         $senderName = \App\Libraries\TenantContext::name();
-        $email->setFrom(env('email.SMTPUser'), $senderName);
+        $email->setFrom($emailConfig->SMTPUser, $senderName);
         $email->setReplyTo(\App\Libraries\TenantContext::email(), $senderName);
         $email->setTo($to);
         $email->setSubject($subject);
@@ -149,23 +107,9 @@ if (!function_exists('send_system_email_with_attachments')) {
     function send_system_email_with_attachments($to, $subject, $message, array $attachments = [], $fromEmail = null, $fromName = null)
     {
         $email = \Config\Services::email();
+        $emailConfig = config('Email');
 
-        $config = [
-            'protocol' => 'smtp',
-            'SMTPHost' => env('email.SMTPHost'),
-            'SMTPUser' => env('email.SMTPUser'),
-            'SMTPPass' => env('email.SMTPPass'),
-            'SMTPPort' => (int) env('email.SMTPPort'),
-            'SMTPCrypto' => env('email.SMTPCrypto'),
-            'mailType' => 'html',
-            'charset' => 'utf-8',
-            'newline' => "\r\n",
-            'wordWrap' => true,
-        ];
-
-        $email->initialize($config);
-
-        $fromEmail = env('email.SMTPUser');
+        $fromEmail = $emailConfig->SMTPUser;
         $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
 
         $email->setFrom($fromEmail, $fromName);
