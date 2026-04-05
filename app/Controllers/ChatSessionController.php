@@ -37,7 +37,7 @@ class ChatSessionController extends BaseController
     public function start()
     {
         try {
-            $tokoId = (int)($this->request->getPost('toko_id') ?? 0);
+            $tokoId = (int) ($this->request->getPost('toko_id') ?? 0);
             if (!$tokoId) {
                 return $this->response->setStatusCode(400)->setJSON([
                     'success' => false,
@@ -80,8 +80,7 @@ class ChatSessionController extends BaseController
                     'qr' => $result['qr'] ?? null,
                 ],
             ]);
-        }
-        catch (\Throwable $e) {
+        } catch (\Throwable $e) {
             log_message('error', 'Failed to start chat session: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
@@ -138,8 +137,7 @@ class ChatSessionController extends BaseController
                     'webhookUrl' => $statusData['webhookUrl'] ?? site_url('api/chat/webhook/' . $tokoId),
                 ],
             ]);
-        }
-        catch (\Throwable $e) {
+        } catch (\Throwable $e) {
             log_message('error', 'Failed to get session status: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
@@ -179,8 +177,7 @@ class ChatSessionController extends BaseController
                     'status' => $qrData['status'] ?? $toko['chat_session_status'],
                 ],
             ]);
-        }
-        catch (\Throwable $e) {
+        } catch (\Throwable $e) {
             log_message('error', 'Failed to get QR code: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
@@ -214,7 +211,7 @@ class ChatSessionController extends BaseController
             // Find current store to get tokoId (for SSE and database)
             $toko = $this->sessionModel->where('chat_session_id', $sessionId)->first();
             if (!$toko) {
-                 return $this->response->setStatusCode(404)->setJSON(['success'=>false, 'message'=>'Session not found']);
+                return $this->response->setStatusCode(404)->setJSON(['success' => false, 'message' => 'Session not found']);
             }
             $tokoId = $toko['id'];
 
@@ -229,8 +226,8 @@ class ChatSessionController extends BaseController
             $chatModel = new \App\Models\WhatsAppChatModel();
             $chatModel->set(['unread_count' => 0])
                 ->groupStart()
-                    ->where('jid', $cleanPhone)
-                    ->orWhere('phone', $cleanPhone)
+                ->where('jid', $cleanPhone)
+                ->orWhere('phone', $cleanPhone)
                 ->groupEnd()
                 ->where('tenant_id', TenantContext::id())
                 ->update();
@@ -283,14 +280,14 @@ class ChatSessionController extends BaseController
             $json = $this->request->getJSON(true);
             $sessionId = $json['sessionId'] ?? $this->request->getPost('sessionId') ?? '';
             $to = $json['to'] ?? $this->request->getPost('to') ?? '';
-            
+
             $text = $json['text'] ?? $this->request->getPost('text') ?? null;
             $imageUrl = $json['imageUrl'] ?? $this->request->getPost('imageUrl') ?? null;
-            $imageBase64 = $json['imageBase64'] ?? $this->request->getPost('imageBase64') ?? null;
+            $imageBase64 = $json['documentUrl'] ?? $this->request->getPost('documentUrl') ?? null;
             $caption = $json['caption'] ?? $this->request->getPost('caption') ?? null;
-            
-            $delayMs = (int)($json['delayMs'] ?? $this->request->getPost('delayMs') ?? 0);
-            $typingDurationMs = (int)($json['typingDurationMs'] ?? $this->request->getPost('typingDurationMs') ?? 2000);
+
+            $delayMs = (int) ($json['delayMs'] ?? $this->request->getPost('delayMs') ?? 0);
+            $typingDurationMs = (int) ($json['typingDurationMs'] ?? $this->request->getPost('typingDurationMs') ?? 2000);
 
             if (!$sessionId) {
                 return $this->response->setStatusCode(400)->setJSON(['success' => false, 'message' => 'sessionId is required']);
@@ -306,14 +303,11 @@ class ChatSessionController extends BaseController
             // Send message based on type
             if ($imageUrl) {
                 $result = $this->chatService->sendImageMessage($sessionId, $toHost, $imageUrl, $caption, $delayMs);
-            }
-            elseif ($imageBase64) {
+            } elseif ($imageBase64) {
                 $result = $this->chatService->sendImageBase64Message($sessionId, $toHost, $imageBase64, $caption, $delayMs);
-            }
-            elseif ($text) {
+            } elseif ($text) {
                 $result = $this->chatService->sendTextMessage($sessionId, $toHost, $text, $delayMs, $typingDurationMs);
-            }
-            else {
+            } else {
                 return $this->response->setStatusCode(400)->setJSON([
                     'success' => false,
                     'message' => 'text, imageUrl, or imageBase64 is required',
@@ -334,8 +328,7 @@ class ChatSessionController extends BaseController
                     'status' => 'sent',
                 ],
             ]);
-        }
-        catch (\Throwable $e) {
+        } catch (\Throwable $e) {
             log_message('error', 'Failed to send message: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([
@@ -360,8 +353,7 @@ class ChatSessionController extends BaseController
         ?string $text = null,
         ?string $imageUrl = null,
         ?string $caption = null
-        ): void
-    {
+    ): void {
         try {
             $messageModel = new \App\Models\WhatsAppMessageModel();
 
@@ -385,8 +377,7 @@ class ChatSessionController extends BaseController
                     'unread_count' => 0,
                 ], true);
                 $chat = $chatModel->find($chatId);
-            }
-            else {
+            } else {
                 $chatModel->update($chat['id'], [
                     'last_message_at' => date('Y-m-d H:i:s'),
                     'last_message_snippet' => $text ? mb_substr($text, 0, 120) : '[image]',
@@ -405,8 +396,7 @@ class ChatSessionController extends BaseController
                 'media_mime' => $imageUrl ? 'image/jpeg' : null,
                 'received_at' => date('Y-m-d H:i:s'),
             ]);
-        }
-        catch (\Throwable $e) {
+        } catch (\Throwable $e) {
             log_message('error', 'Failed to store outgoing message: {msg}', ['msg' => $e->getMessage()]);
         }
     }
@@ -442,8 +432,7 @@ class ChatSessionController extends BaseController
                 'success' => true,
                 'message' => 'Session disconnected successfully',
             ]);
-        }
-        catch (\Throwable $e) {
+        } catch (\Throwable $e) {
             log_message('error', 'Failed to disconnect session: {msg}', ['msg' => $e->getMessage()]);
 
             return $this->response->setStatusCode(500)->setJSON([

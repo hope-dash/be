@@ -161,7 +161,7 @@ class WhatsAppChatController extends BaseController
         }
 
         $this->db->transStart();
-        $this->chatLabelModel->where('tenant_id', $tenantId)->where('label_id', $id)->delete();
+        $this->db->table('whatsapp_chat_labels')->where('tenant_id', $tenantId)->where('label_id', $id)->delete();
         $this->labelModel->delete($id);
         $this->db->transComplete();
 
@@ -181,25 +181,38 @@ class WhatsAppChatController extends BaseController
             return $this->response->setStatusCode(400)->setJSON(['message' => 'label_id is required']);
         }
 
-        // Verify if chat and label exist for this tenant
-        $chat = $this->chatModel->where('tenant_id', $tenantId)->find($chatId);
-        $label = $this->labelModel->where('tenant_id', $tenantId)->find($labelId);
-        
-        if (!$chat || !$label) {
-            return $this->response->setStatusCode(404)->setJSON(['message' => 'Chat or label not found']);
+        // Verify if chat exists for this tenant
+        $chat = $this->chatModel->where(['id' => $chatId, 'tenant_id' => $tenantId])->first();
+        if (!$chat) {
+            return $this->response->setStatusCode(404)->setJSON([
+                'message' => 'Chat not found for this tenant',
+                'chat_id' => $chatId,
+                'tenant_id' => $tenantId
+            ]);
         }
 
+        // Verify if label exists for this tenant
+        $label = $this->labelModel->where(['id' => $labelId, 'tenant_id' => $tenantId])->first();
+        if (!$label) {
+            return $this->response->setStatusCode(404)->setJSON([
+                'message' => 'Label not found for this tenant',
+                'label_id' => $labelId,
+                'tenant_id' => $tenantId
+            ]);
+        }
+
+        // Check if already attached
         $existing = $this->chatLabelModel
             ->where('tenant_id', $tenantId)
-            ->where('chat_id', $chatId)
-            ->where('label_id', $labelId)
+            ->where('chat_id', (int)$chatId)
+            ->where('label_id', (int)$labelId)
             ->first();
 
         if (!$existing) {
-            $this->chatLabelModel->insert([
+            $this->db->table('whatsapp_chat_labels')->insert([
                 'tenant_id' => $tenantId,
-                'chat_id' => $chatId,
-                'label_id' => $labelId,
+                'chat_id' => (int)$chatId,
+                'label_id' => (int)$labelId,
             ]);
         }
 
@@ -220,7 +233,7 @@ class WhatsAppChatController extends BaseController
         // Verify if relationship exists
         $existing = $this->chatLabelModel
             ->where('tenant_id', $tenantId)
-            ->where('chat_id', $chatId)
+            ->where('chat_id', (int)$chatId)
             ->where('label_id', (int)$labelId)
             ->first();
 
@@ -228,9 +241,9 @@ class WhatsAppChatController extends BaseController
             return $this->response->setStatusCode(404)->setJSON(['message' => 'Label not attached to this chat']);
         }
 
-        $this->chatLabelModel
+        $this->db->table('whatsapp_chat_labels')
             ->where('tenant_id', $tenantId)
-            ->where('chat_id', $chatId)
+            ->where('chat_id', (int)$chatId)
             ->where('label_id', (int)$labelId)
             ->delete();
 
