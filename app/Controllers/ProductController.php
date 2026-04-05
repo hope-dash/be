@@ -1395,6 +1395,7 @@ class ProductController extends ResourceController
                 'stock.barang_cacat',
                 'toko.toko_name',
                 'product.harga_jual',
+                '(SELECT url FROM image WHERE image.kode = product.id AND image.type = "product" LIMIT 1) as image',
                 '(SELECT COALESCE(SUM(sp.jumlah), 0) 
                   FROM sales_product sp 
                   JOIN transaction t ON t.id = sp.id_transaction 
@@ -1473,6 +1474,7 @@ class ProductController extends ResourceController
                     'barang_cacat' => $p['barang_cacat'],
                     'toko_name' => $p['toko_name'],
                     'harga_jual' => $p['harga_jual'],
+                    'image' => $p['image'],
                 ];
             }
 
@@ -1692,6 +1694,7 @@ class ProductController extends ResourceController
                     'harga_jual' => $hargaJual,
                     'berat' => $p['berat'] ?? null,
                     'stock' => $stockByProduct[$p['id_barang']] ?? [],
+                    'image' => (isset($imageMap[$p['id']]) && count($imageMap[$p['id']]) > 0) ? $imageMap[$p['id']][0] : null,
                     'images' => $imageMap[$p['id']] ?? [],
                 ];
             }
@@ -1907,7 +1910,8 @@ class ProductController extends ResourceController
                     'description' => $p['description'] ?? null,
                     'harga_jual' => (int) round($hargaJualFinal), // Harga setelah discount
                     'stock' => $stockByProduct[$p['id_barang']] ?? [],
-                    'images' => $imageMap[$p['id']] ?? [],
+                    'image' => (isset($imageMap[$p['id']]) && count($imageMap[$p['id']]) > 0) ? $imageMap[$p['id']][0] : null,
+                    'images' => $imageMap[$p['id']] ?? []
                 ];
             }
 

@@ -14,15 +14,21 @@ class CustomerJwtMiddleware implements FilterInterface
     public function before(RequestInterface $request, $arguments = null)
     {
         $header = $request->getHeaderLine('Authorization');
+        $token = null;
 
-        if (!$header || !preg_match('/Bearer\s(\S+)/', $header, $matches)) {
+        if ($header && preg_match('/Bearer\s(\S+)/', $header, $matches)) {
+            $token = $matches[1];
+        } else {
+            // Check for token in query parameter (useful for SSE/EventSource)
+            $token = $request->getGet('token') ?? $request->getGet('access_token');
+        }
+
+        if (!$token) {
             return service('response')->setJSON([
                 'status' => 401,
                 'message' => 'Unauthorized: Token not provided'
             ])->setStatusCode(401);
         }
-
-        $token = $matches[1];
 
         try {
             $jwt = new Jwtoken();

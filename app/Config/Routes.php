@@ -13,6 +13,7 @@ $routes->options('api/(:any)', function () {
 
 // --- 2. PUBLIC ROUTES (No Token, No X-Tenant Required) ---
 $routes->post('api/login', 'UserController::login');
+$routes->post('api/v2/upload/image', 'UploadController::uploadImage');
 
 // Tenant & Subscription Public
 $routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
@@ -26,6 +27,9 @@ $routes->get('tiktok_verif/(:num)', 'TiktokController::callback/$1');
 // Cron Jobs
 $routes->get('api/cron/process-email', 'CronController::processEmailQueue');
 $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
+
+// Webhooks
+// (Routes removed for rebuild)
 
 // Wilayah Indonesia API
 $routes->group('api/wilayah', function ($routes) {
@@ -81,9 +85,32 @@ $routes->group('api', ['filter' => 'tenant'], function ($routes) {
 
 // --- 4. ADMIN PROTECTED ROUTES (X-Tenant + jwtAuth Required) ---
 $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
-    
+    // Chat Session Management
+    $routes->group('chat', function ($routes) {
+        $routes->post('session/start', 'ChatSessionController::start');
+        $routes->post('session/read', 'ChatSessionController::readChat');
+        $routes->get('session/status/(:num)', 'ChatSessionController::status/$1');
+        $routes->get('session/qr/(:num)', 'ChatSessionController::getQr/$1');
+        $routes->post('session/disconnect/(:num)', 'ChatSessionController::disconnect/$1');
+        $routes->post('send', 'ChatSessionController::send');
+        $routes->get('events/(:num)', 'ChatSSEController::subscribe/$1');
+        $routes->get('poll/(:num)', 'ChatSSEController::poll/$1');
+        $routes->get('events/(:num)/chat/(:num)', 'ChatSSEController::subscribeChat/$1/$2');
+    });
+
+    // Existing chat routes (no auth)
+    $routes->group('wa', function ($routes) {
+        $routes->get('chats', 'WhatsAppChatController::index');
+        $routes->get('chats/(:num)', 'WhatsAppChatController::show/$1');
+        $routes->get('labels', 'WhatsAppChatController::listLabels');
+        $routes->post('labels', 'WhatsAppChatController::createLabel');
+        $routes->put('labels/(:num)', 'WhatsAppChatController::updateLabel/$1');
+        $routes->delete('labels/(:num)', 'WhatsAppChatController::deleteLabel/$1');
+        $routes->post('chats/(:num)/labels', 'WhatsAppChatController::attachLabel/$1');
+        $routes->delete('chats/(:num)/labels/(:num)', 'WhatsAppChatController::detachLabel/$1/$2');
+    });
+
     // Uploads
-    $routes->post('v2/upload/image', 'UploadController::uploadImage');
     $routes->post('upload/image', 'UploadController::uploadImage');
 
     // User Management
