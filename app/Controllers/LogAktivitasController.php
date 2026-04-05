@@ -36,6 +36,7 @@ class LogAktivitasController extends ResourceController
         $user_id = $this->request->getGet('user_id');
         $startDate = $this->request->getGet('start_date');
         $endDate = $this->request->getGet('end_date');
+        $search = $this->request->getGet('search');
 
         if ($targetTable) {
             $targetTables = array_filter(array_map('trim', explode(',', $targetTable)));
@@ -60,6 +61,12 @@ class LogAktivitasController extends ResourceController
         }
         if ($endDate) {
             $builder->where('DATE(log_aktivitas.created_at) <=', $endDate);
+        }
+        if ($search) {
+            $builder->like('log_aktivitas.target_table', $search);
+            $builder->orLike('log_aktivitas.target_id', $search);
+            $builder->orLike('log_aktivitas.description', $search);
+            $builder->orLike('users.name', $search);
         }
 
         // Pagination
