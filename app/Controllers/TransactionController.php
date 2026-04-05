@@ -585,7 +585,8 @@ class TransactionController extends BaseController
             if ($delivery_status)
                 $builder->like('t.delivery_status', $delivery_status, 'both');
             if ($source) {
-                $builder->where("EXISTS (SELECT 1 FROM transaction_meta tm_source_f WHERE tm_source_f.transaction_id = t.id AND tm_source_f.key = 'source' AND tm_source_f.value LIKE '%{$db->escapeLikeString($source)}%')");
+                $sourceEscaped = $db->escape('%' . $source . '%');
+                $builder->where("EXISTS (SELECT 1 FROM transaction_meta tm_source_f WHERE tm_source_f.transaction_id = t.id AND tm_source_f.key = 'source' AND tm_source_f.value LIKE $sourceEscaped)");
             }
             if (!empty($role) && !$id_toko)
                 $builder->whereIn('t.id_toko', $role);
@@ -621,13 +622,12 @@ class TransactionController extends BaseController
                     AND (c.nama_customer LIKE '%{$db->escapeLikeString($search)}%' OR c.no_hp_customer LIKE '%{$db->escapeLikeString($search)}%')
                 )");
 
-                // 3. Search by Guest Name (Directly in Meta)
-                // exists (select 1 from transaction_meta tm where tm.transaction_id = t.id and tm.key = 'customer_name' and tm.value like ...)
+                // 4. Search by Source (Meta)
                 $builder->orWhere("EXISTS (
-                    SELECT 1 FROM transaction_meta tm 
-                    WHERE tm.transaction_id = t.id 
-                    AND tm.key = 'customer_name' 
-                    AND tm.value LIKE '%{$db->escapeLikeString($search)}%'
+                    SELECT 1 FROM transaction_meta tm_source 
+                    WHERE tm_source.transaction_id = t.id 
+                    AND tm_source.key = 'source' 
+                    AND tm_source.value LIKE '%{$db->escapeLikeString($search)}%'
                 )");
 
                 $builder->groupEnd();
@@ -782,6 +782,7 @@ class TransactionController extends BaseController
                     ->like('c.nama_customer', $search)
                     ->orLike('c.no_hp_customer', $search)
                     ->orLike('tm_name.value', $search)
+                    ->orLike('tm_source.value', $search)
                     ->orLike('t.invoice', $search)
                     ->groupEnd();
             }
