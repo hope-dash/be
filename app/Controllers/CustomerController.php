@@ -245,7 +245,10 @@ class CustomerController extends BaseController
                 ->where('customer.deleted_at', null);
 
             if (!empty($namaUser)) {
-                $builder->like('customer.nama_customer', $namaUser, 'both');
+                $builder->groupStart()
+                    ->like('customer.nama_customer', $namaUser, 'both')
+                    ->orLike('customer.no_hp_customer', $namaUser, 'both')
+                    ->groupEnd();
             }
 
             // Count total data before applying limit
