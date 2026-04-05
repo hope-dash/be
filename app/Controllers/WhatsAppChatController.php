@@ -16,6 +16,7 @@ class WhatsAppChatController extends BaseController
     private WhatsAppLabelModel $labelModel;
     private WhatsAppChatLabelModel $chatLabelModel;
     private CustomerModel $customerModel;
+    private $db;
 
     public function __construct()
     {
@@ -24,6 +25,7 @@ class WhatsAppChatController extends BaseController
         $this->labelModel = new WhatsAppLabelModel();
         $this->chatLabelModel = new WhatsAppChatLabelModel();
         $this->customerModel = new CustomerModel();
+        $this->db = \Config\Database::connect();
     }
 
     public function index()
@@ -116,6 +118,59 @@ class WhatsAppChatController extends BaseController
         ]);
     }
 
+    public function updateLabel($id = null)
+    {
+        $tenantId = $this->tenantId();
+        if (!$id) return $this->response->setStatusCode(400)->setJSON(['message' => 'ID is required']);
+
+        $json = $this->request->getJSON(true);
+        $name = trim($json['name'] ?? $this->request->getPost('name') ?? '');
+        $color = $json['color'] ?? $this->request->getPost('color') ?? '';
+
+        $label = $this->labelModel->where('tenant_id', $tenantId)->find($id);
+        if (!$label) {
+            return $this->response->setStatusCode(404)->setJSON(['message' => 'Label not found']);
+        }
+
+        $updateData = [];
+        if ($name !== '') $updateData['name'] = $name;
+        if ($color !== '') $updateData['color'] = $color;
+
+        if (empty($updateData)) {
+            return $this->response->setStatusCode(400)->setJSON(['message' => 'Nothing to update']);
+        }
+
+        $this->labelModel->update($id, $updateData);
+
+        return $this->response->setJSON([
+            'success' => true,
+            'message' => 'Label updated successfully',
+            'id' => $id,
+            'update_data' => $updateData
+        ]);
+    }
+
+    public function deleteLabel($id = null)
+    {
+        $tenantId = $this->tenantId();
+        if (!$id) return $this->response->setStatusCode(400)->setJSON(['message' => 'ID is required']);
+
+        $label = $this->labelModel->where('tenant_id', $tenantId)->find($id);
+        if (!$label) {
+            return $this->response->setStatusCode(404)->setJSON(['message' => 'Label not found']);
+        }
+
+        $this->db->transStart();
+        $this->chatLabelModel->where('tenant_id', $tenantId)->where('label_id', $id)->delete();
+        $this->labelModel->delete($id);
+        $this->db->transComplete();
+
+        return $this->response->setJSON([
+            'success' => true,
+            'message' => 'Label deleted successfully'
+        ]);
+    }
+
     public function attachLabel($chatId)
     {
         $tenantId = $this->tenantId();
@@ -151,6 +206,37 @@ class WhatsAppChatController extends BaseController
         return $this->response->setJSON([
             'success' => true,
             'message' => 'Label attached successfully'
+        ]);
+    }
+
+    public function detachLabel($chatId, $labelId)
+    {
+        $tenantId = $this->tenantId();
+        
+        if (!$labelId) {
+            return $this->response->setStatusCode(400)->setJSON(['message' => 'label_id is required']);
+        }
+
+        // Verify if relationship exists
+        $existing = $this->chatLabelModel
+            ->where('tenant_id', $tenantId)
+            ->where('chat_id', $chatId)
+            ->where('label_id', (int)$labelId)
+            ->first();
+
+        if (!$existing) {
+            return $this->response->setStatusCode(404)->setJSON(['message' => 'Label not attached to this chat']);
+        }
+
+        $this->chatLabelModel
+            ->where('tenant_id', $tenantId)
+            ->where('chat_id', $chatId)
+            ->where('label_id', (int)$labelId)
+            ->delete();
+
+        return $this->response->setJSON([
+            'success' => true,
+            'message' => 'Label detached successfully'
         ]);
     }
 
