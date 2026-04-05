@@ -393,6 +393,8 @@ class CustomerTransactionControllerV2 extends ResourceController
                     'pengiriman' => $pengirimanCourier,
                     'biaya_pengiriman' => $shippingCost,
                     'free_ongkir' => ($shippingCost == 0 && !empty($pengirimanCourier)) ? '1' : '0',
+                    'discount_type' => $txnDiscountType,
+                    'discount_amount' => $txnDiscountAmount,
                     'tx_discount_value' => $txnDiscountValue,
                     'item_discount_total' => $totalItemDiscount,
                     'source' => 'CUSTOMER_PORTAL'

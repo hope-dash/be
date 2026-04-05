@@ -246,6 +246,8 @@ class TransactionControllerV2 extends ResourceController
                 'free_ongkir' => $isFreeOngkir ? '1' : '0',
                 'ppn' => $ppnPercent,
                 'ppn_value' => $ppnValue,
+                'discount_type' => $txDiscountType,
+                'discount_amount' => $txDiscountAmount,
                 'item_discount_total' => $totalItemDiscount,
                 'tx_discount_value' => $txDiscountValue
             ];
