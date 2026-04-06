@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Invoice #
-        <?= $transaction['invoice_number'] ?? $transaction['id']?>
+        <?= $transaction['invoice_number'] ?? $transaction['id'] ?>
     </title>
     <style>
         * {
@@ -74,9 +74,9 @@
         }
 
         .invoice-title h2 {
-            font-size: 36px;
+            font-size: 30px;
             color: #2c3e50;
-            margin-bottom: 10px;
+            margin-bottom: 2px;
         }
 
         .invoice-meta {
@@ -279,23 +279,59 @@
         }
 
         .notes {
-            background: #fffbea;
-            padding: 15px;
-            border-left: 4px solid #f39c12;
-            margin-bottom: 20px;
-            border-radius: 3px;
+            background: #fdf2f2;
+            padding: 20px;
+            border: 2px solid #e03131;
+            margin-bottom: 25px;
+            border-radius: 8px;
         }
 
         .notes h4 {
-            font-size: 13px;
-            color: #2c3e50;
-            margin-bottom: 8px;
+            font-size: 16px;
+            color: #c92a2a;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 800;
         }
 
         .notes p {
-            font-size: 11px;
-            color: #555;
-            margin: 3px 0;
+            font-size: 13px;
+            color: #333;
+            margin: 5px 0;
+            line-height: 1.5;
+            font-weight: 500;
+        }
+
+        .shipping-highlight {
+            background: #f0f4ff !important;
+            border: 2px solid #c1cbffff !important;
+        }
+
+        .shipping-highlight h3 {
+            color: #364fc7 !important;
+            border-bottom: 2px solid #c1cbffff !important;
+        }
+
+        .bank-summary {
+            margin-top: 15px;
+            padding: 15px;
+            background: #fff;
+            border: 1px dashed #2c3e50;
+            border-radius: 5px;
+        }
+
+        .bank-summary h4 {
+            font-size: 12px;
+            color: #2c3e50;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .qty-text {
+            font-size: 15px;
+            font-weight: 800;
+            color: #000;
         }
 
         @media print {
@@ -322,38 +358,66 @@
         <div class="header">
             <div class="logo-section">
                 <?php if (!empty($transaction['toko_logo'])): ?>
-                <img src="<?= base_url('uploads/toko/' . $transaction['toko_logo'])?>" alt="Logo" class="logo">
-                <?php
-endif; ?>
+                    <img src="<?= base_url('uploads/toko/' . $transaction['toko_logo']) ?>" alt="Logo" class="logo">
+                    <?php
+                endif; ?>
                 <div class="company-info">
                     <h1>
-                        <?= esc($transaction['toko_name'] ?? 'Nama Toko')?>
+                        <?= esc($transaction['toko_name'] ?? 'Nama Toko') ?>
                     </h1>
                     <p>
-                        <?= esc($transaction['toko_alamat'] ?? '')?>
+                        <?= esc($transaction['toko_alamat'] ?? '') ?>
                     </p>
                     <p>Telp:
-                        <?= esc($transaction['toko_phone'] ?? '')?>
+                        <?= esc($transaction['toko_phone'] ?? '') ?>
                     </p>
                     <?php if (!empty($transaction['email_toko'])): ?>
-                    <p>Email:
-                        <?= esc($transaction['email_toko'])?>
-                    </p>
-                    <?php
-endif; ?>
+                        <p>Email:
+                            <?= esc($transaction['email_toko']) ?>
+                        </p>
+                        <?php
+                    endif; ?>
                 </div>
             </div>
             <div class="invoice-title">
                 <h2>INVOICE</h2>
                 <div class="invoice-meta">
                     <p><strong>No. Invoice:</strong>
-                        <?= esc($transaction['invoice_number'] ?? 'INV-' . str_pad($transaction['id'], 6, '0', STR_PAD_LEFT))?>
+                        <?= esc($transaction['invoice_number'] ?? 'INV-' . str_pad($transaction['id'], 6, '0', STR_PAD_LEFT)) ?>
                     </p>
                     <p><strong>Tanggal:</strong>
-                        <?= date('d F Y', strtotime($transaction['created_at']))?>
+                        <?= date('d F Y', strtotime($transaction['created_at'])) ?>
                     </p>
-                    <p><strong>Jatuh Tempo:</strong>
-                        <?=!empty($transaction['due_date']) ? date('d F Y', strtotime($transaction['due_date'])) : '-'?>
+
+                    <?= !empty($transaction['due_date']) ? '<p><strong>Jatuh Tempo:</strong>' . date('d F Y', strtotime($transaction['due_date'])) . '</p>' : '' ?>
+
+                    <p style="margin-top: 10px;">
+                        <?php
+                        $status = strtolower($transaction['status'] ?? 'unpaid');
+                        $statusClass = 'status-unpaid';
+                        $statusText = 'Belum Dibayar';
+
+                        if ($status === 'paid' || $status === 'fully_paid') {
+                            $statusClass = 'status-paid';
+                            $statusText = 'Lunas';
+                        } elseif ($status === 'partially_paid') {
+                            $statusClass = 'status-partial';
+                            $statusText = 'Dibayar Sebagian';
+                        } elseif ($status === 'cancel' || $status === 'canceled' || $status === 'cancelled') {
+                            $statusClass = 'status-canceled';
+                            $statusText = 'Dibatalkan';
+                        } elseif ($status === 'need_refund') {
+                            $statusClass = 'status-refund';
+                            $statusText = 'Butuh Refund';
+                        } elseif ($status === 'refunded') {
+                            $statusClass = 'status-refund';
+                            $statusText = 'Refund Selesai';
+                        }
+                        ?>
+                        <span class="status-badge <?= $statusClass ?>"
+                            style="padding: 8px 20px; font-size: 14px; border: 1px solid #ddd;">
+                            <?= $statusText ?>
+                        </span>
                     </p>
                 </div>
             </div>
@@ -364,91 +428,41 @@ endif; ?>
             <div class="info-box">
                 <h3>Kepada</h3>
                 <p><strong>
-                        <?= esc($transaction['meta']['customer_name'])?>
+                        <?= esc($transaction['meta']['customer_name']) ?>
                     </strong></p>
                 <p>
-                    <?= esc($transaction['meta']['alamat'] ?? '')?>
+                    <?= esc($transaction['meta']['alamat'] ?? '') ?>
                 </p>
                 <p>
-                    <?= esc($transaction['meta']['provinsi'] ?? '')?>,
-                    <?= esc($transaction['meta']['kota_kabupaten'] ?? '')?>
+                    <?= esc($transaction['meta']['provinsi'] ?? '') ?>,
+                    <?= esc($transaction['meta']['kota_kabupaten'] ?? '') ?>
                 </p>
                 <p>
-                    <?= esc($transaction['meta']['kode_pos'] ?? '')?>
+                    <?= esc($transaction['meta']['kode_pos'] ?? '') ?>
                 </p>
                 <p>Telp:
-                    <?= esc($transaction['meta']['customer_phone'] ?? '')?>
+                    <?= esc($transaction['meta']['customer_phone'] ?? '') ?>
                 </p>
             </div>
 
-            <div class="info-box">
+            <div class="info-box shipping-highlight">
                 <h3>Informasi Pengiriman</h3>
-                <p style="margin-top: 5px;"><strong>Ekspedisi:</strong> 
-                    <?= esc($transaction['meta']['courier'] ?? $transaction['meta']['pengiriman'] ?? '-') ?>
+                <p style="margin-top: 5px;"><strong>Ekspedisi:</strong>
+                    <span
+                        style="font-size: 14px; font-weight: bold; color: #364fc7;"><?= esc($transaction['meta']['courier'] ?? $transaction['meta']['pengiriman'] ?? '-') ?></span>
                 </p>
-                <p><strong>No. Resi:</strong> 
-                    <?= esc($transaction['meta']['resi'] ?? '-') ?>
+                <p><strong>No. Resi:</strong>
+                    <span
+                        style="font-size: 14px; font-weight: bold;"><?= esc($transaction['meta']['resi'] ?? '-') ?></span>
                 </p>
                 <?php
                 $delStatus = str_replace('_', ' ', strtoupper($transaction['delivery_status'] ?? $transaction['meta']['shipping_status'] ?? 'BELUM DIKIRIM'));
                 ?>
-                <p><strong>Status:</strong> <?= esc($delStatus) ?></p>
+                <p><strong>Status:</strong> <span class="status-badge"
+                        style="background: #364fc7; color: white;"><?= esc($delStatus) ?></span></p>
             </div>
 
-            <div class="info-box">
-                <h3>Informasi Pembayaran</h3>
-                <div class="bank-info">
-                    <?php if (!empty($transaction['bank'])): ?>
-                    <p><strong>Bank:</strong>
-                        <?= esc($transaction['bank'])?>
-                    </p>
-                    <?php
-endif; ?>
-                    <?php if (!empty($transaction['nomer_rekening'])): ?>
-                    <p><strong>No. Rekening:</strong>
-                        <?= esc($transaction['nomer_rekening'])?>
-                    </p>
-                    <?php
-endif; ?>
-                    <?php if (!empty($transaction['nama_pemilik'])): ?>
-                    <p><strong>Atas Nama:</strong>
-                        <?= esc($transaction['nama_pemilik'])?>
-                    </p>
-                    <?php
-endif; ?>
-                </div>
-                <p style="margin-top: 10px;"><strong>Status:</strong>
-                    <?php
-$status = strtolower($transaction['status'] ?? 'unpaid');
-$statusClass = 'status-unpaid';
-$statusText = 'Belum Dibayar';
 
-if ($status === 'paid' || $status === 'fully_paid') {
-    $statusClass = 'status-paid';
-    $statusText = 'Lunas';
-}
-elseif ($status === 'partially_paid') {
-    $statusClass = 'status-partial';
-    $statusText = 'Dibayar Sebagian';
-}
-elseif ($status === 'cancel' || $status === 'canceled' || $status === 'cancelled') {
-    $statusClass = 'status-canceled';
-    $statusText = 'Dibatalkan';
-}
-elseif ($status === 'need_refund') {
-    $statusClass = 'status-refund';
-    $statusText = 'Butuh Refund';
-}
-elseif ($status === 'refunded') {
-    $statusClass = 'status-refund';
-    $statusText = 'Refund Selesai';
-}
-?>
-                    <span class="status-badge <?= $statusClass?>">
-                        <?= $statusText?>
-                    </span>
-                </p>
-            </div>
         </div>
 
         <!-- Items Table -->
@@ -465,42 +479,42 @@ elseif ($status === 'refunded') {
             </thead>
             <tbody>
                 <?php
-$no = 1;
-$subtotal = 0;
-foreach ($transaction['items'] as $item):
-    $itemTotal = $item['actual_total'] ?? (($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0));
-    $subtotal += $itemTotal;
-?>
-                <tr>
-                    <td class="text-center">
-                        <?= $no++?>
-                    </td>
-                    <td>
-                        <strong>
-                            <?= esc($item['nama_lengkap_barang'])?>
-                        </strong>
-                        <?php if (!empty($item['keterangan'])): ?>
-                        <br><small style="color: #777;">
-                            <?= esc($item['keterangan'])?>
-                        </small>
-                        <?php
-    endif; ?>
-                    </td>
-                    <td class="text-center">
-                        <?= number_format($item['jumlah'], 0, ',', '.')?>
-                    </td>
-                    <td class="text-right">Rp
-                        <?= number_format($item['harga_jual'], 0, ',', '.')?>
-                    </td>
-                    <td class="text-center">
-                        <?=!empty($item['diskon']) ? 'Rp ' . number_format($item['diskon'], 0, ',', '.') : '-'?>
-                    </td>
-                    <td class="text-right"><strong>Rp
-                            <?= number_format($itemTotal, 0, ',', '.')?>
-                        </strong></td>
-                </tr>
-                <?php
-endforeach; ?>
+                $no = 1;
+                $subtotal = 0;
+                foreach ($transaction['items'] as $item):
+                    $itemTotal = $item['actual_total'] ?? (($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0));
+                    $subtotal += $itemTotal;
+                    ?>
+                    <tr>
+                        <td class="text-center">
+                            <?= $no++ ?>
+                        </td>
+                        <td>
+                            <strong>
+                                <?= esc($item['nama_lengkap_barang']) ?>
+                            </strong>
+                            <?php if (!empty($item['keterangan'])): ?>
+                                <br><small style="color: #777;">
+                                    <?= esc($item['keterangan']) ?>
+                                </small>
+                                <?php
+                            endif; ?>
+                        </td>
+                        <td class="text-center qty-text">
+                            <?= number_format($item['jumlah'], 0, ',', '.') ?>
+                        </td>
+                        <td class="text-right">Rp
+                            <?= number_format($item['harga_jual'], 0, ',', '.') ?>
+                        </td>
+                        <td class="text-center">
+                            <?= !empty($item['diskon']) ? 'Rp ' . number_format($item['diskon'], 0, ',', '.') : '-' ?>
+                        </td>
+                        <td class="text-right"><strong>Rp
+                                <?= number_format($itemTotal, 0, ',', '.') ?>
+                            </strong></td>
+                    </tr>
+                    <?php
+                endforeach; ?>
             </tbody>
         </table>
 
@@ -510,126 +524,152 @@ endforeach; ?>
                 <div class="summary-row">
                     <span>Subtotal:</span>
                     <span>Rp
-                        <?= number_format($subtotal, 0, ',', '.')?>
+                        <?= number_format($subtotal, 0, ',', '.') ?>
                     </span>
                 </div>
                 <?php if (!empty($transaction['discount_type'])): ?>
-                <div class="summary-row">
-                    <span>Diskon Tambahan:</span>
-                    <span>
-                        <?= $transaction['discount_type'] == 'PERCENTAGE' ? $transaction['discount_amount'] . '%' : ''?>
-                    </span>
-                    <span>- Rp
-                        <?= number_format($transaction['meta']['tx_discount_value'], 0, ',', '.')?>
-                    </span>
-                </div>
-                <?php
-endif; ?>
+                    <div class="summary-row">
+                        <span>Diskon Tambahan:</span>
+                        <span>
+                            <?= $transaction['discount_type'] == 'PERCENTAGE' ? $transaction['discount_amount'] . '%' : '' ?>
+                        </span>
+                        <span>- Rp
+                            <?= number_format($transaction['meta']['tx_discount_value'], 0, ',', '.') ?>
+                        </span>
+                    </div>
+                    <?php
+                endif; ?>
                 <?php if (!empty($transaction['meta']['ppn']) && !empty($transaction['meta']['ppn_value'])): ?>
-                <div class="summary-row">
-                    <span>Pajak (PPN
-                        <?= esc($transaction['meta']['ppn'])?>%):
-                    </span>
-                    <span>Rp
-                        <?= number_format($transaction['meta']['ppn_value'], 0, ',', '.')?>
-                    </span>
-                </div>
-                <?php
-elseif (!empty($transaction['ppn'])): ?>
-                <div class="summary-row">
-                    <span>Pajak:</span>
-                    <span>Rp
-                        <?= number_format($transaction['ppn'], 0, ',', '.')?>
-                    </span>
-                </div>
-                <?php
-endif; ?>
+                    <div class="summary-row">
+                        <span>Pajak (PPN
+                            <?= esc($transaction['meta']['ppn']) ?>%):
+                        </span>
+                        <span>Rp
+                            <?= number_format($transaction['meta']['ppn_value'], 0, ',', '.') ?>
+                        </span>
+                    </div>
+                    <?php
+                elseif (!empty($transaction['ppn'])): ?>
+                    <div class="summary-row">
+                        <span>Pajak:</span>
+                        <span>Rp
+                            <?= number_format($transaction['ppn'], 0, ',', '.') ?>
+                        </span>
+                    </div>
+                    <?php
+                endif; ?>
                 <?php if (!empty($transaction['meta']['biaya_pengiriman'])): ?>
-                <div class="summary-row">
-                    <span>Ongkos Kirim:</span>
-                    <span>
-                        <?php if ($transaction['meta']['free_ongkir'] == 1): ?>
-                        <del style="color: #999;">Rp
-                            <?= number_format($transaction['meta']['biaya_pengiriman'], 0, ',', '.')?>
-                        </del>
-                        <span style="color: #27ae60; font-weight: bold; margin-left: 8px;">GRATIS</span>
-                        <?php
-    else: ?>
-                        Rp
-                        <?= number_format($transaction['meta']['biaya_pengiriman'] ?? 0, 0, ',', '.')?>
-                        <?php
-    endif; ?>
-                    </span>
-                </div>
-                <?php
-endif; ?>
+                    <div class="summary-row">
+                        <span>Ongkos Kirim:</span>
+                        <span>
+                            <?php if ($transaction['meta']['free_ongkir'] == 1): ?>
+                                <del style="color: #999;">Rp
+                                    <?= number_format($transaction['meta']['biaya_pengiriman'], 0, ',', '.') ?>
+                                </del>
+                                <span style="color: #27ae60; font-weight: bold; margin-left: 8px;">GRATIS</span>
+                                <?php
+                            else: ?>
+                                Rp
+                                <?= number_format($transaction['meta']['biaya_pengiriman'] ?? 0, 0, ',', '.') ?>
+                                <?php
+                            endif; ?>
+                        </span>
+                    </div>
+                    <?php
+                endif; ?>
 
                 <?php
-if (!empty($transaction['meta']['adjustments'])):
-    $adjustments = json_decode($transaction['meta']['adjustments'], true) ?? [];
-    foreach ($adjustments as $adj):
-        if (($adj['category'] ?? '') === 'PPN')
-            continue;
-        $isSubtraction = (($adj['type'] ?? '') === 'subtraction' || ($adj['type'] ?? '') === 'reduction');
-        $color = $isSubtraction ? '#059669' : '#6b7280';
-        $sign = $isSubtraction ? '- ' : '+ ';
-?>
-                <div class="summary-row" style="color: <?= $color?>;">
-                    <span>
-                        <?= esc($adj['component_name'] ?? $adj['category'] ?? 'Penyesuaian')?>:
-                    </span>
-                    <span>
-                        <?= $sign?>Rp
-                        <?= number_format($adj['amount'], 0, ',', '.')?>
-                    </span>
-                </div>
-                <?php
-    endforeach;
-endif;
-?>
+                if (!empty($transaction['meta']['adjustments'])):
+                    $adjustments = json_decode($transaction['meta']['adjustments'], true) ?? [];
+                    foreach ($adjustments as $adj):
+                        if (($adj['category'] ?? '') === 'PPN')
+                            continue;
+                        $isSubtraction = (($adj['type'] ?? '') === 'subtraction' || ($adj['type'] ?? '') === 'reduction');
+                        $color = $isSubtraction ? '#059669' : '#6b7280';
+                        $sign = $isSubtraction ? '- ' : '+ ';
+                        ?>
+                        <div class="summary-row" style="color: <?= $color ?>;">
+                            <span>
+                                <?= esc($adj['component_name'] ?? $adj['category'] ?? 'Penyesuaian') ?>:
+                            </span>
+                            <span>
+                                <?= $sign ?>Rp
+                                <?= number_format($adj['amount'], 0, ',', '.') ?>
+                            </span>
+                        </div>
+                        <?php
+                    endforeach;
+                endif;
+                ?>
                 <div class="summary-row total">
                     <span>TOTAL:</span>
                     <span>Rp
-                        <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.')?>
+                        <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?>
                     </span>
                 </div>
                 <?php if (isset($transaction['total_paid']) && $transaction['total_paid'] > 0): ?>
-                <div class="summary-row" style="color: #059669; font-weight: 500;">
-                    <span>Dibayar:</span>
-                    <span>Rp
-                        <?= number_format($transaction['total_paid'], 0, ',', '.')?>
-                    </span>
+                    <div class="summary-row" style="color: #059669; font-weight: 500;">
+                        <span>Dibayar:</span>
+                        <span>Rp
+                            <?= number_format($transaction['total_paid'], 0, ',', '.') ?>
+                        </span>
+                    </div>
+                    <div class="summary-row" style="color: #dc2626; font-weight: 600;">
+                        <span>Sisa:</span>
+                        <span>Rp
+                            <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) - $transaction['total_paid'], 0, ',', '.') ?>
+                        </span>
+                    </div>
+                    <?php
+                endif; ?>
+
+                <!-- Bank Info exactly below Totals -->
+                <div class="bank-summary">
+                    <h4>Informasi Pembayaran (Transfer)</h4>
+                    <?php if (!empty($transaction['bank'])): ?>
+                        <p style="font-size: 14px; margin-bottom: 5px;"><strong>Bank:</strong>
+                            <span style="color: #2c3e50;"><?= esc($transaction['bank']) ?></span>
+                        </p>
+                        <?php
+                    endif; ?>
+                    <?php if (!empty($transaction['nomer_rekening'])): ?>
+                        <p style="font-size: 18px; margin-bottom: 5px; color: #c92a2a;"><strong>No. Rekening:</strong>
+                            <span
+                                style="font-weight: 800; letter-spacing: 1px;"><?= esc($transaction['nomer_rekening']) ?></span>
+                        </p>
+                        <?php
+                    endif; ?>
+                    <?php if (!empty($transaction['nama_pemilik'])): ?>
+                        <p style="font-size: 14px;"><strong>Atas Nama:</strong>
+                            <?= esc($transaction['nama_pemilik']) ?>
+                        </p>
+                        <?php
+                    endif; ?>
                 </div>
-                <div class="summary-row" style="color: #dc2626; font-weight: 600;">
-                    <span>Sisa:</span>
-                    <span>Rp
-                        <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) - $transaction['total_paid'], 0, ',', '.')?>
-                    </span>
-                </div>
-                <?php
-endif; ?>
             </div>
         </div>
+    </div>
+    </div>
 
-        <!-- Notes -->
-        <?php if (!empty($transaction['notes']) || !empty($transaction['meta']['notes'])): ?>
+    <!-- Notes -->
+    <?php if (!empty($transaction['notes']) || !empty($transaction['meta']['notes'])): ?>
         <div class="notes">
             <h4>Catatan</h4>
             <p>
-                <?= esc($transaction['notes'] ?? $transaction['meta']['notes'] ?? '')?>
+                <?= esc($transaction['notes'] ?? $transaction['meta']['notes'] ?? '') ?>
             </p>
         </div>
         <?php
-endif; ?>
+    endif; ?>
 
-        <!-- Footer -->
-        <div class="footer">
-            <p>Terima kasih atas kepercayaan Anda</p>
-            <p style="margin-top: 5px;">Invoice ini dicetak secara otomatis dan sah tanpa tanda tangan</p>
-            <p style="margin-top: 10px; font-size: 10px;">Dicetak pada:
-                <?= date('d F Y H:i:s')?>
-            </p>
-        </div>
+    <!-- Footer -->
+    <div class="footer">
+        <p>Terima kasih atas kepercayaan Anda</p>
+        <p style="margin-top: 5px;">Invoice ini dicetak secara otomatis dan sah tanpa tanda tangan</p>
+        <p style="margin-top: 10px; font-size: 10px;">Dicetak pada:
+            <?= date('d F Y H:i:s') ?>
+        </p>
+    </div>
     </div>
 
     <script>
