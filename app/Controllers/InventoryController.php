@@ -91,8 +91,8 @@ class InventoryController extends ResourceController
             $this->db->transComplete();
 
             return $this->jsonResponse->oneResp('Transfer request created', ['id' => $transferId, 'ref_id' => $refId], 201);
-        } catch (\Exception $e) {
-            $this->db->transRollback();
+        } catch (\Throwable $e) {
+            if ($this->db->transStatus() === false) $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -200,8 +200,8 @@ class InventoryController extends ResourceController
 
             return $this->jsonResponse->oneResp('Transfer approved and executed', ['ref_id' => $refId], 200);
 
-        } catch (\Exception $e) {
-            $this->db->transRollback();
+        } catch (\Throwable $e) {
+            if ($this->db->transStatus() === false) $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -224,26 +224,93 @@ class InventoryController extends ResourceController
 
     public function getTransfers()
     {
-        $status = $this->request->getGet('status');
-        $builder = $this->stockTransferModel;
-        if ($status) $builder->where('status', $status);
-        
-        $data = $builder->orderBy('created_at', 'DESC')->findAll();
-        return $this->jsonResponse->oneResp('success', $data, 200);
+        try {
+            $status = $this->request->getGet('status');
+            $sourceToko = $this->request->getGet('source_toko_id');
+            $targetToko = $this->request->getGet('target_toko_id');
+            $createdBy = $this->request->getGet('created_by');
+            $search = $this->request->getGet('search');
+            $page = (int)($this->request->getGet('page') ?? 1);
+            $limit = (int)($this->request->getGet('limit') ?? 10);
+            $offset = ($page - 1) * $limit;
+
+            $builder = $this->stockTransferModel
+                ->select('stock_transfer.*, 
+                    st.toko_name as source_toko_name, 
+                    tt.toko_name as target_toko_name, 
+                    u1.name as created_by_name, 
+                    u2.name as approved_by_name,
+                    (SELECT COUNT(*) FROM stock_transfer_item WHERE transfer_id = stock_transfer.id) as total_items,
+                    (SELECT SUM(qty) FROM stock_transfer_item WHERE transfer_id = stock_transfer.id) as total_qty')
+                ->join('toko st', 'st.id = stock_transfer.source_toko_id', 'left')
+                ->join('toko tt', 'tt.id = stock_transfer.target_toko_id', 'left')
+                ->join('users u1', 'u1.user_id = stock_transfer.created_by', 'left')
+                ->join('users u2', 'u2.user_id = stock_transfer.approved_by', 'left');
+
+            if ($status) $builder->where('stock_transfer.status', $status);
+            if ($sourceToko) $builder->where('stock_transfer.source_toko_id', $sourceToko);
+            if ($targetToko) $builder->where('stock_transfer.target_toko_id', $targetToko);
+            if ($createdBy) $builder->where('stock_transfer.created_by', $createdBy);
+            if ($search) {
+                $builder->groupStart()
+                    ->like('stock_transfer.ref_id', $search)
+                    ->orLike('stock_transfer.note', $search)
+                    ->groupEnd();
+            }
+
+            // Get count for pagination
+            $countBuilder = clone $builder;
+            $total = $countBuilder->countAllResults(false);
+
+            $data = $builder->orderBy('stock_transfer.created_at', 'DESC')
+                ->limit($limit, $offset)
+                ->findAll();
+
+            return $this->jsonResponse->oneResp('success', [
+                'data' => $data,
+                'pagination' => [
+                    'page' => (int)$page,
+                    'limit' => (int)$limit,
+                    'total' => $total,
+                    'total_pages' => ceil($total / $limit)
+                ]
+            ], 200);
+        } catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
     }
 
     public function getTransferDetail($id)
     {
-        $transfer = $this->stockTransferModel->find($id);
-        if (!$transfer) return $this->jsonResponse->error("Not found", 404);
-        
-        $transfer['items'] = $this->stockTransferItemModel
-            ->select('stock_transfer_item.*, product.nama_barang')
-            ->join('product', 'product.id_barang = stock_transfer_item.kode_barang', 'left')
-            ->where('transfer_id', $id)
-            ->findAll();
+        try {
+            $transfer = $this->stockTransferModel
+                ->select('stock_transfer.*, 
+                    st.toko_name as source_toko_name, 
+                    tt.toko_name as target_toko_name, 
+                    u1.name as created_by_name, 
+                    u2.name as approved_by_name')
+                ->join('toko st', 'st.id = stock_transfer.source_toko_id', 'left')
+                ->join('toko tt', 'tt.id = stock_transfer.target_toko_id', 'left')
+                ->join('users u1', 'u1.user_id = stock_transfer.created_by', 'left')
+                ->join('users u2', 'u2.user_id = stock_transfer.approved_by', 'left')
+                ->find($id);
 
-        return $this->jsonResponse->oneResp('success', $transfer, 200);
+            if (!$transfer) return $this->jsonResponse->error("Not found", 404);
+            
+            $transfer['items'] = $this->stockTransferItemModel
+                ->select('stock_transfer_item.*, product.nama_barang, 
+                        CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang,
+                        (SELECT url FROM image WHERE type = "product" AND kode = product.id LIMIT 1) as product_image')
+                ->join('product', 'product.id_barang = stock_transfer_item.kode_barang', 'left')
+                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                ->join('seri', 'seri.id = product.id_seri_barang', 'left')
+                ->where('transfer_id', $id)
+                ->findAll();
+
+            return $this->jsonResponse->oneResp('success', $transfer, 200);
+        } catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
     }
 
     private function createJournal($refType, $refId, $desc, $date, $tokoId)
