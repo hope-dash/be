@@ -470,10 +470,9 @@
             <thead>
                 <tr>
                     <th style="width: 5%;">No</th>
-                    <th style="width: 40%;">Nama Barang</th>
+                    <th style="width: 45%;">Nama Barang</th>
                     <th style="width: 10%;" class="text-center">Jumlah</th>
                     <th style="width: 20%;" class="text-right">Harga Satuan</th>
-                    <th style="width: 10%;" class="text-center">Diskon</th>
                     <th style="width: 20%;" class="text-right">Total</th>
                 </tr>
             </thead>
@@ -482,8 +481,14 @@
                 $no = 1;
                 $subtotal = 0;
                 foreach ($transaction['items'] as $item):
-                    $itemTotal = $item['actual_total'] ?? (($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0));
+                    $itemTotal = $item['actual_total'] ?? $item['total'] ?? ($item['harga_jual'] * $item['jumlah']);
                     $subtotal += $itemTotal;
+
+                    $basePrice = (float) ($item['harga_system'] ?? $item['harga_jual']);
+                    $discType = $item['discount_type'] ?? null;
+                    $discAmount = (float) ($item['discount_amount'] ?? $item['diskon'] ?? 0);
+                    $hargaJual = (float) $item['harga_jual'];
+                    $hasDiscount = ($discAmount > 0 || $basePrice > $hargaJual);
                     ?>
                     <tr>
                         <td class="text-center">
@@ -497,24 +502,33 @@
                                 <br><small style="color: #777;">
                                     <?= esc($item['keterangan']) ?>
                                 </small>
-                                <?php
-                            endif; ?>
+                            <?php endif; ?>
                         </td>
                         <td class="text-center qty-text">
                             <?= number_format($item['jumlah'], 0, ',', '.') ?>
                         </td>
-                        <td class="text-right">Rp
-                            <?= number_format($item['harga_jual'], 0, ',', '.') ?>
-                        </td>
-                        <td class="text-center">
-                            <?= !empty($item['diskon']) ? 'Rp ' . number_format($item['diskon'], 0, ',', '.') : '-' ?>
+                        <td class="text-right">
+                            <?php if ($hasDiscount): ?>
+                                <small style="color: #999; text-decoration: line-through;">Rp <?= number_format($basePrice, 0, ',', '.') ?></small>
+                                <br>
+                                <span style="color: #27ae60; font-size: 11px; font-weight: bold;">
+                                    <?php if ($discType === 'PERCENTAGE'): ?>
+                                        Diskon <?= number_format($discAmount, 0) ?>%
+                                    <?php elseif ($discAmount > 0): ?>
+                                        Diskon Rp <?= number_format($discAmount, 0, ',', '.') ?>
+                                    <?php else: ?>
+                                        Diskon <?= round((($basePrice - $hargaJual) / $basePrice) * 100) ?>%
+                                    <?php endif; ?>
+                                </span>
+                                <br>
+                            <?php endif; ?>
+                            Rp <?= number_format($item['harga_jual'], 0, ',', '.') ?>
                         </td>
                         <td class="text-right"><strong>Rp
                                 <?= number_format($itemTotal, 0, ',', '.') ?>
                             </strong></td>
                     </tr>
-                    <?php
-                endforeach; ?>
+                <?php endforeach; ?>
             </tbody>
         </table>
 

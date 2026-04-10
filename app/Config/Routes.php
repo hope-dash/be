@@ -14,6 +14,7 @@ $routes->options('api/(:any)', function () {
 // --- 2. PUBLIC ROUTES (No Token, No X-Tenant Required) ---
 $routes->post('api/login', 'UserController::login');
 $routes->post('api/v2/upload/image', 'UploadController::uploadImage');
+$routes->post('api/v2/upload/file', 'UploadController::uploadImage');
 
 // Tenant & Subscription Public
 $routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
@@ -112,6 +113,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
 
     // Uploads
     $routes->post('upload/image', 'UploadController::uploadImage');
+    $routes->post('upload/file', 'UploadController::uploadImage');
 
     // User Management
     $routes->post('register', 'UserController::create');

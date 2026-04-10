@@ -1065,32 +1065,62 @@ class ProductController extends ResourceController
             $limit = max((int) ($this->request->getGet('limit') ?: 25), 1);
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
+            $only_toko = ($this->request->getGet('only_toko') === 'true' && !empty($id_toko));
 
             // === Bangun query dasar ===
-            $builder = $this->productModel
-                ->select([
-                    'product.id',
-                    'product.id_barang',
-                    'product.notes',
-                    'product.nama_barang',
-                    'product.harga_modal',
-                    'product.harga_jual',
-                    'product.harga_jual_toko',
-                    'product.description',
-                    'product.id_model_barang',
-                    'product.id_seri_barang',
-                    'product.suplier',
-                    'product.dropship',
-                    'product.berat',
-                    'model_barang.nama_model',
-                    'seri.seri',
-                ])
-                ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
-                ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+            if ($only_toko) {
+                // only_toko: join stock + toko langsung, filter by toko spesifik
+                $builder = $this->productModel
+                    ->select([
+                        'product.id',
+                        'product.id_barang',
+                        'product.notes',
+                        'product.nama_barang',
+                        'product.harga_modal',
+                        'product.harga_jual',
+                        'product.harga_jual_toko',
+                        'product.description',
+                        'product.id_model_barang',
+                        'product.id_seri_barang',
+                        'product.suplier',
+                        'product.dropship',
+                        'product.berat',
+                        'model_barang.nama_model',
+                        'seri.seri',
+                    ])
+                    ->join('stock', 'stock.id_barang = product.id_barang', 'inner')
+                    ->join('toko', 'toko.id = stock.id_toko', 'left')
+                    ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                    ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
-            // Filter by toko: only show products that have stock in this toko
-            if (!empty($id_toko)) {
-                $builder->join('stock', 'stock.id_barang = product.id_barang AND stock.id_toko = ' . (int) $id_toko, 'inner');
+                $builder->where('stock.id_toko', (int) $id_toko)
+                    ->where('stock.stock >', 0);
+            } else {
+                $builder = $this->productModel
+                    ->select([
+                        'product.id',
+                        'product.id_barang',
+                        'product.notes',
+                        'product.nama_barang',
+                        'product.harga_modal',
+                        'product.harga_jual',
+                        'product.harga_jual_toko',
+                        'product.description',
+                        'product.id_model_barang',
+                        'product.id_seri_barang',
+                        'product.suplier',
+                        'product.dropship',
+                        'product.berat',
+                        'model_barang.nama_model',
+                        'seri.seri',
+                    ])
+                    ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
+                    ->join('seri', 'seri.id = product.id_seri_barang', 'left');
+
+                // Filter by toko: only show products that have stock in this toko
+                if (!empty($id_toko)) {
+                    $builder->join('stock', 'stock.id_barang = product.id_barang AND stock.id_toko = ' . (int) $id_toko, 'inner');
+                }
             }
 
             $builder->where('product.tenant_id', \App\Libraries\TenantContext::id())
@@ -1172,10 +1202,15 @@ class ProductController extends ResourceController
             $stockByProduct = [];
             $tokoMap = [];
             if (!empty($productCodes)) {
-                $stocks = $this->stockModel
+                $stockQuery = $this->stockModel
                     ->select('id_barang, dropship, stock, barang_cacat, id_toko')
-                    ->whereIn('id_barang', $productCodes)
-                    ->findAll();
+                    ->whereIn('id_barang', $productCodes);
+
+                if ($only_toko) {
+                    $stockQuery->where('id_toko', (int) $id_toko);
+                }
+
+                $stocks = $stockQuery->findAll();
 
                 $tokoIds = array_unique(array_column($stocks, 'id_toko'));
                 if (!empty($tokoIds)) {
@@ -1198,7 +1233,7 @@ class ProductController extends ResourceController
             $holdMap = [];
             $holdTotalMap = [];
             if (!empty($productCodes)) {
-                $rows = $this->db->table('sales_product sp')
+                $builderSales = $this->db->table('sales_product sp')
                     ->select('
                         sp.kode_barang, 
                         t.id_toko, 
@@ -1207,8 +1242,13 @@ class ProductController extends ResourceController
                     ')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $productCodes)
-                    ->where('sp.tenant_id', \App\Libraries\TenantContext::id())
-                    ->groupBy('sp.kode_barang, t.id_toko')
+                    ->where('sp.tenant_id', \App\Libraries\TenantContext::id());
+
+                if ($only_toko) {
+                    $builderSales->where('t.id_toko', $id_toko);
+                }
+
+                $rows = $builderSales->groupBy('sp.kode_barang, t.id_toko')
                     ->get()->getResultArray();
 
                 foreach ($rows as $row) {
@@ -1216,7 +1256,7 @@ class ProductController extends ResourceController
                     $tId = $row['id_toko'];
 
                     if ($row['terjual'] > 0) {
-                        $terjualMap[$kode] = ($terjualMap[$kode] ?? 0) + (int) $row['terjual'];
+                        $terjualMap[$kode][$tId] = (int) $row['terjual'];
                     }
                     if ($row['hold'] > 0) {
                         $holdMap[$kode][$tId] = (int) $row['hold'];
@@ -1228,18 +1268,24 @@ class ProductController extends ResourceController
             // --- Coming Soon ---
             $comingSoonTotalMap = [];
             if (!empty($productCodes)) {
-                $rows = $this->db->table('pembelian_detail pd')
-                    ->select('pd.kode_barang, SUM(pd.jumlah) as total')
+                $builderPembelian = $this->db->table('pembelian_detail pd')
+                    ->select('pd.kode_barang, p.id_toko, SUM(pd.jumlah) as total')
                     ->join('pembelian p', 'p.id = pd.pembelian_id')
                     ->whereIn('pd.kode_barang', $productCodes)
                     ->whereIn('p.status', ['APPROVED', 'NEED_REVIEW', 'WAITING', 'PENDING', 'ON_PROGRESS'])
                     ->where('pd.tenant_id', \App\Libraries\TenantContext::id())
-                    ->where('p.deleted_at IS NULL')
-                    ->groupBy('pd.kode_barang')
+                    ->where('p.deleted_at IS NULL');
+
+                if ($only_toko) {
+                    $builderPembelian->where('p.id_toko', $id_toko);
+                }
+
+                $rows = $builderPembelian->groupBy('pd.kode_barang, p.id_toko')
                     ->get()->getResultArray();
                 foreach ($rows as $row) {
                     $kode = strtoupper(trim($row['kode_barang']));
-                    $comingSoonTotalMap[$kode] = (int) $row['total'];
+                    $tId = $row['id_toko'];
+                    $comingSoonTotalMap[$kode][$tId] = (int) $row['total'];
                 }
             }
 
@@ -1274,18 +1320,25 @@ class ProductController extends ResourceController
 
                 foreach ($stocks as $s) {
                     $tokoId = $s['id_toko'];
+
+                    if ($only_toko && $tokoId != $id_toko) {
+                        continue;
+                    }
+
                     $tokoName = $tokoMap[$tokoId] ?? 'Tidak diketahui';
                     $dropship = in_array($s['dropship'], ['1', 1, true], true);
                     $stockReady = (int) ($s['stock'] ?? 0);
                     $cacatVal = (int) ($s['barang_cacat'] ?? 0);
                     $holdVal = (int) ($holdMap[$kodeBarang][$tokoId] ?? 0);
-                    $comingSoonVal = (int) ($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0);
+                    $terjualVal = (int) ($terjualMap[$kodeBarang][$tokoId] ?? 0);
+                    $comingSoonVal = (int) ($comingSoonTotalMap[strtoupper($kodeBarang)][$tokoId] ?? 0);
 
                     $stockList[] = [
                         'stock_ready' => $stockReady,
                         'stock' => $stockReady + $holdVal, // Stock aja = ready + hold
                         'barang_cacat' => $cacatVal,
                         'hold_stock' => $holdVal,
+                        'terjual' => $terjualVal,
                         'stock_coming_soon' => $comingSoonVal,
                         'toko_name' => $tokoName,
                         'id_toko' => $tokoId,
@@ -1308,6 +1361,9 @@ class ProductController extends ResourceController
                 }
 
                 $totalHold = (int) ($holdTotalMap[$kodeBarang] ?? 0);
+                $totalTerjual = array_sum($terjualMap[$kodeBarang] ?? []);
+                $totalComingSoon = array_sum($comingSoonTotalMap[strtoupper($kodeBarang)] ?? []);
+
                 $formattedProducts[] = [
                     'id' => $p['id'],
                     'kode_barang' => $kodeBarang,
@@ -1327,9 +1383,9 @@ class ProductController extends ResourceController
                     'total_stock_ready' => $totalStockReady,
                     'total_stock' => $totalStockReady + $totalHold, // total ready + hold
                     'total_cacat' => $totalCacat,
-                    'total_terjual' => (int) ($terjualMap[$kodeBarang] ?? 0),
+                    'total_terjual' => $totalTerjual,
                     'total_hold' => $totalHold,
-                    'total_coming_soon' => (int) ($comingSoonTotalMap[strtoupper($kodeBarang)] ?? 0),
+                    'total_coming_soon' => $totalComingSoon,
                     'images' => $imageMap[$p['id']] ?? []
                 ];
             }

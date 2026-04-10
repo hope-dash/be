@@ -40,6 +40,20 @@ class UploadController extends ResourceController
             mkdir($targetDir, 0755, true);
         }
 
+        // Handle PDF separately
+        if ($mimeType === 'application/pdf' || $ext === 'pdf') {
+            $newName = bin2hex(random_bytes(10)) . '.pdf';
+            if ($file->move($targetDir, $newName)) {
+                $relativeUrl = 'uploads/' . $folder . '/' . $newName;
+                return $this->jsonResponse->oneResp('PDF uploaded successfully', [
+                    'path' => $relativeUrl,
+                    'url' => base_url($relativeUrl)
+                ], 200);
+            } else {
+                return $this->jsonResponse->error('Failed to move uploaded PDF', 500);
+            }
+        }
+
         $newName = bin2hex(random_bytes(10)) . '.webp';
         $savePath = $targetDir . '/' . $newName;
 
@@ -77,7 +91,7 @@ class UploadController extends ResourceController
                     }
                     break;
                 default:
-                    return $this->jsonResponse->error('Unsupported image format: ' . $mimeType, 400);
+                    return $this->jsonResponse->error('Unsupported file format: ' . $mimeType, 400);
             }
 
             if (!$source) {
