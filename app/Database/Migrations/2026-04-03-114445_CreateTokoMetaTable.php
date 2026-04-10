@@ -40,7 +40,9 @@ class CreateTokoMetaTable extends Migration
         $this->forge->addKey('id', true);
         $this->forge->addForeignKey('id_toko', 'toko', 'id', 'CASCADE', 'CASCADE');
         $this->forge->addKey(['id_toko', 'meta_key']);
-        $this->forge->createTable('toko_meta');
+        if (!$this->db->tableExists('toko_meta')) {
+            $this->forge->createTable('toko_meta');
+        }
     }
 
     public function down()

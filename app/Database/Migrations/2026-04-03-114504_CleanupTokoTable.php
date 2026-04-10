@@ -8,14 +8,20 @@ class CleanupTokoTable extends Migration
 {
     public function up()
     {
-        $this->forge->dropColumn('toko', [
+        $colsToDrop = [
             'chat_session_id',
             'chat_session_status',
             'tiktok_code',
             'tiktok_shop_cipher',
             'tiktok_access_token',
             'tiktok_refresh_token'
-        ]);
+        ];
+
+        foreach ($colsToDrop as $col) {
+            if ($this->db->fieldExists($col, 'toko')) {
+                $this->forge->dropColumn('toko', $col);
+            }
+        }
     }
 
     public function down()

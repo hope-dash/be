@@ -257,7 +257,11 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         // Finance & Inventory
         $routes->post('finance/transfer', 'FinanceController::transfer');
         $routes->post('finance/distribute-profit', 'FinanceController::distributeProfit');
-        $routes->post('inventory/transfer', 'InventoryController::transfer');
+        $routes->post('inventory/transfer/request', 'InventoryController::requestTransfer');
+        $routes->get('inventory/transfer', 'InventoryController::getTransfers');
+        $routes->get('inventory/transfer/(:num)', 'InventoryController::getTransferDetail/$1');
+        $routes->post('inventory/transfer/(:num)/approve', 'InventoryController::approveTransfer/$1');
+        $routes->post('inventory/transfer/(:num)/reject', 'InventoryController::rejectTransfer/$1');
 
         // Products V2
         $routes->post('product', 'ProductController::createProductV2');
