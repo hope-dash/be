@@ -248,7 +248,28 @@ class CustomerTransactionControllerV2 extends ResourceController
             return $this->jsonResponse->error("Pelanggan tidak ditemukan", 404);
         }
 
-        $cartIds = $data['cart_ids'] ?? [];
+        $cartIdsRaw = $data['cart_ids'] ?? [];
+        if (empty($cartIdsRaw)) {
+            return $this->jsonResponse->error("Tidak ada item keranjang yang dipilih", 400);
+        }
+
+        // Parse cart_ids: support both ["11"] and [{"id":"11","discount_percent":10}]
+        $cartIds = [];
+        $itemDiscountMap = []; // cart_id => discount_percent
+        foreach ($cartIdsRaw as $entry) {
+            if (is_array($entry)) {
+                $cid = $entry['id'] ?? null;
+                $discPct = (float) ($entry['discount_percent'] ?? 0);
+            } else {
+                $cid = $entry;
+                $discPct = 0;
+            }
+            if ($cid !== null) {
+                $cartIds[] = $cid;
+                $itemDiscountMap[$cid] = max(0, min(100, $discPct)); // clamp 0-100
+            }
+        }
+
         if (empty($cartIds)) {
             return $this->jsonResponse->error("Tidak ada item keranjang yang dipilih", 400);
         }
@@ -318,9 +339,11 @@ class CustomerTransactionControllerV2 extends ResourceController
                         throw new \Exception("Stok kurang untuk {$item['nama_barang']} di toko pilihan");
                     }
 
-                    // Price Logic (Customer Discount)
+                    // Price Logic (Per-item Discount Percentage)
                     $originalPrice = (float) $item['harga_jual'];
-                    $itemDiscountValue = 0;
+                    $cartItemId = $item['id'];
+                    $discountPercent = $itemDiscountMap[$cartItemId] ?? 0;
+                    $itemDiscountValue = ($originalPrice * $discountPercent) / 100;
                     $finalPrice = max(0, $originalPrice - $itemDiscountValue);
 
                     $grossAmount += ($originalPrice * $qty);
@@ -333,7 +356,8 @@ class CustomerTransactionControllerV2 extends ResourceController
                         'final_price' => $finalPrice,
                         'modal' => $item['harga_modal'],
                         'total_modal_item' => $item['harga_modal'] * $qty,
-                        'discount_value' => $itemDiscountValue * $qty
+                        'discount_value' => $itemDiscountValue * $qty,
+                        'discount_percent' => $discountPercent
                     ];
                 }
 
@@ -420,7 +444,9 @@ class CustomerTransactionControllerV2 extends ResourceController
                         'modal_system' => $it['modal'],
                         'total_modal' => $it['total_modal_item'],
                         'actual_per_piece' => $it['final_price'],
-                        'actual_total' => $it['final_price'] * $it['qty']
+                        'actual_total' => $it['final_price'] * $it['qty'],
+                        'discount_type' => ($it['discount_percent'] > 0) ? 'PERCENTAGE' : null,
+                        'discount_amount' => $it['discount_percent']
                     ]);
 
                     $this->deductStock($it['kode_barang'], $actualIdToko, $it['qty'], $trxId, "Invoice {$invoiceNo}");

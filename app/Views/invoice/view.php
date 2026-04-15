@@ -486,7 +486,7 @@
 
                     $basePrice = (float) ($item['harga_system'] ?? $item['harga_jual']);
                     $discType = $item['discount_type'] ?? null;
-                    $discAmount = (float) ($item['discount_amount'] ?? $item['diskon'] ?? 0);
+                    $discAmount = (float) ($item['discount_amount'] ?? $item['discount_amount'] ?? 0);
                     $hargaJual = (float) $item['harga_jual'];
                     $hasDiscount = ($discAmount > 0 || $basePrice > $hargaJual);
                     ?>
@@ -509,7 +509,8 @@
                         </td>
                         <td class="text-right">
                             <?php if ($hasDiscount): ?>
-                                <small style="color: #999; text-decoration: line-through;">Rp <?= number_format($basePrice, 0, ',', '.') ?></small>
+                                <small style="color: #999; text-decoration: line-through;">Rp
+                                    <?= number_format($basePrice, 0, ',', '.') ?></small>
                                 <br>
                                 <span style="color: #27ae60; font-size: 11px; font-weight: bold;">
                                     <?php if ($discType === 'PERCENTAGE'): ?>

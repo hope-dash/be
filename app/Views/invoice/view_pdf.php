@@ -342,10 +342,10 @@
                 <td>
                     <div class="info-box">
                         <h3>Informasi Pengiriman</h3>
-                        <p style="margin-top: 4px;"><strong>Ekspedisi:</strong> 
+                        <p style="margin-top: 4px;"><strong>Ekspedisi:</strong>
                             <?= esc($transaction['meta']['courier'] ?? $transaction['meta']['pengiriman'] ?? '-') ?>
                         </p>
-                        <p><strong>No. Resi:</strong> 
+                        <p><strong>No. Resi:</strong>
                             <?= esc($transaction['meta']['resi'] ?? '-') ?>
                         </p>
                         <?php
@@ -434,10 +434,10 @@
                 foreach ($transaction['items'] as $item):
                     $itemTotal = $item['actual_total'] ?? $item['total'] ?? ($item['harga_jual'] * $item['jumlah']);
                     $subtotal += $itemTotal;
-                    
+
                     $basePrice = (float) ($item['harga_system'] ?? $item['harga_jual']);
                     $discType = $item['discount_type'] ?? null;
-                    $discAmount = (float) ($item['discount_amount'] ?? $item['diskon'] ?? 0);
+                    $discAmount = (float) ($item['discount_amount'] ?? $item['discount_amount'] ?? 0);
                     $hargaJual = (float) $item['harga_jual'];
                     $hasDiscount = ($discAmount > 0 || $basePrice > $hargaJual);
                     ?>
@@ -460,7 +460,8 @@
                         </td>
                         <td class="text-right">
                             <?php if ($hasDiscount): ?>
-                                <small style="color: #999; text-decoration: line-through;">Rp <?= number_format($basePrice, 0, ',', '.') ?></small>
+                                <small style="color: #999; text-decoration: line-through;">Rp
+                                    <?= number_format($basePrice, 0, ',', '.') ?></small>
                                 <br>
                                 <span style="color: #27ae60; font-size: 9px; font-weight: bold;">
                                     <?php if ($discType === 'PERCENTAGE'): ?>
@@ -549,7 +550,8 @@
                         if (!empty($transaction['meta']['adjustments'])):
                             $adjustments = json_decode($transaction['meta']['adjustments'], true) ?? [];
                             foreach ($adjustments as $adj):
-                                if (($adj['category'] ?? '') === 'PPN') continue;
+                                if (($adj['category'] ?? '') === 'PPN')
+                                    continue;
                                 $isSubtraction = (($adj['type'] ?? '') === 'subtraction' || ($adj['type'] ?? '') === 'reduction');
                                 $color = $isSubtraction ? '#059669' : '#666';
                                 $sign = $isSubtraction ? '- ' : '+ ';
@@ -557,7 +559,8 @@
                                 <table class="summary-row" cellpadding="0" cellspacing="0" style="color: <?= $color ?>;">
                                     <tr>
                                         <td><?= esc($adj['component_name'] ?? $adj['category'] ?? 'Penyesuaian') ?>:</td>
-                                        <td class="text-right"><?= $sign ?>Rp <?= number_format($adj['amount'], 0, ',', '.') ?></td>
+                                        <td class="text-right"><?= $sign ?>Rp <?= number_format($adj['amount'], 0, ',', '.') ?>
+                                        </td>
                                     </tr>
                                 </table>
                                 <?php
@@ -581,7 +584,8 @@
                                     </td>
                                 </tr>
                             </table>
-                            <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #dc2626; font-weight: bold;">
+                            <table class="summary-row" cellpadding="0" cellspacing="0"
+                                style="color: #dc2626; font-weight: bold;">
                                 <tr>
                                     <td>Sisa:</td>
                                     <td class="text-right">Rp
