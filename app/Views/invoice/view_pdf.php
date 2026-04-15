@@ -437,7 +437,7 @@
 
                     $basePrice = (float) ($item['harga_system'] ?? $item['harga_jual']);
                     $discType = $item['discount_type'] ?? null;
-                    $discAmount = (float) ($item['discount_amount'] ?? $item['discount_amount'] ?? 0);
+                    $discAmount = (float) ($item['discount_amount'] ?? $item['diskon'] ?? 0);
                     $hargaJual = (float) $item['harga_jual'];
                     $hasDiscount = ($discAmount > 0 || $basePrice > $hargaJual);
                     ?>
