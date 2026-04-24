@@ -45,7 +45,10 @@ class JournalController extends ResourceController
             $builder->where('date <=', $date_end);
         }
         if ($ref_type) {
-            $builder->where('reference_type', $ref_type);
+            $builder->groupStart()
+                ->where('reference_type', $ref_type)
+                ->orLike('description', $ref_type)
+                ->groupEnd();
         }
 
         $sortBy = $this->request->getGet('sortBy') ?: 'date';

@@ -1408,6 +1408,20 @@ class TransactionControllerV2 extends ResourceController
 
             $this->db->transComplete();
 
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'RETURN_TRANSACTION',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Processed return for {$trx['invoice']}. Items returned: " . count($returnDetails) . ". AR Reduction: $totalARReduction",
+                'detail' => [
+                    'invoice' => $trx['invoice'],
+                    'items' => $returnDetails,
+                    'total_ar_reduction' => $totalARReduction,
+                    'new_grand_total' => $newGrandTotal
+                ]
+            ]);
+
             return $this->jsonResponse->oneResp('Retur berhasil diproses', [
                 'items_returned' => count($returnDetails),
                 'total_ar_reduction' => $totalARReduction,
@@ -1604,6 +1618,20 @@ class TransactionControllerV2 extends ResourceController
                     }
                 }
             }
+
+            log_aktivitas([
+                'user_id' => $this->request->user['user_id'] ?? 0,
+                'action_type' => 'UPDATE_DELIVERY',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Updated delivery for {$trx['invoice']}. Status: " . ($status ?? $trx['delivery_status']) . ($resi ? ", Resi: $resi" : "") . ($courier ? ", Courier: $courier" : ""),
+                'detail' => [
+                    'invoice' => $trx['invoice'],
+                    'status' => $status,
+                    'resi' => $resi,
+                    'courier' => $courier
+                ]
+            ]);
 
             return $this->jsonResponse->oneResp("Status pengiriman berhasil diperbarui", [], 200);
 
