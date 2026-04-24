@@ -773,7 +773,7 @@ class ProductController extends ResourceController
 
             if ($diffStock != 0 || $diffCacat != 0) {
                 $refNo = 'ADJ-OPNAME-' . time();
-                $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Stock Opname: {$product['nama_barang']} ({$alasan})", $data->id_toko);
+                $jid = $this->internalCreateJournal('ADJUSTMENT', $id, $refNo, date('Y-m-d'), "Stock Opname: {$product['id_barang']} ({$alasan})", $data->id_toko);
 
                 if ($totalDiff === 0) {
                     // --- Reklasifikasi saja (total tidak berubah) ---

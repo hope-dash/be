@@ -1521,6 +1521,7 @@ class TransactionControllerV2 extends ResourceController
     public function updateDeliveryStatus($id = null)
     {
         $data = $this->request->getJSON();
+        $userId = $this->request->user['user_id'] ?? 0;
 
         $this->db->transStart();
         try {
@@ -1542,11 +1543,21 @@ class TransactionControllerV2 extends ResourceController
 
             // GUARD: If updating status, check if it's already the same or if transaction is cancelled
             if ($status && (strtoupper($status) === strtoupper($trx['delivery_status'] ?? ''))) {
-                 // Already in this status, just complete and return success
-                 $this->db->transComplete();
-                 return $this->jsonResponse->oneResp("Status pengiriman sudah diperbarui sebelumnya", [], 200);
+                // Already in this status, just complete and return success
+                $this->db->transComplete();
+
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'UPDATE_DELIVERY_SKIP',
+                    'target_table' => 'transaction',
+                    'target_id' => $id,
+                    'description' => "Attempted to update delivery status for {$trx['invoice']} but was already $status",
+                    'detail' => ['invoice' => $trx['invoice'], 'status' => $status]
+                ]);
+
+                return $this->jsonResponse->oneResp("Status pengiriman sudah diperbarui sebelumnya", [], 200);
             }
-            
+
             if ($trx['status'] === 'CANCEL') {
                 $this->db->transRollback();
                 return $this->jsonResponse->error("Tidak bisa update pengiriman untuk transaksi yang sudah dibatalkan", 400);
@@ -1609,34 +1620,31 @@ class TransactionControllerV2 extends ResourceController
                     $trx['customer'] = $custData;
                     if (strtoupper($status ?? '') === 'READY') {
                         send_order_ready_email($trx);
-                    }
-                    else if (strtoupper($status ?? '') === 'SHIPPED') {
+                    } else if (strtoupper($status ?? '') === 'SHIPPED') {
                         send_order_shipped_email($trx, $resi, $courier);
-                    }
-                    else if (strtoupper($status ?? '') === 'DELIVERED') {
+                    } else if (strtoupper($status ?? '') === 'DELIVERED') {
                         send_order_delivered_email($trx);
                     }
                 }
-            }
 
-            log_aktivitas([
-                'user_id' => $this->request->user['user_id'] ?? 0,
-                'action_type' => 'UPDATE_DELIVERY',
-                'target_table' => 'transaction',
-                'target_id' => $id,
-                'description' => "Updated delivery for {$trx['invoice']}. Status: " . ($status ?? $trx['delivery_status']) . ($resi ? ", Resi: $resi" : "") . ($courier ? ", Courier: $courier" : ""),
-                'detail' => [
-                    'invoice' => $trx['invoice'],
-                    'status' => $status,
-                    'resi' => $resi,
-                    'courier' => $courier
-                ]
-            ]);
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'UPDATE_DELIVERY',
+                    'target_table' => 'transaction',
+                    'target_id' => $id,
+                    'description' => "Updated delivery for {$trx['invoice']}. Status: " . ($status ?? $trx['delivery_status']) . ($resi ? ", Resi: $resi" : "") . ($courier ? ", Courier: $courier" : ""),
+                    'detail' => [
+                        'invoice' => $trx['invoice'],
+                        'status' => $status,
+                        'resi' => $resi,
+                        'courier' => $courier
+                    ]
+                ]);
+            }
 
             return $this->jsonResponse->oneResp("Status pengiriman berhasil diperbarui", [], 200);
 
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
