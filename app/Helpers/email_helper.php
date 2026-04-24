@@ -21,6 +21,7 @@ if (!function_exists('send_email')) {
         $email->setReplyTo(\App\Libraries\TenantContext::email(), $senderName);
         $email->setTo($to);
         $email->setSubject($subject);
+        $email->setMailType('html');
         $email->setMessage($message);
 
         log_message('debug', '[send_email] From: ' . $senderEmail . ' Name: "' . $senderName . '" To: ' . $to);
@@ -51,6 +52,7 @@ if (!function_exists('send_system_email')) {
         $email->setReplyTo(env('email.replyTo', $fromEmail), $fromName);
         $email->setTo($to);
         $email->setSubject($subject);
+        $email->setMailType('html');
         $email->setMessage($message);
 
         if ($email->send()) {
@@ -82,6 +84,7 @@ if (!function_exists('send_email_with_attachments')) {
         $email->setReplyTo(\App\Libraries\TenantContext::email(), $senderName);
         $email->setTo($to);
         $email->setSubject($subject);
+        $email->setMailType('html');
         $email->setMessage($message);
 
         foreach ($attachments as $path) {
@@ -116,6 +119,7 @@ if (!function_exists('send_system_email_with_attachments')) {
         $email->setReplyTo(env('email.replyTo', $fromEmail), $fromName);
         $email->setTo($to);
         $email->setSubject($subject);
+        $email->setMailType('html');
         $email->setMessage($message);
 
         foreach ($attachments as $path) {
