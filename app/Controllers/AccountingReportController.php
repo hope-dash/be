@@ -71,11 +71,16 @@ class AccountingReportController extends ResourceController
             ->join('accounts a', 'a.id = ji.account_id')
             ->where('j.date >=', $startDate)
             ->where('j.date <=', $endDate);
-
-
-
         if ($tokoId) {
             $builder->where('j.id_toko', $tokoId);
+        }
+
+        $search = $this->request->getGet('search') ?? $this->request->getGet('description');
+        if ($search) {
+            $builder->groupStart()
+                ->like('j.description', $search)
+                ->orLike('j.reference_no', $search)
+                ->groupEnd();
         }
 
         $results = $builder->orderBy('j.date', 'DESC')
