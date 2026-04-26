@@ -1534,63 +1534,85 @@ class TransactionController extends BaseController
         $offset = ($page - 1) * $limit;
         $namaProduct = $this->request->getGet('namaProduct') ?? '';
 
+        $sort_sold = $this->request->getGet('sort_total_sold');
+        $sort_stock = $this->request->getGet('sort_total_stock');
+
+        $min_stock = $this->request->getGet('min_stock');
+        $max_sold = $this->request->getGet('max_sold');
+
         try {
-            $query = $this->db->table('sales_product')
-                ->select('sales_product.kode_barang, product.nama_barang, model_barang.nama_model, 
+            // Build ON condition for transaction join to keep 0-sold rows
+            $onTrx = 'sales_product.id_transaction = transaction.id 
+                      AND transaction.status IN ("SUCCESS", "PAID", "PACKING", "IN_DELIVERY", "PARTIALLY_PAID", "RETUR")';
+
+            if ($date_start && $date_end) {
+                $onTrx .= " AND transaction.date_time BETWEEN '{$date_start} 00:00:00' AND '{$date_end} 23:59:59'";
+            } elseif ($date_start) {
+                $onTrx .= " AND transaction.date_time >= '{$date_start} 00:00:00'";
+            } elseif ($date_end) {
+                $onTrx .= " AND transaction.date_time <= '{$date_end} 23:59:59'";
+            }
+
+            if (is_string($role)) {
+                $roleArr = array_filter(array_map('intval', explode(',', $role)), fn($v) => $v > 0);
+                if (!empty($roleArr)) {
+                    $onTrx .= " AND transaction.id_toko IN (" . implode(',', $roleArr) . ")";
+                }
+            }
+
+            $query = $this->db->table('product')
+                ->select('product.id_barang as kode_barang, product.nama_barang, model_barang.nama_model, 
                     COALESCE(seri.seri, "Tidak Ada Seri") AS seri, 
-                    SUM(sales_product.jumlah) AS total_sold,  
+                    SUM(COALESCE(sales_product.jumlah, 0)) AS total_sold,  
                     CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang,
                     (
                         SELECT COALESCE(SUM(stock.stock), 0) 
                         FROM stock 
-                        WHERE stock.id_barang = sales_product.kode_barang 
+                        WHERE stock.id_barang = product.id_barang 
                         AND stock.dropship = 0
                     ) AS total_stock')
-                ->join('transaction', 'sales_product.id_transaction = transaction.id')
-                ->join('product', 'sales_product.kode_barang = product.id_barang')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id')
                 ->join('seri', 'product.id_seri_barang = seri.id', 'left')
-                ->where('transaction.tenant_id', \App\Libraries\TenantContext::id())
-                ->whereIn('transaction.status', ['SUCCESS', 'PAID', 'PACKING', 'IN_DELIVERY', 'PARTIALLY_PAID', 'RETUR'])
-                ->groupBy(['sales_product.kode_barang', 'product.nama_barang', 'model_barang.nama_model', 'seri.seri'])
-                ->orderBy('total_sold', 'DESC');
+                ->join('sales_product', 'sales_product.kode_barang = product.id_barang', 'left')
+                ->join('transaction', $onTrx, 'left')
+                ->where('product.tenant_id', \App\Libraries\TenantContext::id())
+                ->groupBy(['product.id_barang', 'product.nama_barang', 'model_barang.nama_model', 'seri.seri']);
+
+            if ($min_stock !== null && $min_stock !== '') {
+                $query->having('total_stock >=', (int) $min_stock);
+            }
+            if ($max_sold !== null && $max_sold !== '') {
+                $query->having('total_sold <=', (int) $max_sold);
+            }
 
             if (!empty($namaProduct)) {
                 $query->groupStart()
-                    ->like("CONCAT_WS(' ', product.nama_barang, model_barang.nama_model, seri.seri)", $namaProduct)
+                    ->like("product.nama_barang", $namaProduct)
+                    ->orLike("model_barang.nama_model", $namaProduct)
+                    ->orLike("seri.seri", $namaProduct)
                     ->orLike("product.id_barang", $namaProduct)
                     ->groupEnd();
             }
 
-            if ($date_start && $date_end) {
-                $start_val = $date_start . ' 00:00:00';
-                $end_val = $date_end . ' 23:59:59';
-                $query->where("transaction.date_time BETWEEN '{$start_val}' AND '{$end_val}'");
-
-            } elseif ($date_start) {
-                $start_val = $date_start . ' 00:00:00';
-                $query->where("transaction.date_time >= '{$start_val}'");
-
-            } elseif ($date_end) {
-                $end_val = $date_end . ' 23:59:59';
-                $query->where("transaction.date_time <= '{$end_val}'");
+            $hasSort = false;
+            if ($sort_sold && in_array(strtoupper($sort_sold), ['ASC', 'DESC'])) {
+                $query->orderBy('total_sold', strtoupper($sort_sold));
+                $hasSort = true;
+            }
+            if ($sort_stock && in_array(strtoupper($sort_stock), ['ASC', 'DESC'])) {
+                $query->orderBy('total_stock', strtoupper($sort_stock));
+                $hasSort = true;
             }
 
-            if (is_string($role)) {
-                $role = array_map('intval', explode(',', $role));
+            if (!$hasSort) {
+                $query->orderBy('total_sold', 'DESC');
             }
 
-            if (!empty($role)) {
-                $query->whereIn('transaction.id_toko', $role);
-            }
-
-            $total_data = $query->countAllResults(false); // Hitung total data
+            $total_data = $query->countAllResults(false);
             $query->limit($limit, $offset);
 
             $result = $query->get()->getResultArray();
-
             $total_page = ceil($total_data / $limit);
-
 
             return $this->jsonResponse->multiResp(
                 'Success',
@@ -1601,7 +1623,6 @@ class TransactionController extends BaseController
                 $limit,
                 200
             );
-
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
