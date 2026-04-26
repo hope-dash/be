@@ -1529,6 +1529,7 @@ class TransactionController extends BaseController
         $date_start = $this->request->getGet('date_start');
         $date_end = $this->request->getGet('date_end');
         $role = $this->request->getGet('role');
+        $id_toko = $this->request->getGet('id_toko');
         $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
         $page = max((int) ($this->request->getGet('page') ?: 1), 1);
         $offset = ($page - 1) * $limit;
@@ -1538,6 +1539,8 @@ class TransactionController extends BaseController
         $sort_stock = $this->request->getGet('sort_total_stock');
 
         $min_stock = $this->request->getGet('min_stock');
+        $max_stock = $this->request->getGet('max_stock');
+        $min_sold = $this->request->getGet('min_sold');
         $max_sold = $this->request->getGet('max_sold');
 
         try {
@@ -1545,19 +1548,25 @@ class TransactionController extends BaseController
             $onTrx = 'sales_product.id_transaction = transaction.id 
                       AND transaction.status IN ("SUCCESS", "PAID", "PACKING", "IN_DELIVERY", "PARTIALLY_PAID", "RETUR")';
 
+            $stockWhere = "AND stock.dropship = 0";
+
+            if ($id_toko) {
+                $onTrx .= " AND transaction.id_toko = " . (int) $id_toko;
+                $stockWhere .= " AND stock.id_toko = " . (int) $id_toko;
+            } elseif (is_string($role)) {
+                $roleArr = array_filter(array_map('intval', explode(',', $role)), fn($v) => $v > 0);
+                if (!empty($roleArr)) {
+                    $onTrx .= " AND transaction.id_toko IN (" . implode(',', $roleArr) . ")";
+                    $stockWhere .= " AND stock.id_toko IN (" . implode(',', $roleArr) . ")";
+                }
+            }
+
             if ($date_start && $date_end) {
                 $onTrx .= " AND transaction.date_time BETWEEN '{$date_start} 00:00:00' AND '{$date_end} 23:59:59'";
             } elseif ($date_start) {
                 $onTrx .= " AND transaction.date_time >= '{$date_start} 00:00:00'";
             } elseif ($date_end) {
                 $onTrx .= " AND transaction.date_time <= '{$date_end} 23:59:59'";
-            }
-
-            if (is_string($role)) {
-                $roleArr = array_filter(array_map('intval', explode(',', $role)), fn($v) => $v > 0);
-                if (!empty($roleArr)) {
-                    $onTrx .= " AND transaction.id_toko IN (" . implode(',', $roleArr) . ")";
-                }
             }
 
             $query = $this->db->table('product')
@@ -1569,7 +1578,7 @@ class TransactionController extends BaseController
                         SELECT COALESCE(SUM(stock.stock), 0) 
                         FROM stock 
                         WHERE stock.id_barang = product.id_barang 
-                        AND stock.dropship = 0
+                        ' . $stockWhere . '
                     ) AS total_stock')
                 ->join('model_barang', 'product.id_model_barang = model_barang.id')
                 ->join('seri', 'product.id_seri_barang = seri.id', 'left')
@@ -1580,6 +1589,12 @@ class TransactionController extends BaseController
 
             if ($min_stock !== null && $min_stock !== '') {
                 $query->having('total_stock >=', (int) $min_stock);
+            }
+            if ($max_stock !== null && $max_stock !== '') {
+                $query->having('total_stock <=', (int) $max_stock);
+            }
+            if ($min_sold !== null && $min_sold !== '') {
+                $query->having('total_sold >=', (int) $min_sold);
             }
             if ($max_sold !== null && $max_sold !== '') {
                 $query->having('total_sold <=', (int) $max_sold);
