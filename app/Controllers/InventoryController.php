@@ -90,6 +90,21 @@ class InventoryController extends ResourceController
 
             $this->db->transComplete();
 
+            log_aktivitas([
+                'user_id' => $user,
+                'action_type' => 'REQUEST_TRANSFER',
+                'target_table' => 'stock_transfer',
+                'target_id' => $transferId,
+                'description' => "Requested stock transfer {$refId} from Toko {$data->source_toko_id} to Toko {$data->target_toko_id}",
+                'detail' => [
+                    'ref_id' => $refId,
+                    'source_toko_id' => $data->source_toko_id,
+                    'target_toko_id' => $data->target_toko_id,
+                    'total_value' => $totalValue,
+                    'note' => $data->note ?? ""
+                ]
+            ]);
+
             return $this->jsonResponse->oneResp('Transfer request created', ['id' => $transferId, 'ref_id' => $refId], 201);
         } catch (\Throwable $e) {
             if ($this->db->transStatus() === false) $this->db->transRollback();
@@ -164,6 +179,20 @@ class InventoryController extends ResourceController
                     'reference_id' => $transfer['ref_id'],
                     'description' => $transfer['note']
                 ]);
+
+                log_aktivitas([
+                    'user_id' => $user,
+                    'action_type' => 'TRANSFER_STOCK_ITEM',
+                    'target_table' => 'product',
+                    'target_id' => $code,
+                    'description' => "Transfered $qty pcs from Toko {$transfer['source_toko_id']} to Toko {$transfer['target_toko_id']} (Ref: {$transfer['ref_id']})",
+                    'detail' => [
+                        'from_toko' => $transfer['source_toko_id'],
+                        'to_toko' => $transfer['target_toko_id'],
+                        'qty' => $qty,
+                        'ref_id' => $transfer['ref_id']
+                    ]
+                ]);
             }
 
             // Accounting Journals
@@ -198,6 +227,15 @@ class InventoryController extends ResourceController
 
             $this->db->transComplete();
 
+            log_aktivitas([
+                'user_id' => $user,
+                'action_type' => 'APPROVE_TRANSFER',
+                'target_table' => 'stock_transfer',
+                'target_id' => $id,
+                'description' => "Approved stock transfer {$transfer['ref_id']} from Toko {$transfer['source_toko_id']} to Toko {$transfer['target_toko_id']}",
+                'detail' => $transfer
+            ]);
+
             return $this->jsonResponse->oneResp('Transfer approved and executed', ['ref_id' => $refId], 200);
 
         } catch (\Throwable $e) {
@@ -217,6 +255,15 @@ class InventoryController extends ResourceController
         $this->stockTransferModel->update($id, [
             'status' => 'REJECTED',
             'approved_by' => $user // We use this field to track who took action
+        ]);
+
+        log_aktivitas([
+            'user_id' => $user,
+            'action_type' => 'REJECT_TRANSFER',
+            'target_table' => 'stock_transfer',
+            'target_id' => $id,
+            'description' => "Rejected stock transfer {$transfer['ref_id']}",
+            'detail' => $transfer
         ]);
 
         return $this->jsonResponse->oneResp('Transfer rejected', null, 200);

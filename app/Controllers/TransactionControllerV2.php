@@ -816,7 +816,10 @@ class TransactionControllerV2 extends ResourceController
                     'category' => $adj['category'] ?? '',
                     'component_name' => $componentName,
                     'type' => $type,
-                    'amount' => $amount
+                    'amount' => $amount,
+                    'discount_adj' => $discountAdjustment,
+                    'income_adj' => $incomeAdjustment,
+                    'ppn_adj' => $ppnChange
                 ];
             }
 
@@ -946,6 +949,9 @@ class TransactionControllerV2 extends ResourceController
                     'component_name' => $adjLog['component_name'],
                     'type' => $adjLog['type'],
                     'amount' => $adjLog['amount'],
+                    'discount_adj' => $adjLog['discount_adj'],
+                    'income_adj' => $adjLog['income_adj'],
+                    'ppn_adj' => $adjLog['ppn_adj'],
                     'date' => date('Y-m-d H:i:s')
                 ];
             }
@@ -1056,9 +1062,22 @@ class TransactionControllerV2 extends ResourceController
             $ppnValue = (float)($metaMap['ppn_value'] ?? 0);
             $itemDiscountTotal = (float)($metaMap['item_discount_total'] ?? 0);
             $txDiscountValue = (float)($metaMap['tx_discount_value'] ?? 0);
-            $totalDiscount = $itemDiscountTotal + $txDiscountValue;
             $shippingCost = (float)($metaMap['biaya_pengiriman'] ?? 0);
             $isFreeOngkir = ($metaMap['free_ongkir'] ?? '0') === '1';
+
+            // Handle Adjustments reversal
+            $adjustmentsJSON = $metaMap['adjustments'] ?? null;
+            $adjustments = $adjustmentsJSON ? json_decode($adjustmentsJSON, true) : [];
+            $adjDiscountTotal = 0;
+            $adjIncomeTotal = 0;
+
+            foreach ($adjustments as $adj) {
+                $adjDiscountTotal += (float)($adj['discount_adj'] ?? 0);
+                $adjIncomeTotal += (float)($adj['income_adj'] ?? 0);
+            }
+
+            $totalDiscount = $itemDiscountTotal + $txDiscountValue + $adjDiscountTotal;
+            $totalSales = (float)$trx['amount'] + $adjIncomeTotal;
 
             // Reverse AR
             $this->addJournalItem($jIdSales, '10' . $trx['id_toko'] . '3', 0, $trx['actual_total'], $trx['id_toko']);
@@ -1067,13 +1086,21 @@ class TransactionControllerV2 extends ResourceController
             if ($totalDiscount > 0) {
                 $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '2', 0, $totalDiscount, $trx['id_toko']);
             }
+            elseif ($totalDiscount < 0) {
+                $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '2', abs($totalDiscount), 0, $trx['id_toko']);
+            }
 
             // Reverse Gross Sales
-            $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $trx['amount'], 0, $trx['id_toko']);
+            if ($totalSales != 0) {
+                $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $totalSales, 0, $trx['id_toko']);
+            }
 
             // Reverse PPN Keluaran
             if ($ppnValue > 0) {
                 $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '5', $ppnValue, 0, $trx['id_toko']);
+            }
+            elseif ($ppnValue < 0) {
+                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '5', 0, abs($ppnValue), $trx['id_toko']);
             }
 
             // Reverse Shipping (Only if NOT delivered)
