@@ -1830,8 +1830,11 @@ class TransactionControllerV2 extends ResourceController
 
             // 1. Get Transaction with Toko info
             $transaction = $this->transactionModel
-                ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo, toko.bank, toko.nomer_rekening, toko.nama_pemilik')
+                ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo, toko.bank, toko.nomer_rekening, toko.nama_pemilik,
+                    u_created.name as creator_name, u_updated.name as updater_name')
                 ->join('toko', 'transaction.id_toko = toko.id AND toko.tenant_id = transaction.tenant_id', 'left')
+                ->join('users u_created', 'transaction.created_by = u_created.user_id', 'left')
+                ->join('users u_updated', 'transaction.updated_by = u_updated.user_id', 'left')
                 ->find($id);
 
             if (!$transaction)
