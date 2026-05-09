@@ -69,8 +69,10 @@ $routes->group('api', ['filter' => 'tenant'], function ($routes) {
     $routes->get('invoice/download/(:num)', 'InvoiceController::downloadPdf/$1');
     $routes->get('invoice/download-mpdf/(:num)', 'InvoiceController::downloadPdfMpdf/$1');
     $routes->get('receipt/download/(:num)', 'InvoiceController::downloadReceiptPdf/$1');
+    $routes->get('resi/download/(:num)', 'InvoiceController::downloadResiPdf/$1');
     $routes->get('invoice/(:num)', 'InvoiceController::view/$1');
     $routes->get('receipt/(:num)', 'InvoiceController::receipt/$1');
+    $routes->get('resi/(:num)', 'InvoiceController::resi/$1');
 
     // Customer V2 Public
     $routes->group('v2/customer', function ($routes) {

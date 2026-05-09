@@ -205,14 +205,84 @@ class InvoiceController extends Controller
             ->setBody($dompdf->output());
     }
 
+    public function resi($id = null)
+    {
+        if (!$id) {
+            return redirect()->to('/');
+        }
+
+        $transaction = $this->getTransactionData($id);
+
+        if (!$transaction) {
+            return view('errors/html/error_404');
+        }
+
+        $data = [
+            'transaction' => $transaction
+        ];
+
+        return view('invoice/resi', $data);
+    }
+
+    public function downloadResiPdf($id = null)
+    {
+        if (!$id) {
+            return redirect()->to('/');
+        }
+
+        $transaction = $this->getTransactionData($id);
+
+        if (!$transaction) {
+            return $this->response->setStatusCode(404)->setJSON(['error' => 'Transaction not found']);
+        }
+
+        $data = [
+            'transaction' => $transaction
+        ];
+
+        // Load view (optimized for A6)
+        $html = view('invoice/resi', $data);
+
+        // Initialize Dompdf with proper options
+        $options = new \Dompdf\Options();
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('isRemoteEnabled', true);
+        $options->set('defaultFont', 'DejaVu Sans');
+        $options->set('chroot', realpath(FCPATH));
+
+        $dompdf = new \Dompdf\Dompdf($options);
+        $dompdf->loadHtml($html);
+
+        // Set paper size to A6 (105mm x 148mm)
+        $dompdf->setPaper('A6', 'portrait');
+
+        // Render PDF
+        $dompdf->render();
+
+        // Generate filename
+        $rawCustName = $transaction['customer']['nama_customer'] ?? $transaction['meta']['customer_name'] ?? '';
+        $customerSuffix = $rawCustName ? '-' . preg_replace('/[^A-Za-z0-9\-]/', '_', trim($rawCustName)) : '';
+        $invNumber = $transaction['invoice_number'] ?? $transaction['invoice'] ?? 'RESI-' . str_pad($id, 6, '0', STR_PAD_LEFT);
+        $filename = 'Resi-' . $invNumber . $customerSuffix . '.pdf';
+
+        // Output PDF for download using CI response to ensure filters (CORS) are applied
+        return $this->response
+            ->setHeader('Content-Type', 'application/pdf')
+            ->setHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
+            ->setBody($dompdf->output());
+    }
+
+
     private function getTransactionData($id)
     {
         $db = \Config\Database::connect();
 
         // 1. Get Transaction with Toko info (Matches TransactionControllerV2::getDetail)
         $transaction = $this->transactionModel
-            ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo, toko.bank, toko.nomer_rekening, toko.nama_pemilik')
+            ->select('transaction.*, toko.toko_name, toko.alamat as toko_alamat, toko.phone_number as toko_phone, toko.image_logo as toko_logo, toko.bank, toko.nomer_rekening, toko.nama_pemilik, creator.name as creator_name, updater.name as updater_name')
             ->join('toko', 'transaction.id_toko = toko.id AND toko.tenant_id = transaction.tenant_id', 'left')
+            ->join('users as creator', 'transaction.created_by = creator.user_id', 'left')
+            ->join('users as updater', 'transaction.updated_by = updater.user_id', 'left')
             ->find($id);
 
         if (!$transaction) {

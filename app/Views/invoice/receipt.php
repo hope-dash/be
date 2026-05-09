@@ -222,7 +222,7 @@
             <div class="info-row">
                 <span class="info-label">Kasir:</span>
                 <span>
-                    <?= esc($transaction['meta']['kasir'] ?? 'Admin') ?>
+                    <?= esc($transaction['creator_name'] ?? 'Admin') ?>
                 </span>
             </div>
             <div class="info-row">
