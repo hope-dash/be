@@ -1972,15 +1972,20 @@ class TransactionControllerV2 extends ResourceController
                 ->limit($limit, $offset)
                 ->findAll();
 
-            // Enrich with meta data
-            foreach ($transactions as &$trx) {
-                $meta = $this->transactionMetaModel
-                    ->where('transaction_id', $trx['id'])
+            // Enrich with meta data - OPTIMIZED: Batch load metadata to avoid N+1 queries
+            if (!empty($transactions)) {
+                $trxIds = array_column($transactions, 'id');
+                $metas = $this->transactionMetaModel
+                    ->whereIn('transaction_id', $trxIds)
                     ->findAll();
 
-                $trx['meta'] = [];
-                foreach ($meta as $m) {
-                    $trx['meta'][$m['key']] = $m['value'];
+                $metaByTrx = [];
+                foreach ($metas as $m) {
+                    $metaByTrx[$m['transaction_id']][$m['key']] = $m['value'];
+                }
+
+                foreach ($transactions as &$trx) {
+                    $trx['meta'] = $metaByTrx[$trx['id']] ?? [];
                 }
             }
 
