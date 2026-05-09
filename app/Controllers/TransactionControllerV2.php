@@ -1950,7 +1950,11 @@ class TransactionControllerV2 extends ResourceController
         try {
             $status = $this->request->getGet('status'); // e.g., PAID, PARTIALLY_PAID
             $idToko = $this->request->getGet('id_toko');
+            
+            // Optimization: Cap the limit to prevent server overload from huge requests
             $limit = (int)$this->request->getGet('limit') ?: 20;
+            if ($limit > 100) $limit = 100;
+            
             $page = (int)$this->request->getGet('page') ?: 1;
             $offset = ($page - 1) * $limit;
 
@@ -1964,18 +1968,24 @@ class TransactionControllerV2 extends ResourceController
                 $builder = $builder->where('id_toko', $idToko);
             }
 
+            // Optimization: countAllResults is standard, but ensure we don't fetch data here
             $totalData = $builder->countAllResults(false);
             $totalPage = ceil($totalData / $limit);
 
+            // Optimization: Select only necessary columns for the list view to reduce memory/bandwidth
             $transactions = $builder
+                ->select('id, invoice, status, delivery_status, amount, actual_total, id_toko, created_at, created_by')
                 ->orderBy('created_at', 'DESC')
                 ->limit($limit, $offset)
                 ->findAll();
 
-            // Enrich with meta data - OPTIMIZED: Batch load metadata to avoid N+1 queries
+            // Enrich with meta data - FURTHER OPTIMIZED
             if (!empty($transactions)) {
                 $trxIds = array_column($transactions, 'id');
+                
+                // Only fetch necessary columns from meta table
                 $metas = $this->transactionMetaModel
+                    ->select('transaction_id, key, value')
                     ->whereIn('transaction_id', $trxIds)
                     ->findAll();
 
@@ -1986,7 +1996,12 @@ class TransactionControllerV2 extends ResourceController
 
                 foreach ($transactions as &$trx) {
                     $trx['meta'] = $metaByTrx[$trx['id']] ?? [];
+                    
+                    // Optional: Clean up memory as we go
+                    unset($metaByTrx[$trx['id']]);
                 }
+                unset($metas);
+                unset($metaByTrx);
             }
 
             return $this->jsonResponse->multiResp('', $transactions, $totalData, $totalPage, $page, $limit, 200);
