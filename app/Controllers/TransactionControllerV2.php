@@ -509,7 +509,8 @@ class TransactionControllerV2 extends ResourceController
             $this->transactionModel->update($id, [
                 'total_payment' => $newTotalPaid,
                 'status' => $newStatus,
-                'delivery_status' => 'PENDING'
+                'delivery_status' => 'PENDING',
+                'updated_by' => $userId
             ]);
 
             $this->db->transComplete();
@@ -568,7 +569,8 @@ class TransactionControllerV2 extends ResourceController
                 // Set transaction status back to WAITING_PAYMENT
                 $newStatus = 'WAITING_PAYMENT';
                 $this->transactionModel->update($id, [
-                    'status' => $newStatus
+                    'status' => $newStatus,
+                    'updated_by' => $userId
                 ]);
 
                 log_aktivitas([
@@ -607,7 +609,8 @@ class TransactionControllerV2 extends ResourceController
                 $this->transactionModel->update($id, [
                     'total_payment' => $newTotalPaid,
                     'status' => $newStatus,
-                    'delivery_status' => 'PENDING'
+                    'delivery_status' => 'PENDING',
+                    'updated_by' => $userId
                 ]);
 
                 log_aktivitas([
@@ -936,7 +939,8 @@ class TransactionControllerV2 extends ResourceController
 
             $this->transactionModel->update($id, [
                 'actual_total' => $newActualTotal,
-                'status' => $newStatus
+                'status' => $newStatus,
+                'updated_by' => $userId
             ]);
 
             // Save adjustments to meta
@@ -1149,7 +1153,10 @@ class TransactionControllerV2 extends ResourceController
                 ]);
             }
 
-            $this->transactionModel->update($id, ['status' => $newStatus]);
+            $this->transactionModel->update($id, [
+                'status' => $newStatus,
+                'updated_by' => $userId
+            ]);
 
             $this->db->transComplete();
 
@@ -1360,7 +1367,8 @@ class TransactionControllerV2 extends ResourceController
             $this->transactionModel->update($id, [
                 'amount' => $newGrossAmount,
                 'actual_total' => $newGrandTotal,
-                'total_modal' => $newTotalModal
+                'total_modal' => $newTotalModal,
+                'updated_by' => $userId
             ]);
 
             // Update Meta Records
@@ -1415,7 +1423,10 @@ class TransactionControllerV2 extends ResourceController
 
             // 6. Handle Refund needed
             if (!empty($data->refund_money) && $data->refund_money == true) {
-                $this->transactionModel->update($id, ['status' => 'NEED_REFUND']);
+                $this->transactionModel->update($id, [
+                    'status' => 'NEED_REFUND',
+                    'updated_by' => $userId
+                ]);
                 // The refund amount is based on the reduction of actual_total
                 $refundTotal = $totalARReduction; 
                 
@@ -1522,7 +1533,8 @@ class TransactionControllerV2 extends ResourceController
 
             $this->transactionModel->update($id, [
                 'total_payment' => $newTotalPaid,
-                'status' => $newStatus
+                'status' => $newStatus,
+                'updated_by' => $userId
             ]);
 
             $this->db->transComplete();
@@ -1594,7 +1606,10 @@ class TransactionControllerV2 extends ResourceController
             // But we also added `delivery_status` column in migration calling it "Shipping Status"
 
             if ($status) {
-                $this->transactionModel->update($id, ['delivery_status' => $status]);
+                $this->transactionModel->update($id, [
+                    'delivery_status' => $status,
+                    'updated_by' => $userId
+                ]);
 
                 // Also sync to meta for consistency
                 $this->updateMeta($id, 'shipping_status', $status);
