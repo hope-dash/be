@@ -222,9 +222,11 @@ class ProductController extends ResourceController
     {
         $kode = $this->request->getPost('kode');
         $images = $this->request->getFiles();
-        $imagePaths = $this->request->getPost('image');
+        $imagePaths = $this->request->getPost('existing_image') ?? [];
 
-        $uploadedImagePaths = [];
+        // If single value passed instead of array, ensure array
+        if (!is_array($imagePaths)) $imagePaths = [$imagePaths];
+
         $existingImages = $this->imageModel->where('type', 'product')
             ->where('kode', $kode)
             ->findAll();
@@ -242,8 +244,13 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error("Direktori upload tidak dapat ditulis: " . $uploadPath, 500);
         }
 
+        $newImagesPathMap = [];
+        $existingImagesPathMap = [];
+
+        // Process new images
         if (!empty($images['image'])) {
-            foreach ($images['image'] as $image) {
+            $imageArray = is_array($images['image']) ? $images['image'] : [$images['image']];
+            foreach ($imageArray as $index => $image) {
                 if ($image->isValid()) {
                     $mimeType = $image->getMimeType();
                     $originalName = $image->getName();
@@ -251,26 +258,15 @@ class ProductController extends ResourceController
                     $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
 
                     if ($ext === 'webp') {
-                        // File sudah webp, langsung pindahkan ke tujuan
                         $webpName = bin2hex(random_bytes(10)) . '.webp';
-                        $finalPath = ROOTPATH . 'public/hope/images/' . $webpName;
                         $image->move(ROOTPATH . 'public/hope/images', $webpName);
-
                         $finalImagePath = base_url('hope/images/' . $webpName);
-                        $uploadedImagePaths[] = $finalImagePath;
-
-                        if (!in_array($finalImagePath, $existingImageUrls)) {
-                            $this->imageModel->insert([
-                                'type' => "product",
-                                'kode' => $kode,
-                                'url' => $finalImagePath,
-                            ]);
-                        }
-
+                        $newImagesPathMap[$index] = $finalImagePath;
                         continue;
                     }
 
                     // Convert ke WebP
+                    $source = null;
                     switch ($mimeType) {
                         case 'image/jpeg':
                             $source = imagecreatefromjpeg($tempPath);
@@ -284,74 +280,74 @@ class ProductController extends ResourceController
                         case 'image/avif':
                             if (function_exists('imagecreatefromavif')) {
                                 $source = imagecreatefromavif($tempPath);
-                            } else {
-                                return $this->jsonResponse->oneResp('AVIF not supported on this server', [], 400);
                             }
                             break;
-                        default:
-                            return $this->jsonResponse->oneResp('Unsupported image format', [], 400);
                     }
 
-                    if (!$source) {
-                        return $this->jsonResponse->oneResp('Failed to process image file', [], 400);
+                    if ($source) {
+                        $webpName = bin2hex(random_bytes(10)) . '.webp';
+                        $webpPath = ROOTPATH . 'public/hope/images/' . $webpName;
+
+                        imagewebp($source, $webpPath, 80);
+                        imagedestroy($source);
+
+                        $finalImagePath = base_url('hope/images/' . $webpName);
+                        $newImagesPathMap[$index] = $finalImagePath;
                     }
-
-                    $webpName = bin2hex(random_bytes(10)) . '.webp';
-                    $webpPath = ROOTPATH . 'public/hope/images/' . $webpName;
-
-                    imagewebp($source, $webpPath, 80);
-                    imagedestroy($source);
-
-                    $finalImagePath = base_url('hope/images/' . $webpName);
-                    $uploadedImagePaths[] = $finalImagePath;
-
-                    if (!in_array($finalImagePath, $existingImageUrls)) {
-                        $this->imageModel->insert([
-                            'type' => "product",
-                            'kode' => $kode,
-                            'url' => $finalImagePath,
-                        ]);
-                    }
-                } else {
-                    return $this->jsonResponse->oneResp('Invalid image file', [], 400);
                 }
             }
         }
 
+        // Process existing image paths
         if (!empty($imagePaths)) {
-            foreach ($imagePaths as $imagePath) {
-                if (file_exists(ROOTPATH . 'public/' . $imagePath)) {
-                    $uploadedImagePaths[] = $imagePath;
-                    if (!in_array($imagePath, $existingImageUrls)) {
-                        $this->imageModel->insert([
-                            'type' => "product",
-                            'kode' => $kode,
-                            'url' => $imagePath,
-                        ]);
-                    }
-                } else {
-                    return $this->jsonResponse->oneResp('Invalid image path: ' . $imagePath, [], 400);
-                }
+            foreach ($imagePaths as $index => $imagePath) {
+                $existingImagesPathMap[$index] = $imagePath;
             }
         }
 
+        // Reconstruct final order based on array keys (indexes)
+        $uploadedImagePaths = [];
+        $allIndexes = array_merge(array_keys($newImagesPathMap), array_keys($existingImagesPathMap));
+        if (!empty($allIndexes)) {
+            sort($allIndexes);
+            $allIndexes = array_unique($allIndexes);
+            foreach ($allIndexes as $index) {
+                if (isset($newImagesPathMap[$index])) {
+                    $uploadedImagePaths[] = $newImagesPathMap[$index];
+                } elseif (isset($existingImagesPathMap[$index])) {
+                    $uploadedImagePaths[] = $existingImagesPathMap[$index];
+                }
+            }
+        } else {
+            // Fallback: just append them if no indexes provided
+            $uploadedImagePaths = array_merge(array_values($newImagesPathMap), array_values($existingImagesPathMap));
+        }
+
+        // Insert new URLs
+        foreach ($uploadedImagePaths as $finalImagePath) {
+            if (!in_array($finalImagePath, $existingImageUrls)) {
+                $this->imageModel->insert([
+                    'type' => "product",
+                    'kode' => $kode,
+                    'url' => $finalImagePath,
+                ]);
+            }
+        }
+
+        // Delete removed images
         foreach ($existingImages as $existingImage) {
             if (!in_array($existingImage['url'], $uploadedImagePaths)) {
                 $this->imageModel->delete($existingImage['id']);
             }
         }
 
-        // Update index berdasarkan urutan akhir di $uploadedImagePaths
+        // Update indexes
         foreach ($uploadedImagePaths as $idx => $url) {
             $this->db->table('image')
                 ->where('type', 'product')
                 ->where('kode', $kode)
                 ->where('url', $url)
                 ->update(['index' => $idx]);
-        }
-
-        if (empty($uploadedImagePaths)) {
-            return $this->jsonResponse->oneResp('No images or paths provided', [], 400);
         }
 
         return $this->jsonResponse->oneResp('Images uploaded successfully', ['image_paths' => $uploadedImagePaths], 201);
