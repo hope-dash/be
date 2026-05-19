@@ -214,7 +214,6 @@
             <div class="resi-cell">
                 <span class="resi-label">No. Resi</span>
                 <span class="resi-value">
-                    <?= strtoupper(esc($transaction['meta']['courier'] ?? $transaction['meta']['pengiriman'] ?? 'REGULER')) ?>
                     <?= esc($transaction['meta']['resi'] ?? '-') ?>
                 </span>
             </div>
@@ -230,7 +229,7 @@
                 <span
                     class="addr-detail"><?= esc($transaction['customer']['phone_number'] ?? $transaction['meta']['customer_phone'] ?? '-') ?></span>
                 <span class="addr-detail">
-                    <?= esc($transaction['customer']['alamat'] ?? '') ?>
+                    <?= esc($transaction['meta']['alamat'] ?? '') ?>
                     <?php if (!empty($transaction['meta']['kecamatan'])): ?>
                         <?= esc($transaction['meta']['kecamatan']) ?>,
                     <?php endif; ?>
@@ -239,6 +238,9 @@
                     <?php endif; ?>
                     <?php if (!empty($transaction['meta']['provinsi'])): ?>
                         , <?= esc($transaction['meta']['provinsi']) ?>
+                    <?php endif; ?>
+                    <?php if (!empty($transaction['meta']['kode_pos'])): ?>
+                        , <?= esc($transaction['meta']['kode_pos']) ?>
                     <?php endif; ?>
                 </span>
             </div>
@@ -301,6 +303,13 @@
                 <?php endforeach; ?>
             </tbody>
         </table>
+
+        <?php if (!empty($transaction['meta']['notes'])): ?>
+            <div style="border-top: 1px dashed #000; padding: 1.5mm 2mm; font-size: 7.2pt; background-color: #fff8f8;">
+                <strong>Catatan:</strong> <span
+                    style="color: #d00; font-weight: bold;"><?= esc($transaction['meta']['notes']) ?></span>
+            </div>
+        <?php endif; ?>
 
         <div class="footer">
             Terima kasih telah berbelanja di <?= esc($transaction['toko_name'] ?? 'HOPE') ?>

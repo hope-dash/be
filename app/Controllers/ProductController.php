@@ -341,6 +341,15 @@ class ProductController extends ResourceController
             }
         }
 
+        // Update index berdasarkan urutan akhir di $uploadedImagePaths
+        foreach ($uploadedImagePaths as $idx => $url) {
+            $this->db->table('image')
+                ->where('type', 'product')
+                ->where('kode', $kode)
+                ->where('url', $url)
+                ->update(['index' => $idx]);
+        }
+
         if (empty($uploadedImagePaths)) {
             return $this->jsonResponse->oneResp('No images or paths provided', [], 400);
         }
@@ -923,6 +932,7 @@ class ProductController extends ResourceController
         $p['images'] = array_column(
             $this->imageModel
                 ->where(['type' => 'product', 'kode' => $id])
+                ->orderBy('index', 'ASC')
                 ->findAll(),
             'url'
         );
@@ -1296,6 +1306,7 @@ class ProductController extends ResourceController
                     ->select('kode, url')
                     ->where('type', 'product')
                     ->whereIn('kode', $productIds)
+                    ->orderBy('index', 'ASC')
                     ->findAll();
                 foreach ($images as $img) {
                     $imageMap[$img['kode']][] = $img['url'];
@@ -1451,7 +1462,7 @@ class ProductController extends ResourceController
                 'stock.barang_cacat',
                 'toko.toko_name',
                 'product.harga_jual',
-                '(SELECT url FROM image WHERE image.kode = product.id AND image.type = "product" LIMIT 1) as image',
+                '(SELECT url FROM image WHERE image.kode = product.id AND image.type = "product" ORDER BY image.index ASC LIMIT 1) as image',
                 '(SELECT COALESCE(SUM(sp.jumlah), 0) 
                   FROM sales_product sp 
                   JOIN transaction t ON t.id = sp.id_transaction 
@@ -1720,6 +1731,7 @@ class ProductController extends ResourceController
                     ->select('kode, url')
                     ->where('type', 'product')
                     ->whereIn('kode', $productIds)
+                    ->orderBy('index', 'ASC')
                     ->findAll();
                 foreach ($images as $img) {
                     $imageMap[$img['kode']][] = $img['url'];
@@ -1922,6 +1934,7 @@ class ProductController extends ResourceController
                     ->select('kode, url')
                     ->where('type', 'product')
                     ->whereIn('kode', $productIds)
+                    ->orderBy('index', 'ASC')
                     ->findAll();
                 foreach ($images as $img) {
                     $imageMap[$img['kode']][] = $img['url'];
