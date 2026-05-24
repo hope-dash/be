@@ -391,79 +391,55 @@ class AccountingReportController extends ResourceController
         }
 
         // 2. Add Cash-Basis portions from Payments in this period
-        $paymentsBuilder = $this->db->table('transaction_payments tp')
-            ->select('tp.amount, tp.transaction_id, t.actual_total')
+        $paymentsData = $this->db->table('transaction_payments tp')
+            ->select('tp.amount, tp.transaction_id, t.actual_total, a.code, a.name, a.type, ji.debit, ji.credit, j.reference_type')
             ->join('transaction t', 't.id = tp.transaction_id')
+            ->join('journals j', 'j.reference_id = t.id')
+            ->join('journal_items ji', 'ji.journal_id = j.id')
+            ->join('accounts a', 'a.id = ji.account_id')
             ->where('tp.paid_at >=', $startDate . ' 00:00:00')
             ->where('tp.paid_at <=', $endDate . ' 23:59:59')
-            ->where('tp.status', 'VERIFIED');
+            ->where('tp.status', 'VERIFIED')
+            ->where('t.actual_total >', 0)
+            ->whereIn('j.reference_type', $accrualExcludes)
+            ->whereIn('a.type', ['REVENUE', 'EXPENSE']);
 
         if ($tokoId) {
-            $paymentsBuilder->where('t.id_toko', $tokoId);
+            $paymentsData->where('t.id_toko', $tokoId);
         }
 
-        $paymentList = $paymentsBuilder->get()->getResultArray();
+        $paymentsList = $paymentsData->get()->getResultArray();
 
-        if (!empty($paymentList)) {
-            $transactionIds = array_column($paymentList, 'transaction_id');
-            $transactionIds = array_unique(array_filter($transactionIds));
+        foreach ($paymentsList as $row) {
+            $ratio = (float) $row['amount'] / (float) $row['actual_total'];
+            
+            $bal = (float) $row['credit'] - (float) $row['debit'];
+            if ($row['type'] === 'EXPENSE')
+                $bal = -$bal; // Normal debit
 
-            $journalItemsByTx = [];
-            if (!empty($transactionIds)) {
-                $jidItems = $this->db->table('journal_items ji')
-                    ->select('j.reference_id, a.code, a.name, a.type, ji.debit, ji.credit, j.reference_type')
-                    ->join('journals j', 'j.id = ji.journal_id')
-                    ->join('accounts a', 'a.id = ji.account_id')
-                    ->whereIn('j.reference_id', $transactionIds)
-                    ->whereIn('j.reference_type', $accrualExcludes)
-                    ->whereIn('a.type', ['REVENUE', 'EXPENSE'])
-                    ->get()->getResultArray();
+            $recognized = $bal * $ratio;
 
-                foreach ($jidItems as $item) {
-                    $journalItemsByTx[$item['reference_id']][] = $item;
-                }
-            }
+            if ($row['type'] === 'REVENUE') {
+                if ($recognized < 0 && in_array($row['reference_type'], ['CANCEL_SALES', 'RETUR_SALES'])) {
+                    $virtualCode = $row['code'];
+                    $virtualName = $row['name'] . ' (Refund)';
+                    $val = abs($recognized);
 
-            foreach ($paymentList as $p) {
-                if ($p['actual_total'] <= 0)
-                    continue;
-                $ratio = (float) $p['amount'] / (float) $p['actual_total'];
-
-                $txId = $p['transaction_id'];
-                $txItems = $journalItemsByTx[$txId] ?? [];
-
-                foreach ($txItems as $item) {
-                    $bal = (float) $item['credit'] - (float) $item['debit'];
-                    if ($item['type'] === 'EXPENSE')
-                        $bal = -$bal; // Normal debit
-
-                    $recognized = $bal * $ratio;
-
-                    if ($item['type'] === 'REVENUE') {
-                        // Logic: Original sales stay in revenue. Refunds/Cancellations move to Expenses.
-                        if ($recognized < 0 && in_array($item['reference_type'], ['CANCEL_SALES', 'RETUR_SALES'])) {
-                            $virtualCode = $item['code'];
-                            $virtualName = $item['name'] . ' (Refund)';
-                            $val = abs($recognized); // Convert negative revenue reduction to positive expense
-
-                            if (!isset($expenseMap[$virtualCode])) {
-                                $expenseMap[$virtualCode] = ['code' => $virtualCode, 'name' => $virtualName, 'balance' => 0];
-                            }
-                            $expenseMap[$virtualCode]['balance'] += $val;
-                        } else {
-                            if (!isset($revenueMap[$item['code']])) {
-                                $revenueMap[$item['code']] = ['code' => $item['code'], 'name' => $item['name'], 'balance' => 0];
-                            }
-                            $revenueMap[$item['code']]['balance'] += $recognized;
-                        }
-                    } else {
-                        // EXPENSE type (e.g. COGS or reversal of COGS)
-                        if (!isset($expenseMap[$item['code']])) {
-                            $expenseMap[$item['code']] = ['code' => $item['code'], 'name' => $item['name'], 'balance' => 0];
-                        }
-                        $expenseMap[$item['code']]['balance'] += $recognized;
+                    if (!isset($expenseMap[$virtualCode])) {
+                        $expenseMap[$virtualCode] = ['code' => $virtualCode, 'name' => $virtualName, 'balance' => 0];
                     }
+                    $expenseMap[$virtualCode]['balance'] += $val;
+                } else {
+                    if (!isset($revenueMap[$row['code']])) {
+                        $revenueMap[$row['code']] = ['code' => $row['code'], 'name' => $row['name'], 'balance' => 0];
+                    }
+                    $revenueMap[$row['code']]['balance'] += $recognized;
                 }
+            } else {
+                if (!isset($expenseMap[$row['code']])) {
+                    $expenseMap[$row['code']] = ['code' => $row['code'], 'name' => $row['name'], 'balance' => 0];
+                }
+                $expenseMap[$row['code']]['balance'] += $recognized;
             }
         }
 
@@ -671,72 +647,34 @@ class AccountingReportController extends ResourceController
 
     private function getAccountGroupBalance($type, $startDate, $endDate, $tokoId = null, $excludeClosing = true, $excludeReferenceTypes = [])
     {
-        if ($tokoId) {
-            // Find account IDs of this type used in transactions for this toko
-            $usedAccountIdsRaw = $this->db->table('journal_items ji')
-                ->join('journals j', 'j.id = ji.journal_id')
-                ->join('accounts a', 'a.id = ji.account_id')
-                ->where('j.id_toko', $tokoId)
-                ->where('a.type', $type)
-                ->select('ji.account_id')
-                ->distinct()
-                ->get()->getResultArray();
-            $accountIds = array_column($usedAccountIdsRaw, 'account_id');
-
-            // Add accounts owned by this toko of this type
-            $ownedAccounts = $this->accountModel->where('type', $type)->where('id_toko', $tokoId)->select('id')->findAll();
-            $accountIds = array_unique(array_merge($accountIds, array_column($ownedAccounts, 'id')));
-
-            if (empty($accountIds)) {
-                $accounts = [];
-            } else {
-                $accounts = $this->accountModel->whereIn('id', $accountIds)->orderBy('code', 'ASC')->findAll();
-            }
-        } else {
-            $accounts = $this->accountModel->where('type', $type)->orderBy('code', 'ASC')->findAll();
-        }
-
-        if (empty($accounts)) {
-            return ['details' => [], 'total' => 0];
-        }
-
-        $accountIds = array_column($accounts, 'id');
-
-        // Fetch debits and credits in one query grouped by account_id
-        $builderSum = $this->db->table('journal_items ji')
-            ->select('ji.account_id, SUM(ji.debit) as total_debit, SUM(ji.credit) as total_credit')
+        $builder = $this->db->table('journal_items ji')
+            ->select('a.code, a.name, SUM(ji.debit) as total_debit, SUM(ji.credit) as total_credit')
             ->join('journals j', 'j.id = ji.journal_id')
-            ->whereIn('ji.account_id', $accountIds)
+            ->join('accounts a', 'a.id = ji.account_id')
+            ->where('a.type', $type)
             ->where('j.date >=', $startDate)
             ->where('j.date <=', $endDate);
 
         if ($tokoId) {
-            $builderSum->where('j.id_toko', $tokoId);
+            $builder->where('j.id_toko', $tokoId);
         }
         if ($excludeClosing) {
-            $builderSum->where('j.reference_type !=', 'CLOSING');
+            $builder->where('j.reference_type !=', 'CLOSING');
         }
         if (!empty($excludeReferenceTypes)) {
-            $builderSum->whereNotIn('j.reference_type', $excludeReferenceTypes);
+            $builder->whereNotIn('j.reference_type', $excludeReferenceTypes);
         }
 
-        $sumResults = $builderSum->groupBy('ji.account_id')->get()->getResultArray();
-
-        $balanceMap = [];
-        foreach ($sumResults as $row) {
-            $balanceMap[$row['account_id']] = [
-                'debit' => (float) $row['total_debit'],
-                'credit' => (float) $row['total_credit'],
-            ];
-        }
+        $results = $builder->groupBy('a.id, a.code, a.name')
+            ->orderBy('a.code', 'ASC')
+            ->get()->getResultArray();
 
         $list = [];
         $totalGroup = 0;
 
-        foreach ($accounts as $acc) {
-            $accId = $acc['id'];
-            $debit = $balanceMap[$accId]['debit'] ?? 0.0;
-            $credit = $balanceMap[$accId]['credit'] ?? 0.0;
+        foreach ($results as $row) {
+            $debit = (float) $row['total_debit'];
+            $credit = (float) $row['total_credit'];
 
             if (in_array($type, ['REVENUE', 'EQUITY', 'LIABILITY'])) {
                 $bal = $credit - $debit;
@@ -746,8 +684,8 @@ class AccountingReportController extends ResourceController
 
             if ($bal != 0) {
                 $list[] = [
-                    'code' => $acc['code'],
-                    'name' => $acc['name'],
+                    'code' => $row['code'],
+                    'name' => $row['name'],
                     'balance' => $bal
                 ];
                 $totalGroup += $bal;
