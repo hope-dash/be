@@ -225,7 +225,8 @@ class ProductController extends ResourceController
         $imagePaths = $this->request->getPost('existing_image') ?? [];
 
         // If single value passed instead of array, ensure array
-        if (!is_array($imagePaths)) $imagePaths = [$imagePaths];
+        if (!is_array($imagePaths))
+            $imagePaths = [$imagePaths];
 
         $existingImages = $this->imageModel->where('type', 'product')
             ->where('kode', $kode)
@@ -355,6 +356,8 @@ class ProductController extends ResourceController
 
     private function generateChangeLogString(array $oldData, object $newData): string
     {
+        $kodeBarang = $oldData['id_barang'] ?? $oldData['kode_barang'] ?? 'Unknown';
+        $namaBarang = $oldData['nama_barang'] ?? 'Unknown';
         $changes = [];
 
         $fields = [
@@ -425,10 +428,10 @@ class ProductController extends ResourceController
 
 
         if (empty($changes)) {
-            return "Tidak ada perubahan data.";
+            return "Produk {$kodeBarang} : Tidak ada perubahan data.";
         }
 
-        return implode(", ", $changes) . ".";
+        return "Produk {$kodeBarang} : " . implode(", ", $changes) . ".";
     }
 
     public function updateProduct($id = null)

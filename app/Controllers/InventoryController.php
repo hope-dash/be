@@ -73,7 +73,8 @@ class InventoryController extends ResourceController
             // 2. Save Items and Calculate Value
             foreach ($data->items as $item) {
                 $product = $this->productModel->where('id_barang', $item->kode_barang)->first();
-                if (!$product) throw new \Exception("Product {$item->kode_barang} not found");
+                if (!$product)
+                    throw new \Exception("Product {$item->kode_barang} not found");
 
                 $this->stockTransferItemModel->insert([
                     'transfer_id' => $transferId,
@@ -107,7 +108,8 @@ class InventoryController extends ResourceController
 
             return $this->jsonResponse->oneResp('Transfer request created', ['id' => $transferId, 'ref_id' => $refId], 201);
         } catch (\Throwable $e) {
-            if ($this->db->transStatus() === false) $this->db->transRollback();
+            if ($this->db->transStatus() === false)
+                $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -118,33 +120,40 @@ class InventoryController extends ResourceController
         $user = $this->request->user['user_id'] ?? 0;
         $transfer = $this->stockTransferModel->find($id);
 
-        if (!$transfer) return $this->jsonResponse->error("Transfer not found", 404);
-        if ($transfer['status'] !== 'PENDING') return $this->jsonResponse->error("Transfer is already {$transfer['status']}", 400);
+        if (!$transfer)
+            return $this->jsonResponse->error("Transfer not found", 404);
+        if ($transfer['status'] !== 'PENDING')
+            return $this->jsonResponse->error("Transfer is already {$transfer['status']}", 400);
+
+        $tokoSource = $this->db->table('toko')->select('toko_name')->where('id', $transfer['source_toko_id'])->get()->getRow();
+        $tokoTarget = $this->db->table('toko')->select('toko_name')->where('id', $transfer['target_toko_id'])->get()->getRow();
+        $sourceTokoName = $tokoSource ? $tokoSource->toko_name : "Toko " . $transfer['source_toko_id'];
+        $targetTokoName = $tokoTarget ? $tokoTarget->toko_name : "Toko " . $transfer['target_toko_id'];
 
         $items = $this->stockTransferItemModel->where('transfer_id', $id)->findAll();
-        
+
         $this->db->transStart();
         try {
             // VALIDATION: Check ALL items stock before any movement
             foreach ($items as $item) {
                 $stockSource = $this->stockModel->where('id_barang', $item['kode_barang'])
-                                              ->where('id_toko', $transfer['source_toko_id'])
-                                              ->first();
-                
-                if (!$stockSource || (int)$stockSource['stock'] < (int)$item['qty']) {
+                    ->where('id_toko', $transfer['source_toko_id'])
+                    ->first();
+
+                if (!$stockSource || (int) $stockSource['stock'] < (int) $item['qty']) {
                     throw new \Exception("Insufficient stock for product {$item['kode_barang']} in source store. Available: " . ($stockSource['stock'] ?? 0));
                 }
             }
 
             // EXECUTION: Move stock and create ledgers
             foreach ($items as $item) {
-                $qty = (int)$item['qty'];
+                $qty = (int) $item['qty'];
                 $code = $item['kode_barang'];
 
                 // Deduct Source
                 $stockSource = $this->stockModel->where('id_barang', $code)->where('id_toko', $transfer['source_toko_id'])->first();
                 $this->stockModel->update($stockSource['id'], ['stock' => $stockSource['stock'] - $qty]);
-                
+
                 $this->stockLedgerModel->insert([
                     'id_barang' => $code,
                     'id_toko' => $transfer['source_toko_id'],
@@ -180,12 +189,15 @@ class InventoryController extends ResourceController
                     'description' => $transfer['note']
                 ]);
 
+                $product = $this->productModel->where('id_barang', $code)->first();
+                $productId = $product ? $product['id'] : null;
+
                 log_aktivitas([
                     'user_id' => $user,
                     'action_type' => 'TRANSFER_STOCK_ITEM',
                     'target_table' => 'product',
-                    'target_id' => $code,
-                    'description' => "Transfered $qty pcs from Toko {$transfer['source_toko_id']} to Toko {$transfer['target_toko_id']} (Ref: {$transfer['ref_id']})",
+                    'target_id' => $productId,
+                    'description' => "Transfered $qty pcs $code from {$sourceTokoName} to {$targetTokoName} (Ref: {$transfer['ref_id']})",
                     'detail' => [
                         'from_toko' => $transfer['source_toko_id'],
                         'to_toko' => $transfer['target_toko_id'],
@@ -203,7 +215,7 @@ class InventoryController extends ResourceController
             $date = $transfer['date'];
 
             $j1 = $this->createJournal('TRANSFER_OUT', $refId, "Inventory Move Out -> $toToko", $date, $fromToko);
-            $this->addJournalItem($j1, '10' . $toToko . '4', $totalValue, 0, $fromToko); 
+            $this->addJournalItem($j1, '10' . $toToko . '4', $totalValue, 0, $fromToko);
             $this->addJournalItem($j1, '10' . $fromToko . '4', 0, $totalValue, $fromToko);
 
             $j2 = $this->createJournal('TRANSFER_IN', $refId, "Inventory Move In <- $fromToko", $date, $toToko);
@@ -232,14 +244,15 @@ class InventoryController extends ResourceController
                 'action_type' => 'APPROVE_TRANSFER',
                 'target_table' => 'stock_transfer',
                 'target_id' => $id,
-                'description' => "Approved stock transfer {$transfer['ref_id']} from Toko {$transfer['source_toko_id']} to Toko {$transfer['target_toko_id']}",
+                'description' => "Approved stock transfer {$transfer['ref_id']} from {$sourceTokoName} to {$targetTokoName}",
                 'detail' => $transfer
             ]);
 
             return $this->jsonResponse->oneResp('Transfer approved and executed', ['ref_id' => $refId], 200);
 
         } catch (\Throwable $e) {
-            if ($this->db->transStatus() === false) $this->db->transRollback();
+            if ($this->db->transStatus() === false)
+                $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -249,8 +262,10 @@ class InventoryController extends ResourceController
         $user = $this->request->user['user_id'] ?? 0;
         $transfer = $this->stockTransferModel->find($id);
 
-        if (!$transfer) return $this->jsonResponse->error("Transfer not found", 404);
-        if ($transfer['status'] !== 'PENDING') return $this->jsonResponse->error("Only PENDING transfers can be rejected", 400);
+        if (!$transfer)
+            return $this->jsonResponse->error("Transfer not found", 404);
+        if ($transfer['status'] !== 'PENDING')
+            return $this->jsonResponse->error("Only PENDING transfers can be rejected", 400);
 
         $this->stockTransferModel->update($id, [
             'status' => 'REJECTED',
@@ -277,8 +292,8 @@ class InventoryController extends ResourceController
             $targetToko = $this->request->getGet('target_toko_id');
             $createdBy = $this->request->getGet('created_by');
             $search = $this->request->getGet('search');
-            $page = (int)($this->request->getGet('page') ?? 1);
-            $limit = (int)($this->request->getGet('limit') ?? 10);
+            $page = (int) ($this->request->getGet('page') ?? 1);
+            $limit = (int) ($this->request->getGet('limit') ?? 10);
             $offset = ($page - 1) * $limit;
 
             $builder = $this->stockTransferModel
@@ -294,10 +309,14 @@ class InventoryController extends ResourceController
                 ->join('users u1', 'u1.user_id = stock_transfer.created_by', 'left')
                 ->join('users u2', 'u2.user_id = stock_transfer.approved_by', 'left');
 
-            if ($status) $builder->where('stock_transfer.status', $status);
-            if ($sourceToko) $builder->where('stock_transfer.source_toko_id', $sourceToko);
-            if ($targetToko) $builder->where('stock_transfer.target_toko_id', $targetToko);
-            if ($createdBy) $builder->where('stock_transfer.created_by', $createdBy);
+            if ($status)
+                $builder->where('stock_transfer.status', $status);
+            if ($sourceToko)
+                $builder->where('stock_transfer.source_toko_id', $sourceToko);
+            if ($targetToko)
+                $builder->where('stock_transfer.target_toko_id', $targetToko);
+            if ($createdBy)
+                $builder->where('stock_transfer.created_by', $createdBy);
             if ($search) {
                 $builder->groupStart()
                     ->like('stock_transfer.ref_id', $search)
@@ -316,8 +335,8 @@ class InventoryController extends ResourceController
             return $this->jsonResponse->oneResp('success', [
                 'data' => $data,
                 'pagination' => [
-                    'page' => (int)$page,
-                    'limit' => (int)$limit,
+                    'page' => (int) $page,
+                    'limit' => (int) $limit,
                     'total' => $total,
                     'total_pages' => ceil($total / $limit)
                 ]
@@ -342,8 +361,9 @@ class InventoryController extends ResourceController
                 ->join('users u2', 'u2.user_id = stock_transfer.approved_by', 'left')
                 ->find($id);
 
-            if (!$transfer) return $this->jsonResponse->error("Not found", 404);
-            
+            if (!$transfer)
+                return $this->jsonResponse->error("Not found", 404);
+
             $transfer['items'] = $this->stockTransferItemModel
                 ->select('stock_transfer_item.*, product.nama_barang, 
                         CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(model_barang.nama_model, ""), " ", COALESCE(seri.seri, "")) as nama_lengkap_barang,
