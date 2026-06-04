@@ -167,6 +167,14 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     $routes->get('model_barang/count', 'ProductController::getTotalByModelId');
     $routes->get('seri_barang/count', 'ProductController::getTotalBySeriId');
 
+    // Jasa Service
+    $routes->get('jasa-service', 'JasaServiceController::index');
+    $routes->get('jasa-service/dropdown', 'JasaServiceController::dropdown');
+    $routes->get('jasa-service/(:num)', 'JasaServiceController::show/$1');
+    $routes->post('jasa-service', 'JasaServiceController::create');
+    $routes->put('jasa-service/(:num)', 'JasaServiceController::update/$1');
+    $routes->delete('jasa-service/(:num)', 'JasaServiceController::delete/$1');
+
     // Transactions (Old)
     $routes->post('transaction/belanja', 'PembelianController::createPembelian');
     $routes->put('transaction/belanja/cancel/(:num)', 'PembelianController::cancelPembelian/$1');
