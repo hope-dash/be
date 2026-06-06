@@ -532,6 +532,7 @@ class TransactionController extends BaseController
         $delivery_status = $request->getGet('delivery_status');
         $source = $request->getGet('source');
         $id_toko = $request->getGet('id_toko');
+        $is_service = $request->getGet('is_service');
         $date_start = $request->getGet('date_start');
         $date_end = $request->getGet('date_end');
         $role = $request->getGet('role');
@@ -592,6 +593,13 @@ class TransactionController extends BaseController
                 $builder->whereIn('t.id_toko', $role);
             if ($id_toko)
                 $builder->where('t.id_toko', $id_toko);
+            if ($is_service !== null && $is_service !== '') {
+                if ($is_service === 'true' || $is_service === '1' || $is_service === 1 || $is_service === true) {
+                    $builder->where('t.is_service', 1);
+                } elseif ($is_service === 'false' || $is_service === '0' || $is_service === 0 || $is_service === false) {
+                    $builder->where('t.is_service', 0);
+                }
+            }
             if ($date_start && $date_end) {
                 $builder->where('t.date_time >=', "{$date_start} 00:00:00");
                 $builder->where('t.date_time <=', "{$date_end} 23:59:59");
@@ -765,6 +773,13 @@ class TransactionController extends BaseController
                 $builder->whereIn('t.id_toko', $role);
             if ($id_toko)
                 $builder->where('t.id_toko', $id_toko);
+            if ($is_service !== null && $is_service !== '') {
+                if ($is_service === 'true' || $is_service === '1' || $is_service === 1 || $is_service === true) {
+                    $builder->where('t.is_service', 1);
+                } elseif ($is_service === 'false' || $is_service === '0' || $is_service === 0 || $is_service === false) {
+                    $builder->where('t.is_service', 0);
+                }
+            }
             if ($date_start && $date_end) {
                 $builder->where('t.date_time >=', "{$date_start} 00:00:00");
                 $builder->where('t.date_time <=', "{$date_end} 23:59:59");
@@ -832,6 +847,7 @@ class TransactionController extends BaseController
             t.actual_total,
             t.total_modal,
             t.is_service,
+            t.service_status,
             tk.toko_name,
             tk.image_logo,
             tk.alamat as alamat_toko,

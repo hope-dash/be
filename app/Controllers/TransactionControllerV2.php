@@ -295,6 +295,7 @@ class TransactionControllerV2 extends ResourceController
                 'total_modal' => $totalModal,
                 'po' => $data->po ?? false,
                 'is_service' => $hasService ? 1 : 0,
+                'service_status' => $hasService ? 'WAITING' : null,
                 'created_by' => $userId,
                 'date_time' => date('Y-m-d H:i:s'),
             ];
@@ -2213,6 +2214,7 @@ class TransactionControllerV2 extends ResourceController
         try {
             $status = $this->request->getGet('status'); // e.g., PAID, PARTIALLY_PAID
             $idToko = $this->request->getGet('id_toko');
+            $isService = $this->request->getGet('is_service');
             
             // Optimization: Cap the limit to prevent server overload from huge requests
             $limit = (int)$this->request->getGet('limit') ?: 20;
@@ -2229,6 +2231,14 @@ class TransactionControllerV2 extends ResourceController
 
             if (!empty($idToko)) {
                 $builder = $builder->where('id_toko', $idToko);
+            }
+
+            if ($isService !== null && $isService !== '') {
+                if ($isService === 'true' || $isService === '1' || $isService === 1 || $isService === true) {
+                    $builder = $builder->where('is_service', 1);
+                } elseif ($isService === 'false' || $isService === '0' || $isService === 0 || $isService === false) {
+                    $builder = $builder->where('is_service', 0);
+                }
             }
 
             // Optimization: countAllResults is standard, but ensure we don't fetch data here
@@ -2329,6 +2339,149 @@ class TransactionControllerV2 extends ResourceController
             ]);
 
             return $this->jsonResponse->oneResp('Meta transaksi berhasil diperbarui', [], 200);
+        }
+        catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // Update Technician by Order ID (Transaction ID)
+    public function updateTeknisi($id = null)
+    {
+        try {
+            $data = $this->request->getJSON();
+            $userId = $this->request->user['user_id'] ?? 0;
+
+            if (!$id) {
+                return $this->jsonResponse->error("ID Transaksi wajib diisi", 400);
+            }
+
+            $trx = $this->transactionModel->find($id);
+            if (!$trx) {
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            $teknisiId = $data->teknisi_id ?? $data->teknisi ?? null;
+            if (empty($teknisiId)) {
+                return $this->jsonResponse->error("ID Teknisi wajib diisi", 400);
+            }
+
+            $teknisiUser = $this->db->table('users')->where('user_id', $teknisiId)->where('deleted_at', null)->get()->getRowArray();
+            if (!$teknisiUser) {
+                return $this->jsonResponse->error("Teknisi tidak ditemukan", 404);
+            }
+            $namaTeknisi = $teknisiUser['name'];
+
+            $this->db->transStart();
+
+            // Update or insert teknisi_id in transaction_meta
+            $existsTeknisiId = $this->transactionMetaModel
+                ->where('transaction_id', $id)
+                ->where('key', 'teknisi_id')
+                ->first();
+
+            if ($existsTeknisiId) {
+                $this->transactionMetaModel->update($existsTeknisiId['id'], ['value' => (string)$teknisiId]);
+            } else {
+                $this->transactionMetaModel->insert([
+                    'transaction_id' => $id,
+                    'key' => 'teknisi_id',
+                    'value' => (string)$teknisiId
+                ]);
+            }
+
+            // Update or insert nama_teknisi in transaction_meta
+            $existsNamaTeknisi = $this->transactionMetaModel
+                ->where('transaction_id', $id)
+                ->where('key', 'nama_teknisi')
+                ->first();
+
+            if ($existsNamaTeknisi) {
+                $this->transactionMetaModel->update($existsNamaTeknisi['id'], ['value' => $namaTeknisi]);
+            } else {
+                $this->transactionMetaModel->insert([
+                    'transaction_id' => $id,
+                    'key' => 'nama_teknisi',
+                    'value' => $namaTeknisi
+                ]);
+            }
+
+            // Update teknisi_id in teknisi_komisi table as well
+            $this->db->table('teknisi_komisi')->where('transaction_id', $id)->update(['teknisi_id' => $teknisiId]);
+
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'UPDATE_TEKNISI',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Updated transaction technician: {$namaTeknisi}",
+                'detail' => [
+                    'invoice' => $trx['invoice'],
+                    'teknisi_id' => $teknisiId,
+                    'nama_teknisi' => $namaTeknisi
+                ]
+            ]);
+
+            $this->db->transComplete();
+
+            if ($this->db->transStatus() === false) {
+                throw new \Exception("Gagal memperbarui teknisi transaksi");
+            }
+
+            return $this->jsonResponse->oneResp('Teknisi transaksi berhasil diperbarui', [
+                'teknisi_id' => $teknisiId,
+                'nama_teknisi' => $namaTeknisi
+            ], 200);
+        }
+        catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // Update Service Status
+    public function updateServiceStatus($id = null)
+    {
+        try {
+            $data = $this->request->getJSON();
+            $userId = $this->request->user['user_id'] ?? 0;
+
+            if (!$id) {
+                return $this->jsonResponse->error("ID Transaksi wajib diisi", 400);
+            }
+
+            $trx = $this->transactionModel->find($id);
+            if (!$trx) {
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            if ($trx['is_service'] != 1) {
+                return $this->jsonResponse->error("Transaksi ini bukan tipe jasa/service", 400);
+            }
+
+            $allowedServiceStatuses = ['WAITING', 'CHECKING', 'START', 'FINISH', 'DONE'];
+            $status = strtoupper($data->status ?? '');
+            if (!in_array($status, $allowedServiceStatuses)) {
+                return $this->jsonResponse->error("Status tidak valid. Harus salah satu dari: " . implode(', ', $allowedServiceStatuses), 400);
+            }
+
+            $this->transactionModel->update($id, ['service_status' => $status]);
+
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'UPDATE_SERVICE_STATUS',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Updated service status to {$status}",
+                'detail' => [
+                    'invoice' => $trx['invoice'],
+                    'old_status' => $trx['service_status'],
+                    'new_status' => $status
+                ]
+            ]);
+
+            return $this->jsonResponse->oneResp("Status service berhasil diperbarui ke {$status}", [
+                'service_status' => $status
+            ], 200);
         }
         catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);

@@ -462,11 +462,14 @@
                         style="background: #364fc7; color: white;"><?= esc($delStatus) ?></span></p>
             </div>
 
-            <?php if (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')): ?>
+            <?php if ((isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($transaction['services'])): ?>
                 <div class="info-box" style="background: #fff9db; border: 2px solid #ffe066;">
                     <h3 style="color: #f59f00; border-bottom: 2px solid #ffe066;">Detail Jasa Service</h3>
                     <?php if (!empty($transaction['meta']['imei'])): ?>
                         <p><strong>IMEI / SN:</strong> <?= esc($transaction['meta']['imei']) ?></p>
+                    <?php endif; ?>
+                    <?php if (!empty($transaction['nama_teknisi'])): ?>
+                        <p><strong>Teknisi:</strong> <?= esc($transaction['nama_teknisi']) ?></p>
                     <?php endif; ?>
                     <?php if (!empty($transaction['meta']['kerusakan'])): ?>
                         <p><strong>Kerusakan:</strong> <?= esc($transaction['meta']['kerusakan']) ?></p>

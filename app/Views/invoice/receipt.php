@@ -270,11 +270,14 @@
         <?php endif; ?>
 
         <!-- Service Details (for Service Receipt) -->
-        <?php if (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')): ?>
+        <?php if ((isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($transaction['services'])): ?>
             <div style="font-size: 10px; border-bottom: 1px dashed #000; padding-bottom: 8px; margin-bottom: 10px;">
                 <p class="bold">DETAIL SERVICE:</p>
                 <?php if (!empty($transaction['meta']['imei'])): ?>
                     <p>IMEI/SN: <?= esc($transaction['meta']['imei']) ?></p>
+                <?php endif; ?>
+                <?php if (!empty($transaction['nama_teknisi'])): ?>
+                    <p>Teknisi: <?= esc($transaction['nama_teknisi']) ?></p>
                 <?php endif; ?>
                 <?php if (!empty($transaction['meta']['kerusakan'])): ?>
                     <p>Kerusakan: <?= esc($transaction['meta']['kerusakan']) ?></p>

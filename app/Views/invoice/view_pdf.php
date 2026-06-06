@@ -417,21 +417,25 @@
         <?php endif; ?>
 
         <!-- Service Details (for Service Invoice) -->
-        <?php if (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')): ?>
+        <?php if ((isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($transaction['services'])): ?>
             <div style="margin-bottom: 15px; background: #fff9db; border: 1px solid #ffe066; padding: 10px; border-radius: 4px;">
                 <h3 style="font-size: 11px; font-weight: bold; color: #b45309; border-bottom: 1px solid #ffe066; padding-bottom: 4px; margin-bottom: 6px; text-transform: uppercase;">Detail Jasa Service</h3>
                 <table style="width: 100%; border-collapse: collapse; margin-bottom: 0;">
                     <tr>
                         <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>IMEI / SN:</strong></td>
                         <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['imei'] ?? '-') ?></td>
-                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Estimasi Selesai:</strong></td>
-                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['estimasi_selesai'] ?? '-') ?></td>
+                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Teknisi:</strong></td>
+                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['nama_teknisi'] ?? '-') ?></td>
                     </tr>
                     <tr>
+                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Estimasi Selesai:</strong></td>
+                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['estimasi_selesai'] ?? '-') ?></td>
                         <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Kerusakan:</strong></td>
                         <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['kerusakan'] ?? '-') ?></td>
+                    </tr>
+                    <tr>
                         <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Keterangan Teknisi:</strong></td>
-                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['keterangan_teknisi'] ?? '-') ?></td>
+                        <td colspan="3" style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['keterangan_teknisi'] ?? '-') ?></td>
                     </tr>
                 </table>
             </div>
