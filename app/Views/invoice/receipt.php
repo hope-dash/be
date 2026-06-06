@@ -269,41 +269,90 @@
             </div>
         <?php endif; ?>
 
+        <!-- Service Details (for Service Receipt) -->
+        <?php if (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')): ?>
+            <div style="font-size: 10px; border-bottom: 1px dashed #000; padding-bottom: 8px; margin-bottom: 10px;">
+                <p class="bold">DETAIL SERVICE:</p>
+                <?php if (!empty($transaction['meta']['imei'])): ?>
+                    <p>IMEI/SN: <?= esc($transaction['meta']['imei']) ?></p>
+                <?php endif; ?>
+                <?php if (!empty($transaction['meta']['kerusakan'])): ?>
+                    <p>Kerusakan: <?= esc($transaction['meta']['kerusakan']) ?></p>
+                <?php endif; ?>
+                <?php if (!empty($transaction['meta']['estimasi_selesai'])): ?>
+                    <p>Estimasi: <?= esc($transaction['meta']['estimasi_selesai']) ?></p>
+                <?php endif; ?>
+                <?php if (!empty($transaction['meta']['keterangan_teknisi'])): ?>
+                    <p>Ket. Teknisi: <?= esc($transaction['meta']['keterangan_teknisi']) ?></p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
         <!-- Items -->
         <div class="items-table">
             <?php
+            $services = [];
+            $products = [];
+            foreach ($transaction['items'] as $item) {
+                $isService = (isset($item['is_service']) && ($item['is_service'] == 1 || $item['is_service'] === true || $item['is_service'] === '1'));
+                if ($isService) {
+                    $services[] = $item;
+                } else {
+                    $products[] = $item;
+                }
+            }
+            $isTrxService = (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($services);
             $subtotal = 0;
-            foreach ($transaction['items'] as $item):
-                $itemTotal = $item['actual_total'] ?? (($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0));
-                $subtotal += $itemTotal;
+
+            $renderReceiptItems = function($items, $title, $showTech = false) use (&$subtotal) {
+                if (empty($items)) return;
                 ?>
-                <div class="item-row">
-                    <div class="item-name">
-                        <?= esc($item['nama_lengkap_barang']) ?>
-                    </div>
-                    <div class="item-details">
-                        <div class="item-qty-price">
-                            <span>
-                                <?= number_format($item['jumlah'], 0, ',', '.') ?> x
-                            </span>
-                            <span>Rp
-                                <?= number_format($item['harga_jual'], 0, ',', '.') ?>
-                            </span>
+                <p class="bold" style="font-size: 10px; margin-top: 5px; text-decoration: underline;"><?= esc(strtoupper($title)) ?></p>
+                <?php
+                foreach ($items as $item):
+                    $itemTotal = $item['actual_total'] ?? (($item['harga_jual'] * $item['jumlah']) - ($item['diskon'] ?? 0));
+                    $subtotal += $itemTotal;
+                    ?>
+                    <div class="item-row">
+                        <div class="item-name">
+                            <?= esc($item['nama_lengkap_barang']) ?>
+                            <?php if ($showTech && !empty($item['nama_teknisi'])): ?>
+                                <span style="font-weight: normal; font-size: 9px; color: #333;"><br>*Teknisi: <?= esc($item['nama_teknisi']) ?></span>
+                            <?php endif; ?>
                         </div>
-                        <span class="bold">Rp
-                            <?= number_format($itemTotal, 0, ',', '.') ?>
-                        </span>
-                    </div>
-                    <?php if (!empty($item['diskon'])): ?>
                         <div class="item-details">
-                            <span>Diskon:</span>
-                            <span>- Rp
-                                <?= number_format($item['diskon'], 0, ',', '.') ?>
+                            <div class="item-qty-price">
+                                <span>
+                                    <?= number_format($item['jumlah'], 0, ',', '.') ?> x
+                                </span>
+                                <span>Rp
+                                    <?= number_format($item['harga_jual'], 0, ',', '.') ?>
+                                </span>
+                            </div>
+                            <span class="bold">Rp
+                                <?= number_format($itemTotal, 0, ',', '.') ?>
                             </span>
                         </div>
-                    <?php endif; ?>
-                </div>
-            <?php endforeach; ?>
+                        <?php if (!empty($item['diskon'])): ?>
+                            <div class="item-details">
+                                <span>Diskon:</span>
+                                <span>- Rp
+                                    <?= number_format($item['diskon'], 0, ',', '.') ?>
+                                </span>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+                <?php
+            };
+
+            if ($isTrxService) {
+                $renderReceiptItems($services, 'Jasa Service', true);
+                $renderReceiptItems($products, 'Produk / Sparepart', false);
+            } else {
+                $renderReceiptItems($transaction['items'], 'Daftar Produk', false);
+            }
+            ?>
         </div>
 
         <!-- Summary -->

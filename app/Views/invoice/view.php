@@ -462,76 +462,126 @@
                         style="background: #364fc7; color: white;"><?= esc($delStatus) ?></span></p>
             </div>
 
-
+            <?php if (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')): ?>
+                <div class="info-box" style="background: #fff9db; border: 2px solid #ffe066;">
+                    <h3 style="color: #f59f00; border-bottom: 2px solid #ffe066;">Detail Jasa Service</h3>
+                    <?php if (!empty($transaction['meta']['imei'])): ?>
+                        <p><strong>IMEI / SN:</strong> <?= esc($transaction['meta']['imei']) ?></p>
+                    <?php endif; ?>
+                    <?php if (!empty($transaction['meta']['kerusakan'])): ?>
+                        <p><strong>Kerusakan:</strong> <?= esc($transaction['meta']['kerusakan']) ?></p>
+                    <?php endif; ?>
+                    <?php if (!empty($transaction['meta']['estimasi_selesai'])): ?>
+                        <p><strong>Estimasi Selesai:</strong> <?= esc($transaction['meta']['estimasi_selesai']) ?></p>
+                    <?php endif; ?>
+                    <?php if (!empty($transaction['meta']['keterangan_teknisi'])): ?>
+                        <p><strong>Keterangan:</strong> <?= esc($transaction['meta']['keterangan_teknisi']) ?></p>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
         </div>
 
         <!-- Items Table -->
-        <table>
-            <thead>
-                <tr>
-                    <th style="width: 5%;">No</th>
-                    <th style="width: 45%;">Nama Barang</th>
-                    <th style="width: 10%;" class="text-center">Jumlah</th>
-                    <th style="width: 20%;" class="text-right">Harga Satuan</th>
-                    <th style="width: 20%;" class="text-right">Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php
-                $no = 1;
-                $subtotal = 0;
-                foreach ($transaction['items'] as $item):
-                    $itemTotal = $item['actual_total'] ?? $item['total'] ?? ($item['harga_jual'] * $item['jumlah']);
-                    $subtotal += $itemTotal;
-
-                    $basePrice = (float) ($item['harga_system'] ?? $item['harga_jual']);
-                    $discType = $item['discount_type'] ?? null;
-                    $discAmount = (float) ($item['discount_amount'] ?? $item['diskon'] ?? 0);
-                    $hargaJual = (float) $item['harga_jual'];
-                    $hasDiscount = ($discAmount > 0 || $basePrice > $hargaJual);
-                    ?>
+        <?php
+        $services = [];
+        $products = [];
+        foreach ($transaction['items'] as $item) {
+            $isService = (isset($item['is_service']) && ($item['is_service'] == 1 || $item['is_service'] === true || $item['is_service'] === '1'));
+            if ($isService) {
+                $services[] = $item;
+            } else {
+                $products[] = $item;
+            }
+        }
+        $isTrxService = (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($services);
+        $subtotal = 0;
+        
+        $renderTable = function($items, $title, $showTech = false) use (&$subtotal) {
+            if (empty($items)) return;
+            ?>
+            <h3 style="font-size: 13px; color: #2c3e50; margin: 20px 0 8px 0; border-bottom: 2px solid #2c3e50; padding-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <?= esc($title) ?>
+            </h3>
+            <table>
+                <thead>
                     <tr>
-                        <td class="text-center">
-                            <?= $no++ ?>
-                        </td>
-                        <td>
-                            <strong>
-                                <?= esc($item['nama_lengkap_barang']) ?>
-                            </strong>
-                            <?php if (!empty($item['keterangan'])): ?>
-                                <br><small style="color: #777;">
-                                    <?= esc($item['keterangan']) ?>
-                                </small>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-center qty-text">
-                            <?= number_format($item['jumlah'], 0, ',', '.') ?>
-                        </td>
-                        <td class="text-right">
-                            <?php if ($hasDiscount): ?>
-                                <small style="color: #999; text-decoration: line-through;">Rp
-                                    <?= number_format($basePrice, 0, ',', '.') ?></small>
-                                <br>
-                                <span style="color: #27ae60; font-size: 11px; font-weight: bold;">
-                                    <?php if ($discType === 'PERCENTAGE'): ?>
-                                        Diskon <?= number_format($discAmount, 0) ?>%
-                                    <?php elseif ($discAmount > 0): ?>
-                                        Diskon Rp <?= number_format($discAmount, 0, ',', '.') ?>
-                                    <?php else: ?>
-                                        Diskon <?= round((($basePrice - $hargaJual) / $basePrice) * 100) ?>%
-                                    <?php endif; ?>
-                                </span>
-                                <br>
-                            <?php endif; ?>
-                            Rp <?= number_format($item['harga_jual'], 0, ',', '.') ?>
-                        </td>
-                        <td class="text-right"><strong>Rp
-                                <?= number_format($itemTotal, 0, ',', '.') ?>
-                            </strong></td>
+                        <th style="width: 5%;">No</th>
+                        <th style="width: 45%;"><?= $showTech ? 'Jasa Service' : 'Nama Barang' ?></th>
+                        <th style="width: 10%;" class="text-center">Jumlah</th>
+                        <th style="width: 20%;" class="text-right">Harga Satuan</th>
+                        <th style="width: 20%;" class="text-right">Total</th>
                     </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    <?php
+                    $no = 1;
+                    foreach ($items as $item):
+                        $itemTotal = $item['actual_total'] ?? $item['total'] ?? ($item['harga_jual'] * $item['jumlah']);
+                        $subtotal += $itemTotal;
+
+                        $basePrice = (float) ($item['harga_system'] ?? $item['harga_jual']);
+                        $discType = $item['discount_type'] ?? null;
+                        $discAmount = (float) ($item['discount_amount'] ?? $item['diskon'] ?? 0);
+                        $hargaJual = (float) $item['harga_jual'];
+                        $hasDiscount = ($discAmount > 0 || $basePrice > $hargaJual);
+                        ?>
+                        <tr>
+                            <td class="text-center">
+                                <?= $no++ ?>
+                            </td>
+                            <td>
+                                <strong>
+                                    <?= esc($item['nama_lengkap_barang']) ?>
+                                </strong>
+                                <?php if ($showTech && !empty($item['nama_teknisi'])): ?>
+                                    <br><span style="color: #2563eb; font-size: 11px; font-weight: 600;">
+                                        Teknisi: <?= esc($item['nama_teknisi']) ?>
+                                    </span>
+                                <?php endif; ?>
+                                <?php if (!empty($item['keterangan'])): ?>
+                                    <br><small style="color: #777;">
+                                        <?= esc($item['keterangan']) ?>
+                                    </small>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-center qty-text">
+                                <?= number_format($item['jumlah'], 0, ',', '.') ?>
+                            </td>
+                            <td class="text-right">
+                                <?php if ($hasDiscount): ?>
+                                    <small style="color: #999; text-decoration: line-through;">Rp
+                                        <?= number_format($basePrice, 0, ',', '.') ?></small>
+                                    <br>
+                                    <span style="color: #27ae60; font-size: 11px; font-weight: bold;">
+                                        <?php if ($discType === 'PERCENTAGE'): ?>
+                                            Diskon <?= number_format($discAmount, 0) ?>%
+                                        <?php elseif ($discAmount > 0): ?>
+                                            Diskon Rp <?= number_format($discAmount, 0, ',', '.') ?>
+                                        <?php else: ?>
+                                            Diskon <?= round((($basePrice - $hargaJual) / $basePrice) * 100) ?>%
+                                        <?php endif; ?>
+                                    </span>
+                                    <br>
+                                <?php endif; ?>
+                                Rp <?= number_format($item['harga_jual'], 0, ',', '.') ?>
+                            </td>
+                            <td class="text-right"><strong>Rp
+                                    <?= number_format($itemTotal, 0, ',', '.') ?>
+                                </strong></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php
+        };
+
+        if ($isTrxService) {
+            $renderTable($services, 'Daftar Jasa Service', true);
+            $renderTable($products, 'Daftar Produk / Sparepart', false);
+        } else {
+            $renderTable($transaction['items'], 'Daftar Produk', false);
+        }
+        ?>
 
         <!-- Summary -->
         <div class="summary-section">

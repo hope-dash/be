@@ -74,7 +74,44 @@ class TransactionControllerV2 extends ResourceController
         $this->db->transStart();
 
         try {
-            $items = $data->items ?? $data->item ?? []; // Support both keys
+            $productsInput = $data->products ?? $data->items ?? $data->item ?? [];
+            $servicesInput = $data->services ?? $data->jasa ?? [];
+
+            $teknisiId = $data->teknisi_id ?? null;
+            if (empty($teknisiId) && !empty($servicesInput)) {
+                foreach ($servicesInput as $serv) {
+                    $sObj = (object)$serv;
+                    if (!empty($sObj->teknisi_id)) {
+                        $teknisiId = $sObj->teknisi_id;
+                        break;
+                    }
+                }
+            }
+
+            $namaTeknisi = '';
+            if (!empty($teknisiId)) {
+                $teknisiUser = $this->db->table('users')->where('user_id', $teknisiId)->where('deleted_at', null)->get()->getRowArray();
+                if ($teknisiUser) {
+                    $namaTeknisi = $teknisiUser['name'];
+                }
+            }
+
+            $items = [];
+            foreach ($productsInput as $prod) {
+                $prodObj = (object)$prod;
+                if (isset($prodObj->is_service) && $prodObj->is_service) {
+                    $prodObj->is_service = true;
+                } else {
+                    $prodObj->is_service = false;
+                }
+                $items[] = $prodObj;
+            }
+            foreach ($servicesInput as $serv) {
+                $servObj = (object)$serv;
+                $servObj->is_service = true;
+                $items[] = $servObj;
+            }
+
             if (empty($items))
                 throw new \Exception("Item tidak boleh kosong");
 
@@ -110,6 +147,10 @@ class TransactionControllerV2 extends ResourceController
             $totalItemDiscount = 0;
             $itemsProcessed = [];
             $totalModal = 0;
+            $goodsGrossAmount = 0;
+            $serviceGrossAmount = 0;
+            $totalCommission = 0;
+            $hasService = false;
 
             foreach ($items as $item) {
                 // Compatible with both 'id_barang' and 'kode_barang'
@@ -120,10 +161,7 @@ class TransactionControllerV2 extends ResourceController
                 // Compatible with 'price' or 'harga_jual'
                 $price = $item->price ?? $item->harga_jual ?? 0;
                 $qty = $item->qty ?? $item->jumlah ?? 0;
-
-                $product = $this->productModel->where('id_barang', $idBarang)->first();
-                if (!$product)
-                    throw new \Exception("Product {$idBarang} not found");
+                $isService = $item->is_service ?? false;
 
                 // Item Level Discount
                 $itemDiscountType = $item->discount_type ?? 'FIXED';
@@ -140,28 +178,70 @@ class TransactionControllerV2 extends ResourceController
                     $itemDiscountValue = $itemDiscountAmount * $qty; // Discount per unit
                 }
 
-                // Validate Stock
-                $stockEntry = $this->stockModel->where('id_barang', $idBarang)->where('id_toko', $data->id_toko)->first();
-                $currentStock = $stockEntry ? $stockEntry['stock'] : 0;
-                if ($currentStock < $qty) {
-                    throw new \Exception("Insufficient stock for {$product['nama_barang']}");
+                if ($isService) {
+                    $jasaService = $this->db->table('jasa_service')->where('id', $idBarang)->where('deleted_at', null)->get()->getRowArray();
+                    if (!$jasaService) {
+                        throw new \Exception("Jasa Service dengan ID {$idBarang} tidak ditemukan");
+                    }
+
+                    $grossAmount += $itemTotal;
+                    $totalItemDiscount += $itemDiscountValue;
+                    $serviceGrossAmount += $itemTotal;
+                    $hasService = true;
+
+                    // Calculate commission based on actual price after item discount
+                    $actualItemPrice = $itemTotal - $itemDiscountValue;
+                    $commissionNominal = $actualItemPrice * ($jasaService['komisi'] / 100);
+                    $totalCommission += $commissionNominal;
+
+                    $itemsProcessed[] = [
+                        'product' => [
+                            'id_barang' => $idBarang,
+                            'nama_barang' => $jasaService['nama_jasa'],
+                            'harga_modal' => 0
+                        ],
+                        'is_service' => true,
+                        'id_jasa' => $jasaService['id'],
+                        'teknisi_id' => $teknisiId ?? (!empty($item->teknisi_id) ? $item->teknisi_id : null),
+                        'komisi_persen' => $jasaService['komisi'],
+                        'komisi_nominal' => $commissionNominal,
+                        'qty' => $qty,
+                        'price' => $price,
+                        'discount_type' => $itemDiscountType,
+                        'discount_amount' => $itemDiscountAmount,
+                        'discount_value' => $itemDiscountValue,
+                        'total_modal' => 0
+                    ];
+                } else {
+                    $product = $this->productModel->where('id_barang', $idBarang)->first();
+                    if (!$product)
+                        throw new \Exception("Product {$idBarang} not found");
+
+                    // Validate Stock
+                    $stockEntry = $this->stockModel->where('id_barang', $idBarang)->where('id_toko', $data->id_toko)->first();
+                    $currentStock = $stockEntry ? $stockEntry['stock'] : 0;
+                    if ($currentStock < $qty) {
+                        throw new \Exception("Insufficient stock for {$product['nama_barang']}");
+                    }
+
+                    $grossAmount += $itemTotal;
+                    $totalItemDiscount += $itemDiscountValue;
+                    $goodsGrossAmount += $itemTotal;
+
+                    $modal = $product['harga_modal'] * $qty;
+                    $totalModal += $modal;
+
+                    $itemsProcessed[] = [
+                        'product' => $product,
+                        'is_service' => false,
+                        'qty' => $qty,
+                        'price' => $price,
+                        'discount_type' => $itemDiscountType,
+                        'discount_amount' => $itemDiscountAmount,
+                        'discount_value' => $itemDiscountValue,
+                        'total_modal' => $modal
+                    ];
                 }
-
-                $grossAmount += $itemTotal;
-                $totalItemDiscount += $itemDiscountValue;
-
-                $modal = $product['harga_modal'] * $qty;
-                $totalModal += $modal;
-
-                $itemsProcessed[] = [
-                    'product' => $product,
-                    'qty' => $qty,
-                    'price' => $price,
-                    'discount_type' => $itemDiscountType,
-                    'discount_amount' => $itemDiscountAmount,
-                    'discount_value' => $itemDiscountValue,
-                    'total_modal' => $modal
-                ];
             }
 
             // Transaction Level Discount
@@ -214,6 +294,7 @@ class TransactionControllerV2 extends ResourceController
                 'discount_amount' => $txDiscountAmount,
                 'total_modal' => $totalModal,
                 'po' => $data->po ?? false,
+                'is_service' => $hasService ? 1 : 0,
                 'created_by' => $userId,
                 'date_time' => date('Y-m-d H:i:s'),
             ];
@@ -252,6 +333,18 @@ class TransactionControllerV2 extends ResourceController
                 'tx_discount_value' => $txDiscountValue
             ];
 
+            if ($hasService) {
+                $metaData['kerusakan'] = $data->kerusakan ?? '';
+                $metaData['keterangan_teknisi'] = $data->keterangan_teknisi ?? '';
+                $metaData['estimasi_selesai'] = $data->estimasi_selesai ?? '';
+                $metaData['imei'] = $data->imei ?? '';
+            }
+
+            if (!empty($teknisiId)) {
+                $metaData['teknisi_id'] = $teknisiId;
+                $metaData['nama_teknisi'] = $namaTeknisi;
+            }
+
             foreach ($metaData as $key => $val) {
                 if ($val !== null) {
                     $this->transactionMetaModel->insert([
@@ -274,8 +367,13 @@ class TransactionControllerV2 extends ResourceController
                 $this->addJournalItem($journalId, '40' . $data->id_toko . '2', $totalDiscount, 0, $data->id_toko);
             }
 
-            // 3. Cr Sales Revenue (Gross Sales from Items)
-            $this->addJournalItem($journalId, '40' . $data->id_toko . '1', 0, $grossAmount, $data->id_toko);
+            // 3. Cr Sales Revenue (Split Goods vs Service)
+            if ($goodsGrossAmount > 0) {
+                $this->addJournalItem($journalId, '40' . $data->id_toko . '1', 0, $goodsGrossAmount, $data->id_toko);
+            }
+            if ($serviceGrossAmount > 0) {
+                $this->addJournalItem($journalId, '40' . $data->id_toko . '4', 0, $serviceGrossAmount, $data->id_toko);
+            }
 
             // 4. Cr PPN Keluaran (Output Tax) (2005)
             if ($ppnValue > 0) {
@@ -293,8 +391,7 @@ class TransactionControllerV2 extends ResourceController
             }
 
 
-            // -- Process Items: Stock & COGS --
-            $salesProductData = [];
+            // -- Process Items: Stock, COGS, and Commission --
             $cogsTotal = 0;
 
             foreach ($itemsProcessed as $itemData) {
@@ -303,17 +400,20 @@ class TransactionControllerV2 extends ResourceController
                 $price = $itemData['price'];
                 $modal = $itemData['total_modal'];
                 $discountValue = $itemData['discount_value'];
+                $isService = $itemData['is_service'] ?? false;
 
-                // Deduct Stock
-                $this->deductStock($p['id_barang'], $data->id_toko, $qty, $trxId, "Invoice {$trxData['invoice']}");
+                if (!$isService) {
+                    // Deduct Stock
+                    $this->deductStock($p['id_barang'], $data->id_toko, $qty, $trxId, "Invoice {$trxData['invoice']}");
+                }
 
                 $priceAfterDiscount = ($qty > 0) ? ($qty * $price - $discountValue) / $qty : 0;
                 $totalAfterDiscount = $qty * $price - $discountValue;
 
-                $salesProductData[] = [
+                $spRow = [
                     'tenant_id' => $tenantId,
                     'id_transaction' => $trxId,
-                    'kode_barang' => $p['id_barang'],
+                    'kode_barang' => $isService ? null : $p['id_barang'],
                     'jumlah' => $qty,
                     'harga_system' => $price,
                     'harga_jual' => $priceAfterDiscount,
@@ -323,18 +423,50 @@ class TransactionControllerV2 extends ResourceController
                     'actual_per_piece' => $priceAfterDiscount,
                     'actual_total' => $totalAfterDiscount,
                     'discount_type' => $itemData['discount_type'],
-                    'discount_amount' => $itemData['discount_amount']
+                    'discount_amount' => $itemData['discount_amount'],
+                    'is_service' => $isService ? 1 : 0,
+                    'id_jasa' => $isService ? $itemData['id_jasa'] : null,
+                    'komisi_persen' => $isService ? $itemData['komisi_persen'] : 0,
+                    'komisi_nominal' => $isService ? $itemData['komisi_nominal'] : 0
                 ];
 
-                $cogsTotal += $modal;
+                $this->salesProductModel->insert($spRow);
+                $salesProductId = $this->salesProductModel->getInsertID();
+
+                if ($isService && !empty($itemData['teknisi_id'])) {
+                    // Create commission entry
+                    $this->db->table('teknisi_komisi')->insert([
+                        'tenant_id' => $tenantId,
+                        'id_toko' => $data->id_toko,
+                        'transaction_id' => $trxId,
+                        'sales_product_id' => $salesProductId,
+                        'jasa_service_id' => $itemData['id_jasa'],
+                        'teknisi_id' => $itemData['teknisi_id'],
+                        'komisi_persen' => $itemData['komisi_persen'],
+                        'harga_jasa' => $totalAfterDiscount,
+                        'komisi_nominal' => $itemData['komisi_nominal'],
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s')
+                    ]);
+                }
+
+                if (!$isService) {
+                    $cogsTotal += $modal;
+                }
             }
-            $this->salesProductModel->insertBatch($salesProductData);
 
             // -- Accounting: COGS Journal --
             if ($cogsTotal > 0) {
                 $cogsJournalId = $this->createJournal('COGS', $trxId, $trxData['invoice'], date('Y-m-d'), "COGS Invoice {$trxData['invoice']}", $data->id_toko);
                 $this->addJournalItem($cogsJournalId, '50' . $data->id_toko . '1', $cogsTotal, 0, $data->id_toko); // Dr COGS
                 $this->addJournalItem($cogsJournalId, '10' . $data->id_toko . '4', 0, $cogsTotal, $data->id_toko); // Cr Inventory
+            }
+
+            // -- Accounting: Cost of Service (Commission) Journal --
+            if ($totalCommission > 0) {
+                $cosJournalId = $this->createJournal('COST_OF_SERVICE', $trxId, $trxData['invoice'], date('Y-m-d'), "Commission Cost Invoice {$trxData['invoice']}", $data->id_toko);
+                $this->addJournalItem($cosJournalId, '50' . $data->id_toko . '2', $totalCommission, 0, $data->id_toko); // Dr Cost of Service
+                $this->addJournalItem($cosJournalId, '20' . $data->id_toko . '1', 0, $totalCommission, $data->id_toko); // Cr Accounts Payable
             }
 
             $this->db->transComplete();
@@ -396,7 +528,25 @@ class TransactionControllerV2 extends ResourceController
     {
         try {
             $data = $this->request->getJSON();
-            $items = $data->items ?? $data->item ?? [];
+            $productsInput = $data->products ?? $data->items ?? $data->item ?? [];
+            $servicesInput = $data->services ?? $data->jasa ?? [];
+
+            $items = [];
+            foreach ($productsInput as $prod) {
+                $prodObj = (object)$prod;
+                if (isset($prodObj->is_service) && $prodObj->is_service) {
+                    $prodObj->is_service = true;
+                } else {
+                    $prodObj->is_service = false;
+                }
+                $items[] = $prodObj;
+            }
+            foreach ($servicesInput as $serv) {
+                $servObj = (object)$serv;
+                $servObj->is_service = true;
+                $items[] = $servObj;
+            }
+
             if (empty($items))
                 throw new \Exception("Item tidak boleh kosong");
 
@@ -892,12 +1042,13 @@ class TransactionControllerV2 extends ResourceController
                 $this->addJournalItem($jId, '20' . $trx['id_toko'] . '5', abs($totalPpnChange), 0, $trx['id_toko']);
             }
 
-            // 4. Other Income/Sales Booking (40x1)
+            // 4. Other Income/Sales Booking (40x1 for Goods, 40x4 for Service)
+            $incomeAccountCode = ($trx['is_service'] == 1) ? '40' . $trx['id_toko'] . '4' : '40' . $trx['id_toko'] . '1';
             if ($totalIncomeAdjustment > 0) {
-                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', 0, $totalIncomeAdjustment, $trx['id_toko']);
+                $this->addJournalItem($jId, $incomeAccountCode, 0, $totalIncomeAdjustment, $trx['id_toko']);
             }
             elseif ($totalIncomeAdjustment < 0) {
-                $this->addJournalItem($jId, '40' . $trx['id_toko'] . '1', abs($totalIncomeAdjustment), 0, $trx['id_toko']);
+                $this->addJournalItem($jId, $incomeAccountCode, abs($totalIncomeAdjustment), 0, $trx['id_toko']);
             }
 
             // Check if status needs to change from PAID to NEED_REFUND or PARTIALLY_PAID
@@ -1038,19 +1189,35 @@ class TransactionControllerV2 extends ResourceController
             // Restore Stock
             $items = $this->salesProductModel->where('id_transaction', $id)->findAll();
             log_message('debug', '[CancelTransaction] Found ' . count($items) . ' items to restore for transaction ID: ' . $id);
-            $cogsReversal = 0;
+            $goodsCOGSReversal = 0;
+            $serviceCommissionReversal = 0;
 
             foreach ($items as $item) {
-                log_message('debug', '[CancelTransaction] Restoring ' . $item['jumlah'] . ' of product ' . $item['kode_barang']);
-                $this->addStock($item['kode_barang'], $trx['id_toko'], $item['jumlah'], $id, "Cancel Transaction {$trx['invoice']}");
-                $cogsReversal += $item['total_modal'];
+                if ($item['is_service']) {
+                    log_message('debug', '[CancelTransaction] Skipping stock restore for service item ' . $item['kode_barang']);
+                    $comm = $this->db->table('teknisi_komisi')->where('sales_product_id', $item['id'])->get()->getRowArray();
+                    if ($comm) {
+                        $serviceCommissionReversal += (float)$comm['komisi_nominal'];
+                    }
+                } else {
+                    log_message('debug', '[CancelTransaction] Restoring ' . $item['jumlah'] . ' of product ' . $item['kode_barang']);
+                    $this->addStock($item['kode_barang'], $trx['id_toko'], $item['jumlah'], $id, "Cancel Transaction {$trx['invoice']}");
+                    $goodsCOGSReversal += $item['total_modal'];
+                }
             }
 
             // Reverse COGS
-            if ($cogsReversal > 0) {
+            if ($goodsCOGSReversal > 0) {
                 $jId = $this->createJournal('CANCEL_COGS', $id, $trx['invoice'], date('Y-m-d'), "Reversal COGS {$trx['invoice']}", $trx['id_toko']);
-                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '4', $cogsReversal, 0, $trx['id_toko']);
-                $this->addJournalItem($jId, '50' . $trx['id_toko'] . '1', 0, $cogsReversal, $trx['id_toko']);
+                $this->addJournalItem($jId, '10' . $trx['id_toko'] . '4', $goodsCOGSReversal, 0, $trx['id_toko']);
+                $this->addJournalItem($jId, '50' . $trx['id_toko'] . '1', 0, $goodsCOGSReversal, $trx['id_toko']);
+            }
+
+            // Reverse Cost of Service (Commission Cost)
+            if ($serviceCommissionReversal > 0) {
+                $jIdCOS = $this->createJournal('CANCEL_COST_OF_SERVICE', $id, $trx['invoice'], date('Y-m-d'), "Reversal Commission Cost {$trx['invoice']}", $trx['id_toko']);
+                $this->addJournalItem($jIdCOS, '20' . $trx['id_toko'] . '1', $serviceCommissionReversal, 0, $trx['id_toko']); // Dr Accounts Payable
+                $this->addJournalItem($jIdCOS, '50' . $trx['id_toko'] . '2', 0, $serviceCommissionReversal, $trx['id_toko']); // Cr Cost of Service
             }
 
             // Reverse Sales
@@ -1081,7 +1248,18 @@ class TransactionControllerV2 extends ResourceController
             }
 
             $totalDiscount = $itemDiscountTotal + $txDiscountValue + $adjDiscountTotal;
-            $totalSales = (float)$trx['amount'] + $adjIncomeTotal;
+
+            // Calculate goods vs service gross
+            $goodsGross = 0;
+            $serviceGross = 0;
+            foreach ($items as $item) {
+                $itemGross = (float)($item['harga_system'] * $item['jumlah']);
+                if ($item['is_service']) {
+                    $serviceGross += $itemGross;
+                } else {
+                    $goodsGross += $itemGross;
+                }
+            }
 
             // Reverse AR
             $this->addJournalItem($jIdSales, '10' . $trx['id_toko'] . '3', 0, $trx['actual_total'], $trx['id_toko']);
@@ -1094,9 +1272,13 @@ class TransactionControllerV2 extends ResourceController
                 $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '2', abs($totalDiscount), 0, $trx['id_toko']);
             }
 
-            // Reverse Gross Sales
-            if ($totalSales != 0) {
-                $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', $totalSales, 0, $trx['id_toko']);
+            // Reverse Gross Sales (Split Goods vs Service)
+            $goodsSalesReversal = $goodsGross + $adjIncomeTotal;
+            if ($goodsSalesReversal != 0) {
+                $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '1', abs($goodsSalesReversal), 0, $trx['id_toko']);
+            }
+            if ($serviceGross != 0) {
+                $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '4', $serviceGross, 0, $trx['id_toko']);
             }
 
             // Reverse PPN Keluaran
@@ -1212,6 +1394,10 @@ class TransactionControllerV2 extends ResourceController
             $returnDetails = [];
             $returnSummary = [];
 
+            $serviceCommissionReversalTotal = 0;
+            $goodsGrossRevenueReduction = 0;
+            $serviceGrossRevenueReduction = 0;
+
             foreach ($data->items as $item) {
                 $saleItem = $this->salesProductModel
                     ->where('id_transaction', $id)
@@ -1233,10 +1419,16 @@ class TransactionControllerV2 extends ResourceController
 
                 $isDamaged = ($item->condition === 'bad');
                 $conditionText = $isDamaged ? 'CACAT' : 'BAIK';
+                $isService = (bool)($saleItem['is_service'] ?? false);
 
                 // Get product info
-                $product = $this->productModel->where('id_barang', $item->kode_barang)->first();
-                $productName = $product['nama_barang'] ?? $item->kode_barang;
+                if ($isService) {
+                    $jasaService = $this->db->table('jasa_service')->where('id', $saleItem['id_jasa'])->get()->getRowArray();
+                    $productName = $jasaService ? $jasaService['nama_jasa'] : $item->kode_barang;
+                } else {
+                    $product = $this->productModel->where('id_barang', $item->kode_barang)->first();
+                    $productName = $product['nama_barang'] ?? $item->kode_barang;
+                }
 
                 // 1. Insert into Retur Table
                 $this->returModel->insert([
@@ -1248,11 +1440,13 @@ class TransactionControllerV2 extends ResourceController
                     'solution' => $data->solution ?? 'RETURN'
                 ]);
 
-                // 2. Restore Stock
-                $this->addStock($item->kode_barang, $trx['id_toko'], $qtyToReturn, $id, "Retur Barang ({$item->condition})", $isDamaged);
+                // 2. Restore Stock (only for non-service)
+                if (!$isService) {
+                    $this->addStock($item->kode_barang, $trx['id_toko'], $qtyToReturn, $id, "Retur Barang ({$item->condition})", $isDamaged);
+                }
 
                 // 3. Update Sales Product Record (Reduce quantity)
-                $modalPerUnit = (float)$saleItem['modal_system'];
+                $modalPerUnit = $isService ? 0 : (float)$saleItem['modal_system'];
                 $pricePerUnit = (float)$saleItem['harga_jual'];
                 $grossPerUnit = (float)$saleItem['harga_system'];
                 $discountPerUnit = $grossPerUnit - $pricePerUnit;
@@ -1269,16 +1463,44 @@ class TransactionControllerV2 extends ResourceController
                     $this->salesProductModel->delete($saleItem['id']);
                 }
 
+                // Reverse Technician Commission for Service
+                if ($isService) {
+                    $comm = $this->db->table('teknisi_komisi')->where('sales_product_id', $saleItem['id'])->get()->getRowArray();
+                    if ($comm) {
+                        $commissionPerUnit = (float)$comm['komisi_nominal'] / $saleItem['jumlah'];
+                        $commissionReversal = $commissionPerUnit * $qtyToReturn;
+                        $serviceCommissionReversalTotal += $commissionReversal;
+
+                        $newCommNominal = (float)$comm['komisi_nominal'] - $commissionReversal;
+                        if ($newCommNominal > 0) {
+                            $this->db->table('teknisi_komisi')->where('id', $comm['id'])->update([
+                                'harga_jasa' => $pricePerUnit * $newQty,
+                                'komisi_nominal' => $newCommNominal,
+                                'updated_at' => date('Y-m-d H:i:s')
+                            ]);
+                        } else {
+                            $this->db->table('teknisi_komisi')->where('id', $comm['id'])->delete();
+                        }
+                    }
+                }
+
                 // Tracking for Journal
+                if ($isService) {
+                    $serviceGrossRevenueReduction += ($grossPerUnit * $qtyToReturn);
+                } else {
+                    $goodsGrossRevenueReduction += ($grossPerUnit * $qtyToReturn);
+                }
                 $grossRevenueReduction += ($grossPerUnit * $qtyToReturn);
                 $itemDiscountReduction += ($discountPerUnit * $qtyToReturn);
 
                 // Cogs reversal logic
                 $itemModalTotal = ($modalPerUnit * $qtyToReturn);
-                if ($isDamaged) {
-                    $cogsCacat += $itemModalTotal;
-                } else {
-                    $cogsNormal += $itemModalTotal;
+                if (!$isService) {
+                    if ($isDamaged) {
+                        $cogsCacat += $itemModalTotal;
+                    } else {
+                        $cogsNormal += $itemModalTotal;
+                    }
                 }
 
                 $returnDetails[] = [
@@ -1295,7 +1517,7 @@ class TransactionControllerV2 extends ResourceController
                     'user_id' => $userId,
                     'action_type' => 'RETUR_PRODUCT',
                     'target_table' => 'product',
-                    'target_id' => $product['id'] ?? 0,
+                    'target_id' => $isService ? 0 : ($product['id'] ?? 0),
                     'description' => "Retur: {$productName} ({$item->kode_barang}) - Qty: {$qtyToReturn} - Kondisi: {$conditionText}",
                     'detail' => [
                         'transaction_id' => $id,
@@ -1394,13 +1616,25 @@ class TransactionControllerV2 extends ResourceController
                 $this->addJournalItem($jid, '50' . $trx['id_toko'] . '1', 0, $totalCogsReversal, $trx['id_toko']);
             }
 
+            // Cost of Service (Commission) Reversal
+            if ($serviceCommissionReversalTotal > 0) {
+                $cosJid = $this->createJournal('RETUR_COST_OF_SERVICE', $id, $trx['invoice'], date('Y-m-d'), "Retur Commission Cost Reversal", $trx['id_toko']);
+                $this->addJournalItem($cosJid, '20' . $trx['id_toko'] . '1', $serviceCommissionReversalTotal, 0, $trx['id_toko']); // Dr Accounts Payable (reduce liability)
+                $this->addJournalItem($cosJid, '50' . $trx['id_toko'] . '2', 0, $serviceCommissionReversalTotal, $trx['id_toko']); // Cr Cost of Service (reduce cost)
+            }
+
             // Sales Reversal (Reduction in AR and Revenue)
             $totalARReduction = $oldActualTotal - $newGrandTotal;
             if ($totalARReduction > 0) {
                 $jid = $this->createJournal('RETUR_SALES', $id, $trx['invoice'], date('Y-m-d'), "Retur Sales Reduction", $trx['id_toko']);
                 
-                // 1. Dr Revenue / Retur (Gross Reduction)
-                $this->addJournalItem($jid, '40' . $trx['id_toko'] . '3', $grossRevenueReduction, 0, $trx['id_toko']);
+                // 1. Dr Revenue / Retur (Split Goods vs Service)
+                if ($goodsGrossRevenueReduction > 0) {
+                    $this->addJournalItem($jid, '40' . $trx['id_toko'] . '3', $goodsGrossRevenueReduction, 0, $trx['id_toko']); // Goods Returns (4003)
+                }
+                if ($serviceGrossRevenueReduction > 0) {
+                    $this->addJournalItem($jid, '40' . $trx['id_toko'] . '4', $serviceGrossRevenueReduction, 0, $trx['id_toko']); // Service Revenue direct debit
+                }
 
                 // 2. Dr PPN (Pajak Keluaran reversal 20x5)
                 $ppnReduction = (float)($metaMap['ppn_value'] ?? 0) - $newPpnValue;
@@ -1908,13 +2142,14 @@ class TransactionControllerV2 extends ResourceController
             $items = $db->table('sales_product sp')
                 ->select("
                     sp.*,
-                    p.nama_barang,
+                    COALESCE(p.nama_barang, js.nama_jasa) as nama_barang,
                     p.berat,
                     mb.nama_model,
                     s.seri,
-                    CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang
+                    CASE WHEN sp.is_service = 1 THEN js.nama_jasa ELSE CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) END as nama_lengkap_barang
                 ")
                 ->join('product p', 'sp.kode_barang = p.id_barang AND p.tenant_id = sp.tenant_id', 'left')
+                ->join('jasa_service js', 'sp.is_service = 1 AND sp.id_jasa = js.id', 'left')
                 ->join('model_barang mb', 'p.id_model_barang = mb.id AND mb.tenant_id = sp.tenant_id', 'left')
                 ->join('seri s', 'p.id_seri_barang = s.id AND s.tenant_id = sp.tenant_id', 'left')
                 ->where('sp.id_transaction', $id)
@@ -1922,7 +2157,20 @@ class TransactionControllerV2 extends ResourceController
                 ->get()
                 ->getResultArray();
 
+            $productsList = [];
+            $servicesList = [];
+            foreach ($items as $item) {
+                if ($item['is_service']) {
+                    $servicesList[] = $item;
+                } else {
+                    $productsList[] = $item;
+                }
+            }
             $transaction['items'] = $items;
+            $transaction['products'] = $productsList;
+            $transaction['services'] = $servicesList;
+            $transaction['teknisi_id'] = $metaMap['teknisi_id'] ?? null;
+            $transaction['nama_teknisi'] = $metaMap['nama_teknisi'] ?? null;
 
             // 4. Get Payments
             $payments = $this->paymentModel
@@ -1989,7 +2237,7 @@ class TransactionControllerV2 extends ResourceController
 
             // Optimization: Select only necessary columns for the list view to reduce memory/bandwidth
             $transactions = $builder
-                ->select('id, invoice, status, delivery_status, amount, actual_total, id_toko, created_at, created_by')
+                ->select('id, invoice, status, delivery_status, amount, actual_total, id_toko, created_at, created_by, is_service')
                 ->orderBy('created_at', 'DESC')
                 ->limit($limit, $offset)
                 ->findAll();

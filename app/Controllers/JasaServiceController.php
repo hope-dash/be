@@ -178,4 +178,92 @@ class JasaServiceController extends ResourceController
         $this->jasaServiceModel->delete($id);
         return $this->jsonResponse->oneResp('Jasa service berhasil dihapus', '', 200);
     }
+
+    // GET: Technician commission report
+    public function reportKomisi()
+    {
+        $db = \Config\Database::connect();
+        
+        $idToko = $this->request->getGet('id_toko');
+        $teknisiId = $this->request->getGet('teknisi_id');
+        $dateStart = $this->request->getGet('date_start');
+        $dateEnd = $this->request->getGet('date_end');
+        $search = trim($this->request->getGet('search') ?? '');
+        
+        $sortBy = $this->request->getGet('sortBy') ?? 'id';
+        $allowedSortFields = ['id', 'invoice', 'nama_teknisi', 'nama_jasa', 'harga_jasa', 'komisi_nominal', 'created_at', 'status'];
+        if (!in_array($sortBy, $allowedSortFields)) {
+            $sortBy = 'tk.id';
+        } else {
+            if ($sortBy === 'invoice') {
+                $sortBy = 't.invoice';
+            } elseif ($sortBy === 'nama_teknisi') {
+                $sortBy = 'u.name';
+            } elseif ($sortBy === 'nama_jasa') {
+                $sortBy = 'js.nama_jasa';
+            } elseif ($sortBy === 'status') {
+                $sortBy = 't.status';
+            } else {
+                $sortBy = 'tk.' . $sortBy;
+            }
+        }
+
+        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? 'desc');
+        if (!in_array($sortMethod, ['asc', 'desc'])) {
+            $sortMethod = 'desc';
+        }
+
+        $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+        $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+        $offset = ($page - 1) * $limit;
+
+        $builder = $db->table('teknisi_komisi tk')
+            ->select('tk.*, t.invoice, t.status as transaction_status, t.date_time as transaction_date, u.name as nama_teknisi, js.nama_jasa')
+            ->join('transaction t', 'tk.transaction_id = t.id', 'inner')
+            ->join('users u', 'tk.teknisi_id = u.user_id', 'left')
+            ->join('jasa_service js', 'tk.jasa_service_id = js.id', 'left')
+            ->where('tk.tenant_id', \App\Libraries\TenantContext::id());
+
+        $statusFilter = $this->request->getGet('status');
+        if (!empty($statusFilter)) {
+            $builder->whereIn('t.status', explode(',', $statusFilter));
+        } else {
+            $builder->whereIn('t.status', ['PAID', 'SUCCESS']);
+        }
+
+        if ($idToko !== null && $idToko !== '') {
+            $builder->where('tk.id_toko', (int) $idToko);
+        }
+
+        if ($teknisiId !== null && $teknisiId !== '') {
+            $builder->where('tk.teknisi_id', (int) $teknisiId);
+        }
+
+        if ($dateStart && $dateEnd) {
+            $builder->where('t.date_time >=', "{$dateStart} 00:00:00");
+            $builder->where('t.date_time <=', "{$dateEnd} 23:59:59");
+        } elseif ($dateStart) {
+            $builder->where('t.date_time >=', "{$dateStart} 00:00:00");
+        } elseif ($dateEnd) {
+            $builder->where('t.date_time <=', "{$dateEnd} 23:59:59");
+        }
+
+        if (!empty($search)) {
+            $builder->groupStart()
+                ->like('t.invoice', $search, 'both')
+                ->orLike('u.name', $search, 'both')
+                ->orLike('js.nama_jasa', $search, 'both')
+                ->groupEnd();
+        }
+
+        $total_data = $builder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        $result = $builder->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+        return $this->jsonResponse->multiResp('Commission report fetched successfully', $result, $total_data, $total_page, $page, $limit, 200);
+    }
 }

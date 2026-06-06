@@ -570,7 +570,7 @@ class TransactionController extends BaseController
             // OPTIMIZED PATH (Search with Subqueries, Simple Sort)
             // ==========================================
             $builder = $db->table('transaction t')
-                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.actual_total, t.po, t.total_payment, t.status, t.delivery_status, t.id_toko, t.date_time, toko.toko_name')
+                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.actual_total, t.po, t.total_payment, t.status, t.delivery_status, t.id_toko, t.date_time, t.is_service, toko.toko_name')
                 ->join('toko', 't.id_toko = toko.id', 'left')
                 ->where('t.tenant_id', \App\Libraries\TenantContext::id());
 
@@ -735,7 +735,8 @@ class TransactionController extends BaseController
                 tm_pengiriman.value AS pengiriman,
                 tm_resi.value AS resi,
                 tm_source.value AS source,
-                t.delivery_status
+                t.delivery_status,
+                t.is_service
             ")
                 ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
                 ->join('customer c', 'tm_cust.value = c.id', 'left')
@@ -830,6 +831,7 @@ class TransactionController extends BaseController
             t.date_time,
             t.actual_total,
             t.total_modal,
+            t.is_service,
             tk.toko_name,
             tk.image_logo,
             tk.alamat as alamat_toko,
@@ -865,7 +867,13 @@ class TransactionController extends BaseController
             MAX(CASE WHEN tm.key = 'potongan_ongkir' THEN tm.value END) AS potongan_ongkir,
             MAX(CASE WHEN tm.key = 'provinsi' THEN tm.value END) AS provinsi,
             MAX(CASE WHEN tm.key = 'kota_kabupaten' THEN tm.value END) AS kota_kabupaten,
-            MAX(CASE WHEN tm.key = 'kode_pos' THEN tm.value END) AS kode_pos
+            MAX(CASE WHEN tm.key = 'kode_pos' THEN tm.value END) AS kode_pos,
+            MAX(CASE WHEN tm.key = 'kerusakan' THEN tm.value END) AS kerusakan,
+            MAX(CASE WHEN tm.key = 'keterangan_teknisi' THEN tm.value END) AS keterangan_teknisi,
+            MAX(CASE WHEN tm.key = 'estimasi_selesai' THEN tm.value END) AS estimasi_selesai,
+            MAX(CASE WHEN tm.key = 'imei' THEN tm.value END) AS imei,
+            MAX(CASE WHEN tm.key = 'teknisi_id' THEN tm.value END) AS teknisi_id,
+            MAX(CASE WHEN tm.key = 'nama_teknisi' THEN tm.value END) AS nama_teknisi
         ")
             ->join('toko tk', 't.id_toko = tk.id', 'left')
             ->join('transaction_meta tm_cust', "t.id = tm_cust.transaction_id AND tm_cust.key = 'customer_id'", 'left')
@@ -904,25 +912,36 @@ class TransactionController extends BaseController
             sp.actual_total,
             sp.discount_type,
             sp.discount_amount,
-            CONCAT(
-                COALESCE(p.nama_barang, ''), 
-                ' ', 
-                COALESCE(mb.nama_model, ''), 
-                ' ', 
-                COALESCE(s.seri, '')
-            ) as nama_lengkap_barang,
-            p.nama_barang,
+            sp.is_service,
+            sp.id_jasa,
+            sp.teknisi_id,
+            sp.komisi_persen,
+            sp.komisi_nominal,
+            CASE WHEN sp.is_service = 1 THEN js.nama_jasa ELSE CONCAT(COALESCE(p.nama_barang, ''), ' ', COALESCE(mb.nama_model, ''), ' ', COALESCE(s.seri, '')) END as nama_lengkap_barang,
+            COALESCE(p.nama_barang, js.nama_jasa) as nama_barang,
             mb.nama_model,
             s.seri
         ")
             ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('jasa_service js', 'sp.is_service = 1 AND sp.id_jasa = js.id', 'left')
             ->join('model_barang mb', 'mb.id = p.id_model_barang', 'left')
             ->join('seri s', 's.id = p.id_seri_barang', 'left')
             ->where('sp.id_transaction', $id)
             ->get()
             ->getResultArray();
 
+        $productsList = [];
+        $servicesList = [];
+        foreach ($products as $item) {
+            if ($item['is_service']) {
+                $servicesList[] = $item;
+            } else {
+                $productsList[] = $item;
+            }
+        }
         $transaction['item'] = $products;
+        $transaction['products'] = $productsList;
+        $transaction['services'] = $servicesList;
 
         // Ambil cashflow records dengan single query (menggunakan IN instead of loop)
         $cashflowIds = $db->table('transaction_meta')
