@@ -571,7 +571,7 @@ class TransactionController extends BaseController
             // OPTIMIZED PATH (Search with Subqueries, Simple Sort)
             // ==========================================
             $builder = $db->table('transaction t')
-                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.actual_total, t.po, t.total_payment, t.status, t.delivery_status, t.id_toko, t.date_time, t.is_service, toko.toko_name')
+                ->select('t.id AS transaction_id, t.invoice AS invoice_number, t.amount, t.actual_total, t.po, t.total_payment, t.status, t.delivery_status, t.id_toko, t.date_time, t.is_service, t.service_status, toko.toko_name')
                 ->join('toko', 't.id_toko = toko.id', 'left')
                 ->where('t.tenant_id', \App\Libraries\TenantContext::id());
 
@@ -657,7 +657,7 @@ class TransactionController extends BaseController
                 // 1. Get Transaction Meta (Customer Info & Jatuh Tempo)
                 $metas = $db->table('transaction_meta')
                     ->whereIn('transaction_id', $transactionIds)
-                    ->whereIn('key', ['customer_id', 'customer_name', 'jatuh_tempo', 'pengiriman', 'resi', 'source'])
+                    ->whereIn('key', ['customer_id', 'customer_name', 'jatuh_tempo', 'pengiriman', 'resi', 'source', 'nama_teknisi'])
                     ->get()
                     ->getResultArray();
 
@@ -711,6 +711,7 @@ class TransactionController extends BaseController
                     $row['pengiriman'] = $tMeta['pengiriman'] ?? null;
                     $row['resi'] = $tMeta['resi'] ?? null;
                     $row['source'] = $tMeta['source'] ?? null;
+                    $row['nama_teknisi'] = $tMeta['nama_teknisi'] ?? null;
                 }
                 unset($row);
             }
@@ -743,8 +744,10 @@ class TransactionController extends BaseController
                 tm_pengiriman.value AS pengiriman,
                 tm_resi.value AS resi,
                 tm_source.value AS source,
+                tm_nama_teknisi.value AS nama_teknisi,
                 t.delivery_status,
-                t.is_service
+                t.is_service,
+                t.service_status
             ")
                 ->join('transaction_meta tm_cust', 't.id = tm_cust.transaction_id AND tm_cust.key = "customer_id"', 'left')
                 ->join('customer c', 'tm_cust.value = c.id', 'left')
@@ -753,6 +756,7 @@ class TransactionController extends BaseController
                 ->join('transaction_meta tm_pengiriman', 't.id = tm_pengiriman.transaction_id AND tm_pengiriman.key = "pengiriman"', 'left')
                 ->join('transaction_meta tm_resi', 't.id = tm_resi.transaction_id AND tm_resi.key = "resi"', 'left')
                 ->join('transaction_meta tm_source', 't.id = tm_source.transaction_id AND tm_source.key = "source"', 'left')
+                ->join('transaction_meta tm_nama_teknisi', 't.id = tm_nama_teknisi.transaction_id AND tm_nama_teknisi.key = "nama_teknisi"', 'left')
                 ->join('toko', 't.id_toko = toko.id', 'left')
                 ->where('t.tenant_id', \App\Libraries\TenantContext::id());
 
