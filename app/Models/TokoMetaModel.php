@@ -11,7 +11,7 @@ class TokoMetaModel extends Model
     protected $useAutoIncrement = true;
     protected $returnType = 'array';
     protected $allowedFields = [
-        'id_toko',
+        'toko_id',
         'meta_key',
         'meta_value'
     ];
@@ -23,20 +23,20 @@ class TokoMetaModel extends Model
     /**
      * Set a meta value for a shop
      * 
-     * @param int $id_toko
+     * @param int $toko_id
      * @param string $key
      * @param mixed $value
      * @return bool
      */
-    public function setMeta(int $id_toko, string $key, $value): bool
+    public function setMeta(int $toko_id, string $key, $value): bool
     {
         $existing = $this->where([
-            'id_toko' => $id_toko,
+            'toko_id' => $toko_id,
             'meta_key' => $key
         ])->first();
 
         $data = [
-            'id_toko' => $id_toko,
+            'toko_id' => $toko_id,
             'meta_key' => $key,
             'meta_value' => is_array($value) ? json_encode($value) : $value
         ];
@@ -51,15 +51,15 @@ class TokoMetaModel extends Model
     /**
      * Get a meta value for a shop
      * 
-     * @param int $id_toko
+     * @param int $toko_id
      * @param string $key
      * @param mixed $default
      * @return mixed
      */
-    public function getMeta(int $id_toko, string $key, $default = null)
+    public function getMeta(int $toko_id, string $key, $default = null)
     {
         $row = $this->where([
-            'id_toko' => $id_toko,
+            'toko_id' => $toko_id,
             'meta_key' => $key
         ])->first();
 

@@ -18,7 +18,7 @@ class TenantModel extends Model
         'url',
         'email',
         'status',
-        'moota_app_id',
+        'moota_token',
         'created_at',
         'updated_at',
     ];

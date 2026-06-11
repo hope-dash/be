@@ -1,14 +1,14 @@
 # Dokumentasi API Integrasi Moota (Multi-Application/Multi-Toko)
 
-Sistem ini mendukung pemisahan integrasi Moota per aplikasi/toko (`id_toko`). Setiap toko dapat memiliki setting kredensial Moota masing-masing yang disimpan di tabel `toko_meta` atau dikonfigurasi langsung sebagai bank utama Toko tersebut.
+Sistem ini mendukung pemisahan integrasi Moota per aplikasi/toko (`id_toko`). Setiap toko dapat memiliki setting kredensial Moota masing-masing yang disimpan di tabel `toko` atau dikonfigurasi langsung sebagai bank utama Toko tersebut. Setiap tenant mengelola autentikasi Moota menggunakan token unik (`moota_token`).
 
 ---
 
 ## 1. Database Schema Updates
 
 ### A. Tabel `tenants`
-Ditambahkan kolom `moota_app_id` (VARCHAR 100) untuk menampung Application ID dari Moota.
-*   **Query / Migration:** `2026-06-11-170000_AddMootaAppIdToTenants.php`
+Ditambahkan kolom `moota_token` (TEXT) untuk menampung token akses Moota per tenant.
+*   **Migration:** `2026-06-11-170000_AddMootaAppIdToTenants.php`
 
 ### B. Tabel `toko`
 Ditambahkan kolom-kolom berikut untuk mengintegrasikan rekening bank Toko ke Moota secara otomatis:
@@ -17,14 +17,14 @@ Ditambahkan kolom-kolom berikut untuk mengintegrasikan rekening bank Toko ke Moo
 *   `moota_username` (VARCHAR 100): Username iBanking (atau nomor ponsel untuk Gojek/Ovo).
 *   `moota_password` (VARCHAR 255): Password iBanking.
 *   `moota_bank_id` (VARCHAR 100): ID Bank yang didapatkan setelah sukses didaftarkan ke Moota.
-*   **Query / Migration:** `2026-06-11-171000_AddMootaFieldsToToko.php`
+*   **Migration:** `2026-06-11-171000_AddMootaFieldsToToko.php`
 
 ---
 
 ## 2. API Endpoints
 
 ### A. Konfigurasi Bank Toko & Koneksi Moota
-Menyimpan konfigurasi rekening bank Toko. Jika `moota_connection` diset ke `true`, sistem akan otomatis mendaftarkan rekening tersebut ke API Moota menggunakan `MOOTA_APP_ID` milik Tenant saat ini sebagai `corporate_id`.
+Menyimpan konfigurasi rekening bank Toko. Jika `moota_connection` diset ke `true`, sistem akan otomatis mendaftarkan rekening tersebut ke API Moota menggunakan token (`moota_token`) milik Tenant saat ini dengan parameter `corporate_id` dikosongkan.
 
 *   **Endpoint:** `POST /api/v2/toko/(:num)/bank` (Contoh: `/api/v2/toko/5/bank`)
 *   **Headers:**
@@ -68,7 +68,7 @@ Menyimpan konfigurasi rekening bank Toko. Jika `moota_connection` diset ke `true
 ---
 
 ### B. Ambil Konfigurasi Bank Toko
-Mengambil konfigurasi bank Toko termasuk informasi koneksi Moota dan `corporate_id` (diisi `moota_app_id` milik Tenant).
+Mengambil konfigurasi bank Toko termasuk informasi koneksi Moota.
 
 *   **Endpoint:** `GET /api/v2/toko/(:num)/bank` (Contoh: `/api/v2/toko/5/bank`)
 *   **Headers:**
@@ -80,7 +80,6 @@ Mengambil konfigurasi bank Toko termasuk informasi koneksi Moota dan `corporate_
       "status": "Success",
       "message": "Success fetching bank config",
       "data": {
-        "corporate_id": "your-moota-app-id",
         "bank_type": "bca",
         "username": "loream",
         "password": "yourpassword",
@@ -95,7 +94,7 @@ Mengambil konfigurasi bank Toko termasuk informasi koneksi Moota dan `corporate_
 ---
 
 ### C. Putus Koneksi / Hapus Konfigurasi Bank Toko
-Memutuskan hubungan Moota dan menghapus data konfigurasi bank Toko. Jika sebelumnya terhubung, API juga akan otomatis menghapus bank tersebut dari server Moota.
+Memutuskan hubungan Moota dan menghapus data konfigurasi bank Toko. Jika sebelumnya terhubung, API juga akan otomatis menghapus bank tersebut dari server Moota menggunakan endpoint `POST /bank/{bank_id}/destroy`.
 
 *   **Endpoint:** `DELETE /api/v2/toko/(:num)/bank` (Contoh: `/api/v2/toko/5/bank`)
 *   **Headers:**
@@ -109,3 +108,24 @@ Memutuskan hubungan Moota dan menghapus data konfigurasi bank Toko. Jika sebelum
       "data": null
     }
     ```
+
+---
+
+### D. Create Transaction dengan Integrasi Moota
+Membuat transaksi baru. Jika toko (`id_toko`) memiliki `moota_connection` aktif, maka request ke API Moota `/create-transaction` akan dipicu. Response Moota yang berisi `unique_code`, `trx_id`, dan `payment_url` akan diproses. Kode unik ditambahkan langsung ke `actual_total` transaksi, dan data-data Moota tersebut disimpan ke metadata transaksi.
+
+*   **Endpoint:** `POST /api/v2/transaction`
+*   **Headers:**
+    *   `Authorization: Bearer <JWT_Token>`
+    *   `X-Tenant: <Tenant_ID>`
+    *   `Content-Type: application/json`
+*   **Request Body (JSON):**
+    *   Sama seperti request create transaction standar (berisi `id_toko`, `products`, `customer_name`, dll).
+*   **Hasil Integrasi Moota di Database (Tabel `transaction_meta`):**
+    *   `moota_unique_code`: Kode unik yang di-generate Moota (menambahkan nominal total tagihan).
+    *   `moota_bank_id`: ID Bank tujuan transfer.
+    *   `moota_bank_type`: Jenis bank (misal: `bca`).
+    *   `moota_nomer_rekening`: Nomor rekening tujuan transfer.
+    *   `moota_trx_id`: ID transaksi pembayaran Moota.
+    *   `moota_payment_url`: Tautan/URL halaman pembayaran Moota.
+    *   `moota_expired_at`: Batas waktu aktif kode unik (di-set otomatis 1 tahun).

@@ -9,7 +9,7 @@ class MootaService
 {
     private string $token = '';
     private string $secret = '';
-    private string $baseUrl = "https://app.moota.co/api/v2";
+    private string $baseUrl = "https://api.moota.co/api/v2";
     private TokoMetaModel $tokoMetaModel;
 
     public function __construct()
@@ -17,6 +17,15 @@ class MootaService
         $this->token = getenv('MOOTA_TOKEN') ?: '';
         $this->secret = getenv('MOOTA_SECRET') ?: '';
         $this->tokoMetaModel = new TokoMetaModel();
+
+        // Dynamically load from tenant if TenantContext is available
+        if (class_exists('\App\Libraries\TenantContext') && \App\Libraries\TenantContext::id() > 0) {
+            $db = \Config\Database::connect();
+            $tenant = $db->table('tenants')->where('id', \App\Libraries\TenantContext::id())->get()->getRowArray();
+            if (!empty($tenant['moota_token'])) {
+                $this->token = $tenant['moota_token'];
+            }
+        }
     }
 
     /**
@@ -123,7 +132,7 @@ class MootaService
 
             $localSignature = hash_hmac('sha256', $rawPayload, $tokoSecret);
             if (hash_equals($localSignature, $signatureHeader)) {
-                $idToko = (int)$row['id_toko'];
+                $idToko = (int)$row['toko_id'];
                 // Load token and secret for this specific shop
                 $this->initializeForToko($idToko);
                 return $idToko;
@@ -155,5 +164,13 @@ class MootaService
     public function getMutations(array $filters = []): array
     {
         return $this->request('GET', '/mutation', $filters);
+    }
+
+    /**
+     * Create Transaction (Mutation Tracking) in Moota
+     */
+    public function createTransaction(array $payload): array
+    {
+        return $this->request('POST', '/create-transaction', $payload);
     }
 }

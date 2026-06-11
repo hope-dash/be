@@ -278,6 +278,14 @@ class TransactionControllerV2 extends ResourceController
                 $grandTotal += $shippingCost;
             }
 
+            // Fetch Toko configuration to check if Moota is integrated
+            $tokoModel = new \App\Models\TokoModel();
+            $toko = $tokoModel->find($data->id_toko);
+
+            $mootaUniqueCode = 0;
+            $mootaTrxId = '';
+            $mootaPaymentUrl = '';
+
             if ($grandTotal < 0)
                 $grandTotal = 0;
 
@@ -309,6 +317,74 @@ class TransactionControllerV2 extends ResourceController
             $this->transactionModel->update($trxId, ['invoice' => $invoice]);
             $trxData['invoice'] = $invoice; // Update local variable for later use in journals/logs
 
+            if ($toko && !empty($toko['moota_connection'])) {
+                try {
+                    $mootaService = new \App\Libraries\MootaService();
+                    $mootaService->initializeForToko((int)$data->id_toko);
+
+                    // Build items payload
+                    $mootaItems = [];
+                    if (!empty($productsInput)) {
+                        foreach ($productsInput as $prod) {
+                            $prodObj = (object)$prod;
+                            $mootaItems[] = [
+                                'name' => $prodObj->name ?? $prodObj->product_name ?? 'Product',
+                                'description' => $prodObj->description ?? '',
+                                'qty' => (int)($prodObj->qty ?? 1),
+                                'price' => (int)($prodObj->price ?? 0)
+                            ];
+                        }
+                    }
+                    if (!empty($servicesInput)) {
+                        foreach ($servicesInput as $serv) {
+                            $servObj = (object)$serv;
+                            $mootaItems[] = [
+                                'name' => $servObj->name ?? $servObj->service_name ?? 'Service',
+                                'description' => $servObj->description ?? '',
+                                'qty' => (int)($servObj->qty ?? 1),
+                                'price' => (int)($servObj->price ?? 0)
+                            ];
+                        }
+                    }
+
+                    // Build Moota request payload
+                    $mootaPayload = [
+                        'order_id' => $invoice,
+                        'bank_account_id' => $toko['moota_bank_id'] ?? '',
+                        'customers' => [
+                            'name' => $data->customer_name ?? 'Customer'
+                        ],
+                        'description' => 'Invoice ' . $invoice,
+                        'note' => null,
+                        'redirect_url' => 'https://hope-sparepart.com',
+                        'total' => (int)$grandTotal
+                    ];
+
+                    if (!empty($mootaItems)) {
+                        $mootaPayload['items'] = $mootaItems;
+                    }
+
+                    $mootaResult = $mootaService->createTransaction($mootaPayload);
+                    log_message('info', '[Moota createTransaction] Response: ' . json_encode($mootaResult));
+
+                    if (($mootaResult['status'] ?? '') === 'success' && isset($mootaResult['data'])) {
+                        $mootaUniqueCode = (int)($mootaResult['data']['unique_code'] ?? 0);
+                        $mootaTrxId = $mootaResult['data']['trx_id'] ?? '';
+                        $mootaPaymentUrl = $mootaResult['data']['payment_url'] ?? '';
+
+                        // Update transaction's actual_total to the total returned by Moota
+                        $mootaTotal = (float)($mootaResult['data']['total'] ?? ($grandTotal + $mootaUniqueCode));
+                        if ($mootaTotal > 0) {
+                            $grandTotal = $mootaTotal;
+                            $this->transactionModel->update($trxId, ['actual_total' => $grandTotal]);
+                            $trxData['actual_total'] = $grandTotal;
+                        }
+                    }
+                } catch (\Exception $ex) {
+                    log_message('error', 'Failed to integrate with Moota: ' . $ex->getMessage());
+                }
+            }
+
             // Save Metadata (Customer, Shipping info, etc)
             $metaData = [
                 'customer_id' => $customerId,
@@ -333,6 +409,16 @@ class TransactionControllerV2 extends ResourceController
                 'item_discount_total' => $totalItemDiscount,
                 'tx_discount_value' => $txDiscountValue
             ];
+
+            if ($mootaUniqueCode > 0 || !empty($mootaTrxId)) {
+                $metaData['moota_unique_code'] = (string)$mootaUniqueCode;
+                $metaData['moota_bank_id'] = $toko['moota_bank_id'] ?? '';
+                $metaData['moota_bank_type'] = $toko['moota_bank_type'] ?? '';
+                $metaData['moota_nomer_rekening'] = $toko['nomer_rekening'] ?? '';
+                $metaData['moota_trx_id'] = $mootaTrxId;
+                $metaData['moota_payment_url'] = $mootaPaymentUrl;
+                $metaData['moota_expired_at'] = date('Y-m-d H:i:s', strtotime('+1 year'));
+            }
 
             if ($hasService) {
                 $metaData['kerusakan'] = $data->kerusakan ?? '';

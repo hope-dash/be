@@ -360,15 +360,17 @@ class TokoController extends BaseController
                 $mootaService->initializeForToko((int)$id);
 
                 $mootaPayload = [
-                    'corporate_id'   => $mootaAppId,
+                    'corporate_id'   => '',
                     'bank_type'      => $data['bank_type'],
                     'username'       => $data['username'],
                     'password'       => $data['password'],
                     'account_number' => (string)$data['account_number'],
+                    'name_holder'    => $data['name_holder'] ?? '',
                     'active'         => filter_var($data['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN)
                 ];
 
                 $mootaResponse = $mootaService->request('POST', '/bank/store', $mootaPayload);
+                log_message('info', '[Moota bank/store] Response: ' . json_encode($mootaResponse));
                 $mootaBankId = $mootaResponse['bank_id'] ?? $mootaResponse['id'] ?? null;
 
                 $updateData['moota_bank_type'] = $data['bank_type'];
@@ -384,7 +386,10 @@ class TokoController extends BaseController
 
             $this->modelToko->update($id, $updateData);
 
-            return $this->jsonResponse->oneResp("Toko bank configuration updated successfully", $updateData, 200);
+            return $this->jsonResponse->oneResp("Toko bank configuration updated successfully", [
+                'update_data'    => $updateData,
+                'moota_response' => $mootaResponse ?? null
+            ], 200);
 
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
