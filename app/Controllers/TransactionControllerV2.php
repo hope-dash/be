@@ -278,6 +278,27 @@ class TransactionControllerV2 extends ResourceController
                 $grandTotal += $shippingCost;
             }
 
+            if ($grandTotal < 0) {
+                $grandTotal = 0;
+            }
+
+            // Points spending logic
+            $pointsToUse = 0;
+            if ($customerId && !empty($data->use_points)) {
+                $customer = $this->customerModel->find($customerId);
+                if ($customer && (float)$customer['points_balance'] > 0) {
+                    $availablePoints = (float)$customer['points_balance'];
+                    if (is_numeric($data->use_points)) {
+                        $pointsToUse = min($availablePoints, (float)$data->use_points);
+                    } else {
+                        $pointsToUse = $availablePoints;
+                    }
+                    $pointsToUse = min($pointsToUse, $grandTotal);
+                }
+            }
+
+            $amountToPay = $grandTotal - $pointsToUse;
+
             // Fetch Toko configuration to check if Moota is integrated
             $tokoModel = new \App\Models\TokoModel();
             $toko = $tokoModel->find($data->id_toko);
@@ -287,17 +308,14 @@ class TransactionControllerV2 extends ResourceController
             $mootaPaymentUrl = '';
             $mootaUniqueNote = '';
 
-            if ($grandTotal < 0)
-                $grandTotal = 0;
-
             // -- Insert Transaction --
             $trxData = [
                 'invoice' => 'INV-TMP-' . time(),
                 'id_toko' => $data->id_toko,
                 'amount' => $grossAmount, // amount = total dari semua total barang
                 'actual_total' => $grandTotal, // actual_total = total dari amount stlh discount dan ada ppn atau ongkir lain lain
-                'total_payment' => 0,
-                'status' => 'WAITING_PAYMENT',
+                'total_payment' => $pointsToUse,
+                'status' => ($pointsToUse >= $grandTotal) ? 'PAID' : (($pointsToUse > 0) ? 'PARTIALLY_PAID' : 'WAITING_PAYMENT'),
                 'delivery_status' => 'NOT_READY',
                 'discount_type' => $txDiscountType,
                 'discount_amount' => $txDiscountAmount,
@@ -318,7 +336,35 @@ class TransactionControllerV2 extends ResourceController
             $this->transactionModel->update($trxId, ['invoice' => $invoice]);
             $trxData['invoice'] = $invoice; // Update local variable for later use in journals/logs
 
-            if ($toko && !empty($toko['moota_connection'])) {
+            // Deduct points from customer balance if used
+            if ($pointsToUse > 0 && isset($customer)) {
+                $newBalance = (float)$customer['points_balance'] - $pointsToUse;
+                $this->customerModel->update($customerId, [
+                    'points_balance' => $newBalance
+                ]);
+
+                $pointHistoryModel = new \App\Models\CustomerPointHistoryModel();
+                $pointHistoryModel->insert([
+                    'customer_id' => $customerId,
+                    'transaction_id' => $trxId,
+                    'points_change' => -$pointsToUse,
+                    'balance_after' => $newBalance,
+                    'type' => 'REDEEMED',
+                    'description' => "Point used for discount in invoice {$invoice}"
+                ]);
+
+                // Record points payment
+                $this->paymentModel->insert([
+                    'transaction_id' => $trxId,
+                    'amount' => $pointsToUse,
+                    'payment_method' => 'POINTS',
+                    'status' => 'VERIFIED',
+                    'paid_at' => date('Y-m-d H:i:s'),
+                    'note' => "Paid via points deduction"
+                ]);
+            }
+
+            if ($toko && !empty($toko['moota_connection']) && $amountToPay > 0) {
                 try {
                     $mootaService = new \App\Libraries\MootaService();
                     $mootaService->initializeForToko((int)$data->id_toko);
@@ -335,13 +381,13 @@ class TransactionControllerV2 extends ResourceController
                                 'name' => 'Invoice ' . $invoice,
                                 'description' => 'Pembayaran Belanja',
                                 'qty' => 1,
-                                'price' => (int)$grandTotal
+                                'price' => (int)$amountToPay
                             ]
                         ],
                         'description' => 'Invoice ' . $invoice,
                         'note' => null,
                         'redirect_url' => 'https://hope-sparepart.com',
-                        'total' => (int)$grandTotal
+                        'total' => (int)$amountToPay
                     ];
 
                     $mootaResult = $mootaService->createTransaction($mootaPayload);
@@ -383,6 +429,10 @@ class TransactionControllerV2 extends ResourceController
                 'tx_discount_value' => $txDiscountValue
             ];
 
+            if ($pointsToUse > 0) {
+                $metaData['points_used'] = (string)$pointsToUse;
+            }
+
             if ($mootaUniqueCode > 0 || !empty($mootaTrxId)) {
                 $metaData['moota_unique_code'] = (string)$mootaUniqueCode;
                 $metaData['moota_bank_id'] = $toko['moota_bank_id'] ?? '';
@@ -420,8 +470,13 @@ class TransactionControllerV2 extends ResourceController
             // -- Accounting: Sales Journal --
             $journalId = $this->createJournal('SALES', $trxId, $trxData['invoice'], date('Y-m-d'), "Invoice #{$trxData['invoice']}", $data->id_toko);
 
-            // 1. Dr AR (Total Receivables)
-            $this->addJournalItem($journalId, '10' . $data->id_toko . '3', $grandTotal, 0, $data->id_toko);
+            // 1. Dr AR (Total Receivables - remaining to be paid)
+            $this->addJournalItem($journalId, '10' . $data->id_toko . '3', $grandTotal - $pointsToUse, 0, $data->id_toko);
+
+            // 1b. Dr Customer Points (points used as discount/payment)
+            if ($pointsToUse > 0) {
+                $this->addJournalItem($journalId, '20' . $data->id_toko . '3', $pointsToUse, 0, $data->id_toko);
+            }
 
             // 2. Dr Discount (if any)
             if ($totalDiscount > 0) {
@@ -682,24 +737,37 @@ class TransactionControllerV2 extends ResourceController
     {
         $data = $this->request->getJSON();
         $userId = $this->request->user['user_id'] ?? 0;
+        $amount = (float)($data->amount ?? 0);
+        $method = $data->payment_method ?? 'CASH';
+        $imageUrl = $data->image ?? null;
 
+        try {
+            $res = $this->internalAddPayment($id, $amount, $method, $imageUrl, $userId);
+            return $this->jsonResponse->oneResp('Pembayaran berhasil ditambahkan', ['new_status' => $res['new_status']], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Internal method to add payment, used by both HTTP controller and Moota Webhook
+     */
+    public function internalAddPayment($id, $amount, $method, $imageUrl = null, $userId = 0)
+    {
         $this->db->transStart();
         try {
             // Use RAW SQL to ensure 'FOR UPDATE' locking across all versions/drivers
             $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
             if (!$trx) {
                 $this->db->transRollback();
-                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+                throw new \Exception("Transaksi tidak ditemukan");
             }
 
             // GUARD: Don't allow payment on cancelled or already paid transaction
             if ($trx['status'] === 'CANCEL' || $trx['status'] === 'PAID') {
                 $this->db->transRollback();
-                return $this->jsonResponse->error("Status transaksi ({$trx['status']}) tidak memungkinkan penambahan pembayaran", 400);
+                throw new \Exception("Status transaksi ({$trx['status']}) tidak memungkinkan penambahan pembayaran");
             }
-
-            $amount = (float)($data->amount ?? 0);
-            $method = $data->payment_method ?? 'CASH';
 
             $this->paymentModel->insert([
                 'transaction_id' => $id,
@@ -707,13 +775,58 @@ class TransactionControllerV2 extends ResourceController
                 'payment_method' => $method,
                 'status' => 'VERIFIED',
                 'paid_at' => date('Y-m-d H:i:s'),
-                'image_url' => $data->image ?? null
+                'image_url' => $imageUrl
             ]);
+
+            // Resolve metadata to check for unique code and customer ID
+            $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+            $metaMap = [];
+            foreach ($metas as $m) {
+                $metaMap[$m['key']] = $m['value'];
+            }
+
+            $uniqueCode = 0;
+            if (isset($metaMap['moota_unique_code']) && (float)$metaMap['moota_unique_code'] > 0) {
+                $uniqueCode = (float)$metaMap['moota_unique_code'];
+            }
+
+            $pointsToAdd = 0;
+            if ($uniqueCode > 0 && $amount >= ((float)$trx['actual_total'] + $uniqueCode)) {
+                $pointsToAdd = $uniqueCode;
+            }
 
             $accountCode = ($method == 'CASH') ? '10' . $trx['id_toko'] . '1' : '10' . $trx['id_toko'] . '2';
             $journalId = $this->createJournal('PAYMENT', $id, $trx['invoice'], date('Y-m-d'), "Payment for {$trx['invoice']}", $trx['id_toko']);
-            $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Cash
-            $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
+
+            if ($pointsToAdd > 0) {
+                $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Cash/Bank
+                $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount - $pointsToAdd, $trx['id_toko']); // Cr AR
+                $this->addJournalItem($journalId, '20' . $trx['id_toko'] . '3', 0, $pointsToAdd, $trx['id_toko']); // Cr Customer Points (2003)
+
+                $customerId = $metaMap['customer_id'] ?? null;
+                if ($customerId) {
+                    $customer = $this->customerModel->find($customerId);
+                    if ($customer) {
+                        $newBalance = (float)$customer['points_balance'] + $pointsToAdd;
+                        $this->customerModel->update($customerId, [
+                            'points_balance' => $newBalance
+                        ]);
+
+                        $pointHistoryModel = new \App\Models\CustomerPointHistoryModel();
+                        $pointHistoryModel->insert([
+                            'customer_id' => $customerId,
+                            'transaction_id' => $id,
+                            'points_change' => $pointsToAdd,
+                            'balance_after' => $newBalance,
+                            'type' => 'EARNED',
+                            'description' => "Point earned from unique code transfer for invoice {$trx['invoice']}"
+                        ]);
+                    }
+                }
+            } else {
+                $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Cash/Bank
+                $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
+            }
 
             $newTotalPaid = (float)$trx['total_payment'] + $amount;
             $newStatus = ($newTotalPaid >= (float)$trx['actual_total']) ? 'PAID' : 'PARTIALLY_PAID';
@@ -733,14 +846,14 @@ class TransactionControllerV2 extends ResourceController
                 'target_table' => 'transaction',
                 'target_id' => $id,
                 'description' => "Added payment of $amount via $method",
-                'detail' => ['amount' => $amount, 'method' => $method, 'image' => $data->image ?? null]
+                'detail' => ['amount' => $amount, 'method' => $method, 'image' => $imageUrl]
             ]);
 
-            return $this->jsonResponse->oneResp('Pembayaran berhasil ditambahkan', ['new_status' => $newStatus], 200);
+            return ['status' => true, 'new_status' => $newStatus];
 
-        }
-        catch (\Exception $e) {
-            return $this->jsonResponse->error($e->getMessage(), 500);
+        } catch (\Exception $e) {
+            $this->db->transRollback();
+            throw $e;
         }
     }
 
@@ -809,9 +922,54 @@ class TransactionControllerV2 extends ResourceController
                 $accountCode = '10' . $trx['id_toko'] . '2';
                 $amount = (float)$payment['amount'];
 
+                // Resolve metadata to check for unique code and customer ID
+                $metas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+                $metaMap = [];
+                foreach ($metas as $m) {
+                    $metaMap[$m['key']] = $m['value'];
+                }
+
+                $uniqueCode = 0;
+                if (isset($metaMap['moota_unique_code']) && (float)$metaMap['moota_unique_code'] > 0) {
+                    $uniqueCode = (float)$metaMap['moota_unique_code'];
+                }
+
+                $pointsToAdd = 0;
+                if ($uniqueCode > 0 && $amount >= ((float)$trx['actual_total'] + $uniqueCode)) {
+                    $pointsToAdd = $uniqueCode;
+                }
+
                 $journalId = $this->createJournal('PAYMENT', $id, $trx['invoice'], date('Y-m-d'), "Payment verification for {$trx['invoice']}", $trx['id_toko']);
-                $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Bank
-                $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
+
+                if ($pointsToAdd > 0) {
+                    $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Bank
+                    $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount - $pointsToAdd, $trx['id_toko']); // Cr AR
+                    $this->addJournalItem($journalId, '20' . $trx['id_toko'] . '3', 0, $pointsToAdd, $trx['id_toko']); // Cr Customer Points (2003)
+
+                    $customerId = $metaMap['customer_id'] ?? null;
+                    if ($customerId) {
+                        $customer = $this->customerModel->find($customerId);
+                        if ($customer) {
+                            $newBalance = (float)$customer['points_balance'] + $pointsToAdd;
+                            $this->customerModel->update($customerId, [
+                                'points_balance' => $newBalance
+                            ]);
+
+                            $pointHistoryModel = new \App\Models\CustomerPointHistoryModel();
+                            $pointHistoryModel->insert([
+                                'customer_id' => $customerId,
+                                'transaction_id' => $id,
+                                'points_change' => $pointsToAdd,
+                                'balance_after' => $newBalance,
+                                'type' => 'EARNED',
+                                'description' => "Point earned from unique code transfer for invoice {$trx['invoice']}"
+                            ]);
+                        }
+                    }
+                } else {
+                    $this->addJournalItem($journalId, $accountCode, $amount, 0, $trx['id_toko']); // Dr Bank
+                    $this->addJournalItem($journalId, '10' . $trx['id_toko'] . '3', 0, $amount, $trx['id_toko']); // Cr AR
+                }
 
                 // Update Transaction Status
                 $newTotalPaid = (float)$trx['total_payment'] + $amount;

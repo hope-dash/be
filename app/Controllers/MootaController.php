@@ -111,11 +111,50 @@ class MootaController extends BaseController
             // Log received webhook data for debugging/future processing
             log_message('info', "[Moota Webhook] Received for Toko ID {$idToko}: " . $rawPayload);
 
+            $processedCount = 0;
+            if (is_array($payload)) {
+                $db = \Config\Database::connect();
+                $transactionController = new \App\Controllers\TransactionControllerV2();
+
+                foreach ($payload as $mutation) {
+                    $type = strtoupper($mutation['type'] ?? '');
+                    // Only process Credit mutations (CR)
+                    if ($type !== 'CR') {
+                        continue;
+                    }
+
+                    $trxIdMoota = $mutation['payment_detail']['trx_id'] ?? null;
+                    if (empty($trxIdMoota)) {
+                        continue;
+                    }
+
+                    $amount = (float)($mutation['amount'] ?? 0);
+
+                    // Look up matching moota_trx_id key in transaction_meta
+                    $meta = $db->table('transaction_meta')
+                               ->where('key', 'moota_trx_id')
+                               ->where('value', $trxIdMoota)
+                               ->get()
+                               ->getRowArray();
+
+                    if ($meta) {
+                        $transactionId = (int)$meta['transaction_id'];
+                        try {
+                            // Call the exposed public method to add payment details automatically
+                            $transactionController->internalAddPayment($transactionId, $amount, 'BANK_TRANSFER', null, 0);
+                            $processedCount++;
+                        } catch (\Exception $ex) {
+                            log_message('error', "[Moota Webhook] Error processing payment for Transaction ID {$transactionId}: " . $ex->getMessage());
+                        }
+                    }
+                }
+            }
+
             return $this->response->setStatusCode(200)->setJSON([
-                'status'    => true,
-                'message'   => 'Webhook verified and logged successfully',
-                'id_toko'   => $idToko,
-                'data'      => $payload
+                'status'          => true,
+                'message'         => 'Webhook verified and processed successfully',
+                'id_toko'         => $idToko,
+                'processed_count' => $processedCount
             ]);
 
         } catch (Exception $e) {

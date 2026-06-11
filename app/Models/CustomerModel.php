@@ -34,7 +34,8 @@ class CustomerModel extends TenantScopedModel
         'reset_token',
         'reset_expiry',
         'created_by',
-        'updated_by'
+        'updated_by',
+        'points_balance'
     ];
     protected $useTimestamps = true;
     protected $dateFormat = 'datetime';
