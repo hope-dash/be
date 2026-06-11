@@ -112,7 +112,7 @@ Memutuskan hubungan Moota dan menghapus data konfigurasi bank Toko. Jika sebelum
 ---
 
 ### D. Create Transaction dengan Integrasi Moota
-Membuat transaksi baru. Jika toko (`id_toko`) memiliki `moota_connection` aktif, maka request ke API Moota `/create-transaction` akan dipicu. Response Moota yang berisi `unique_code`, `trx_id`, dan `payment_url` akan diproses. Kode unik ditambahkan langsung ke `actual_total` transaksi, dan data-data Moota tersebut disimpan ke metadata transaksi.
+Membuat transaksi baru. Jika toko (`id_toko`) memiliki `moota_connection` aktif, maka request ke API Moota `/create-transaction` akan dipicu. Response Moota yang berisi `unique_code`, `trx_id`, dan `payment_url` akan diproses. Kode unik disimpan ke metadata transaksi dan berada di luar nominal tagihan (`actual_total` pada tabel `transaction` tetap sama dengan nilai dasar sebelum kode unik).
 
 *   **Endpoint:** `POST /api/v2/transaction`
 *   **Headers:**
@@ -122,10 +122,11 @@ Membuat transaksi baru. Jika toko (`id_toko`) memiliki `moota_connection` aktif,
 *   **Request Body (JSON):**
     *   Sama seperti request create transaction standar (berisi `id_toko`, `products`, `customer_name`, dll).
 *   **Hasil Integrasi Moota di Database (Tabel `transaction_meta`):**
-    *   `moota_unique_code`: Kode unik yang di-generate Moota (menambahkan nominal total tagihan).
+    *   `moota_unique_code`: Kode unik yang di-generate Moota (disimpan sebagai metadata tambahan).
     *   `moota_bank_id`: ID Bank tujuan transfer.
     *   `moota_bank_type`: Jenis bank (misal: `bca`).
     *   `moota_nomer_rekening`: Nomor rekening tujuan transfer.
     *   `moota_trx_id`: ID transaksi pembayaran Moota.
     *   `moota_payment_url`: Tautan/URL halaman pembayaran Moota.
+    *   `moota_unique_note`: Catatan unik / unique note dari Moota.
     *   `moota_expired_at`: Batas waktu aktif kode unik (di-set otomatis 1 tahun).

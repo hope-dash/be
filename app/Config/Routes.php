@@ -13,6 +13,7 @@ $routes->options('api/(:any)', function () {
 
 // --- 2. PUBLIC ROUTES (No Token, No X-Tenant Required) ---
 $routes->post('api/login', 'UserController::login');
+$routes->get('api/temp/setup-token', 'MootaController::setupToken');
 $routes->post('api/v2/upload/image', 'UploadController::uploadImage');
 $routes->post('api/v2/upload/file', 'UploadController::uploadImage');
 

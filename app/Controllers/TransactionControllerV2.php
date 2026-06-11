@@ -285,6 +285,7 @@ class TransactionControllerV2 extends ResourceController
             $mootaUniqueCode = 0;
             $mootaTrxId = '';
             $mootaPaymentUrl = '';
+            $mootaUniqueNote = '';
 
             if ($grandTotal < 0)
                 $grandTotal = 0;
@@ -371,14 +372,7 @@ class TransactionControllerV2 extends ResourceController
                         $mootaUniqueCode = (int)($mootaResult['data']['unique_code'] ?? 0);
                         $mootaTrxId = $mootaResult['data']['trx_id'] ?? '';
                         $mootaPaymentUrl = $mootaResult['data']['payment_url'] ?? '';
-
-                        // Update transaction's actual_total to the total returned by Moota
-                        $mootaTotal = (float)($mootaResult['data']['total'] ?? ($grandTotal + $mootaUniqueCode));
-                        if ($mootaTotal > 0) {
-                            $grandTotal = $mootaTotal;
-                            $this->transactionModel->update($trxId, ['actual_total' => $grandTotal]);
-                            $trxData['actual_total'] = $grandTotal;
-                        }
+                        $mootaUniqueNote = $mootaResult['data']['unique_note'] ?? '';
                     }
                 } catch (\Exception $ex) {
                     log_message('error', 'Failed to integrate with Moota: ' . $ex->getMessage());
@@ -417,6 +411,7 @@ class TransactionControllerV2 extends ResourceController
                 $metaData['moota_nomer_rekening'] = $toko['nomer_rekening'] ?? '';
                 $metaData['moota_trx_id'] = $mootaTrxId;
                 $metaData['moota_payment_url'] = $mootaPaymentUrl;
+                $metaData['moota_unique_note'] = $mootaUniqueNote;
                 $metaData['moota_expired_at'] = date('Y-m-d H:i:s', strtotime('+1 year'));
             }
 

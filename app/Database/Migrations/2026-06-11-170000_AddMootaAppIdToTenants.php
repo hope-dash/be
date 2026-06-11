@@ -9,8 +9,9 @@ class AddMootaAppIdToTenants extends Migration
     public function up()
     {
         $this->forge->addColumn('tenants', [
-            'moota_token' => [
-                'type'       => 'TEXT',
+            'moota_app_id' => [
+                'type'       => 'VARCHAR',
+                'constraint' => '100',
                 'null'       => true,
                 'after'      => 'status'
             ]
@@ -19,6 +20,6 @@ class AddMootaAppIdToTenants extends Migration
 
     public function down()
     {
-        $this->forge->dropColumn('tenants', 'moota_token');
+        $this->forge->dropColumn('tenants', 'moota_app_id');
     }
 }

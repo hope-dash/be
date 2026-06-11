@@ -371,7 +371,7 @@ class TokoController extends BaseController
 
                 $mootaResponse = $mootaService->request('POST', '/bank/store', $mootaPayload);
                 log_message('info', '[Moota bank/store] Response: ' . json_encode($mootaResponse));
-                $mootaBankId = $mootaResponse['bank_id'] ?? $mootaResponse['id'] ?? null;
+                $mootaBankId = $mootaResponse['bank']['bank_id'] ?? $mootaResponse['bank']['id'] ?? $mootaResponse['bank_id'] ?? $mootaResponse['id'] ?? null;
 
                 $updateData['moota_bank_type'] = $data['bank_type'];
                 $updateData['moota_username']  = $data['username'];

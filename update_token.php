@@ -1,0 +1,14 @@
+<?php
+
+// Bootstrapping CodeIgniter 4 manually
+define('FCPATH', __DIR__ . '/public/');
+require_once __DIR__ . '/system/bootstrap.php';
+
+$db = \Config\Database::connect();
+$token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJucWllNHN3OGxsdyIsImp0aSI6IjlmNTJmNjAxMTU2MmM2YzJhYTg2Mzk4MWU0ZDFhYjZkZDdkMGQzMzExZTgzNjE4YWNlN2UxNTBhZmExZjJlZGJhY2Y2MDJlMWU1Y2RjN2MzIiwiaWF0IjoxNzgxMTY3Njc2LjIzNzY1OSwibmJmIjoxNzgxMTY3Njc2LjIzNzY2MiwiZXhwIjoxODEyNzAzNjc2LjIzNDYyNywic3ViIjoiMjIzNjkiLCJzY29wZXMiOlsiYXBpIiwibXV0YXRpb25fcmVhZCIsImJhbmsiLCJiYW5rX3JlYWQiLCJtdXRhdGlvbiJdfQ.K3GF5qOdAMR0Xug2iugDl_DW4CVusXoZkOjE_1F_30hlpbmsocNh5D3XUV3tCHTBuRtO2KTDuvAghRgjOdCJK19_QNqJcbzSh4smpV7a4ySWOLAcw0X5klPZSf8aWjzPyDmeV0ytjyulS_LKZ42DcuU_O59Lb5XnJctgeF5Ybw1iqOIRmUK0eZrpx3JD6ps-y5QyejoXqZZ0G8eipTE4oN1ANBtzoEaOPnP0soF2WkZetpGF7avSfoVHP8loPg4yqkA24HZTjBEZ9S3wmCfAmMJeXIaVPkL1cW5kL5y_PNKfESBcH5zx-h4wgl6afB6_yKnhm3oBtLHCKFtIslitjyr56ZCghPnDqSRAWbYz7ClmuwrHtpsLDVlyTXW-h6-D3MxgCBMjHg1gVPRpp9BgSO0hkXc_pk8ZCCY0iJSi1TbRCN3Bj4Pz_8_VaVyXomRU9-uRQOMfkPURhRCSoMxOB-CEBu6sH0bUhXMOwnF2vz4NOr2iE3BCMHmjXIE0J4R9CquTz4gOUBKMK2RoSIPx2NJkIEBHZPg3TR05KlEUE8wX-0yCGlREgq1I3CbPT4kjGMbWCZhetGPyHlz6rdjLXuEV6PDkjkKkZDX6x9rG6BruacWesYVywwtql6vs7Oj1UfKdgc5gycvE3T2xB70YtKKEaUTede1T_Dsgi-fzGn4";
+
+$db->table('tenants')->where('id', 1)->update([
+    'moota_token' => $token
+]);
+
+echo "Tenant token updated successfully!\n";
