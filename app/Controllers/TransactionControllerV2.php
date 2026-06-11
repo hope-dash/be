@@ -2487,4 +2487,95 @@ class TransactionControllerV2 extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
+
+    // Update Service Detail (IMEI, Estimasi, Kerusakan, Keterangan, Teknisi)
+    public function updateServiceDetail($id = null)
+    {
+        try {
+            $data = $this->request->getJSON();
+            $userId = $this->request->user['user_id'] ?? 0;
+
+            if (!$id) {
+                return $this->jsonResponse->error("ID Transaksi wajib diisi", 400);
+            }
+
+            $trx = $this->transactionModel->find($id);
+            if (!$trx) {
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            if ($trx['is_service'] != 1) {
+                return $this->jsonResponse->error("Transaksi ini bukan tipe jasa/service", 400);
+            }
+
+            $this->db->transStart();
+
+            // 1. Update basic service metadata
+            $metaFields = [
+                'imei' => $data->imei ?? null,
+                'estimasi_selesai' => $data->estimasi_selesai ?? null,
+                'kerusakan' => $data->kerusakan ?? null,
+                'keterangan_teknisi' => $data->keterangan_teknisi ?? null,
+            ];
+
+            foreach ($metaFields as $key => $value) {
+                if ($value !== null) {
+                    $this->updateMeta($id, $key, (string)$value);
+                }
+            }
+
+            // 2. Update Technician if provided or explicitly set to null
+            if (property_exists($data, 'teknisi_id')) {
+                $teknisiId = $data->teknisi_id;
+                if (!empty($teknisiId)) {
+                    $teknisiUser = $this->db->table('users')
+                        ->where('user_id', $teknisiId)
+                        ->where('deleted_at', null)
+                        ->get()
+                        ->getRowArray();
+
+                    if (!$teknisiUser) {
+                        $this->db->transRollback();
+                        return $this->jsonResponse->error("Teknisi tidak ditemukan", 404);
+                    }
+
+                    $namaTeknisi = $teknisiUser['name'];
+
+                    $this->updateMeta($id, 'teknisi_id', (string)$teknisiId);
+                    $this->updateMeta($id, 'nama_teknisi', $namaTeknisi);
+
+                    // Update komisi
+                    $this->db->table('teknisi_komisi')
+                        ->where('transaction_id', $id)
+                        ->update(['teknisi_id' => $teknisiId]);
+                } else {
+                    $this->updateMeta($id, 'teknisi_id', '');
+                    $this->updateMeta($id, 'nama_teknisi', '');
+                    $this->db->table('teknisi_komisi')
+                        ->where('transaction_id', $id)
+                        ->update(['teknisi_id' => null]);
+                }
+            }
+
+            $this->db->transComplete();
+
+            if ($this->db->transStatus() === false) {
+                throw new \Exception("Gagal memperbarui detail service");
+            }
+
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'UPDATE_SERVICE_DETAIL',
+                'target_table' => 'transaction',
+                'target_id' => $id,
+                'description' => "Updated service detail for transaction {$trx['invoice']}",
+                'detail' => $data
+            ]);
+
+            return $this->jsonResponse->oneResp("Detail service berhasil diperbarui", [], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
 }

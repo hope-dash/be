@@ -240,6 +240,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
         $routes->post('transaction/(:num)/teknisi', 'TransactionControllerV2::updateTeknisi/$1');
         $routes->post('transaction/(:num)/service-status', 'TransactionControllerV2::updateServiceStatus/$1');
+        $routes->post('transaction/(:num)/service-details', 'TransactionControllerV2::updateServiceDetail/$1');
 
         // Accounting & Journal
         $routes->get('journal', 'JournalController::index');

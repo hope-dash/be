@@ -530,6 +530,7 @@ class TransactionController extends BaseController
 
         $status = $request->getGet('status');
         $delivery_status = $request->getGet('delivery_status');
+        $service_status = $request->getGet('service_status');
         $source = $request->getGet('source');
         $id_toko = $request->getGet('id_toko');
         $is_service = $request->getGet('is_service');
@@ -598,6 +599,13 @@ class TransactionController extends BaseController
                     $builder->where('t.is_service', 1);
                 } elseif ($is_service === 'false' || $is_service === '0' || $is_service === 0 || $is_service === false) {
                     $builder->where('t.is_service', 0);
+                }
+            }
+            if ($service_status) {
+                if (strpos($service_status, ',') !== false) {
+                    $builder->whereIn('t.service_status', explode(',', $service_status));
+                } else {
+                    $builder->where('t.service_status', $service_status);
                 }
             }
             if ($date_start && $date_end) {
@@ -782,6 +790,13 @@ class TransactionController extends BaseController
                     $builder->where('t.is_service', 1);
                 } elseif ($is_service === 'false' || $is_service === '0' || $is_service === 0 || $is_service === false) {
                     $builder->where('t.is_service', 0);
+                }
+            }
+            if ($service_status) {
+                if (strpos($service_status, ',') !== false) {
+                    $builder->whereIn('t.service_status', explode(',', $service_status));
+                } else {
+                    $builder->where('t.service_status', $service_status);
                 }
             }
             if ($date_start && $date_end) {
