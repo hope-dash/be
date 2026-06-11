@@ -1561,6 +1561,38 @@ class TransactionControllerV2 extends ResourceController
             // Reverse AR
             $this->addJournalItem($jIdSales, '10' . $trx['id_toko'] . '3', 0, $trx['actual_total'], $trx['id_toko']);
 
+            // Reverse Customer Points if points were used
+            $pointsUsed = 0;
+            if (isset($metaMap['points_used']) && (float)$metaMap['points_used'] > 0) {
+                $pointsUsed = (float)$metaMap['points_used'];
+            }
+
+            if ($pointsUsed > 0) {
+                $this->addJournalItem($jIdSales, '20' . $trx['id_toko'] . '3', 0, $pointsUsed, $trx['id_toko']);
+
+                // Refund points to customer balance
+                $customerId = $metaMap['customer_id'] ?? null;
+                if ($customerId) {
+                    $customer = $this->customerModel->find($customerId);
+                    if ($customer) {
+                        $newBalance = (float)$customer['points_balance'] + $pointsUsed;
+                        $this->customerModel->update($customerId, [
+                            'points_balance' => $newBalance
+                        ]);
+
+                        $pointHistoryModel = new \App\Models\CustomerPointHistoryModel();
+                        $pointHistoryModel->insert([
+                            'customer_id' => $customerId,
+                            'transaction_id' => $id,
+                            'points_change' => $pointsUsed,
+                            'balance_after' => $newBalance,
+                            'type' => 'REFUNDED',
+                            'description' => "Point refunded from cancelled invoice {$trx['invoice']}"
+                        ]);
+                    }
+                }
+            }
+
             // Reverse Discount (Contra-Revenue)
             if ($totalDiscount > 0) {
                 $this->addJournalItem($jIdSales, '40' . $trx['id_toko'] . '2', 0, $totalDiscount, $trx['id_toko']);
