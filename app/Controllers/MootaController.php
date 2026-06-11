@@ -25,6 +25,12 @@ class MootaController extends BaseController
     {
         try {
             $data = $this->request->getJSON(true);
+            $idToko = (int)($data['id_toko'] ?? $this->request->getGet('id_toko') ?? 0);
+
+            if ($idToko > 0) {
+                $this->mootaService->initializeForToko($idToko);
+            }
+
             $result = $this->mootaService->addBankAccount($data);
 
             return $this->jsonResponse->oneResp("Bank account successfully added to Moota.", $result, 201);
@@ -41,6 +47,12 @@ class MootaController extends BaseController
     {
         try {
             $filters = $this->request->getGet() ?: [];
+            $idToko = (int)($filters['id_toko'] ?? 0);
+
+            if ($idToko > 0) {
+                $this->mootaService->initializeForToko($idToko);
+            }
+
             $result = $this->mootaService->getBankAccounts($filters);
 
             return $this->jsonResponse->oneResp("Success fetching bank accounts from Moota.", $result, 200);
@@ -68,9 +80,9 @@ class MootaController extends BaseController
                 ]);
             }
 
-            // Verify signature
-            $isValid = $this->mootaService->verifySignature($rawPayload, $signature);
-            if (!$isValid) {
+            // Verify signature and load credentials for the matching Toko
+            $idToko = $this->mootaService->verifyAndLoadWebhookConfig($rawPayload, $signature);
+            if ($idToko === null) {
                 return $this->response->setStatusCode(401)->setJSON([
                     'status'  => false,
                     'message' => 'Invalid webhook signature'
@@ -80,11 +92,12 @@ class MootaController extends BaseController
             $payload = json_decode($rawPayload, true);
             
             // Log received webhook data for debugging/future processing
-            log_message('info', '[Moota Webhook] Received: ' . $rawPayload);
+            log_message('info', "[Moota Webhook] Received for Toko ID {$idToko}: " . $rawPayload);
 
             return $this->response->setStatusCode(200)->setJSON([
                 'status'    => true,
                 'message'   => 'Webhook verified and logged successfully',
+                'id_toko'   => $idToko,
                 'data'      => $payload
             ]);
 

@@ -1,41 +1,28 @@
-# Dokumentasi API Integrasi Moota (Local Proxy)
+# Dokumentasi API Integrasi Moota (Multi-Application/Multi-Toko)
 
-Berikut adalah daftar endpoint API lokal yang kita miliki untuk berinteraksi dengan Moota API:
-
----
-
-## 1. Konfigurasi Environment (`.env`)
-Pastikan variabel berikut sudah terkonfigurasi di file `.env` backend Anda:
-
-```env
-MOOTA_TOKEN=your_bearer_token_here
-MOOTA_SECRET=your_webhook_secret_here
-```
+Sistem ini mendukung pemisahan integrasi Moota per aplikasi/toko (`id_toko`). Setiap toko dapat memiliki setting kredensial Moota masing-masing yang disimpan di tabel `toko_meta`.
 
 ---
 
-## 2. Daftar API Endpoints (Local Proxy)
+## 1. Konfigurasi Kredensial Per Toko
+Simpan kredensial Moota per Toko di tabel `toko_meta` dengan keys berikut:
+*   `moota_token`: Token API Moota untuk Toko tersebut.
+*   `moota_secret`: Webhook Secret Token Moota untuk Toko tersebut.
 
-| No | Nama API | Method | Endpoint | Keterangan |
-|---|---|---|---|---|
-| 1 | **Tambah Rekening Bank** | `POST` | `/api/v2/moota/bank` | Mendaftarkan akun bank baru ke sistem Moota secara remote. |
-| 2 | **List Rekening Bank** | `GET` | `/api/v2/moota/bank` | Mengambil seluruh data rekening terdaftar dari Moota. |
-| 3 | **Moota Webhook Receiver** | `POST` | `/api/v2/moota/webhook` | Menerima & memverifikasi callback mutasi masuk secara otomatis dari server Moota. |
+> **Catatan:** Jika kredensial per toko kosong, sistem akan menggunakan variabel global `MOOTA_TOKEN` dan `MOOTA_SECRET` dari file `.env` sebagai fallback.
 
 ---
 
-### Detail Endpoint:
+## 2. API Endpoints
 
-### 1. Tambah Rekening Bank
-*   **Endpoint:** `/api/v2/moota/bank`
-*   **Method:** `POST`
-*   **Headers:**
-    *   `Authorization: Bearer <JWT_Token>`
-    *   `X-Tenant: <Tenant_ID>`
-    *   `Content-Type: application/json`
+### A. Tambah Rekening Bank ke Moota (Per Toko)
+Mendaftarkan akun iBanking baru ke Moota menggunakan kredensial Toko tertentu.
+
+*   **Endpoint:** `POST /api/v2/moota/bank`
 *   **Request Body (JSON):**
     ```json
     {
+      "id_toko": 5,
       "bank_type": "bca",
       "account_number": "1234567890",
       "username": "myibankinguser",
@@ -43,82 +30,40 @@ MOOTA_SECRET=your_webhook_secret_here
       "pin": "123456"
     }
     ```
-*   **Response (201 Created):**
-    ```json
-    {
-      "status": "Success",
-      "message": "Bank account successfully added to Moota.",
-      "data": {
-        "bank_id": "ab12cd34-ef56-78gh-ij90-kl12md34ef56",
-        "bank_type": "bca",
-        "account_number": "1234567890",
-        "account_name": "JOHN DOE",
-        "username": "myibankinguser",
-        "status": "ACTIVE"
-      }
-    }
-    ```
+*   **Keterangan:** Ganti `id_toko` dengan ID Toko yang sesuai. API akan otomatis mengambil token Moota milik Toko 5 di database.
 
 ---
 
-### 2. List Rekening Bank
-*   **Endpoint:** `/api/v2/moota/bank`
-*   **Method:** `GET`
-*   **Headers:**
-    *   `Authorization: Bearer <JWT_Token>`
-    *   `X-Tenant: <Tenant_ID>`
-*   **Response (200 OK):**
-    ```json
-    {
-      "status": "Success",
-      "message": "Success fetching bank accounts from Moota.",
-      "data": [
-        {
-          "bank_id": "ab12cd34-ef56-78gh-ij90-kl12md34ef56",
-          "bank_type": "bca",
-          "account_number": "1234567890",
-          "account_name": "JOHN DOE",
-          "username": "myibankinguser",
-          "status": "ACTIVE"
-        }
-      ]
-    }
-    ```
+### B. List Rekening Bank Terdaftar (Per Toko)
+Mengambil daftar seluruh rekening bank terdaftar di akun Moota milik Toko tertentu.
+
+*   **Endpoint:** `GET /api/v2/moota/bank?id_toko=5`
+*   **Keterangan:** Sertakan query parameter `id_toko` agar sistem menggunakan token API Moota dari Toko tersebut.
 
 ---
 
-### 3. Moota Webhook Receiver
-*   **Endpoint:** `/api/v2/moota/webhook`
-*   **Method:** `POST`
+### C. Webhook Callback (Auto-Detect Toko)
+Moota akan mengirimkan notifikasi mutasi masuk ke endpoint tunggal ini. Sistem akan otomatis memverifikasi signature menggunakan secret key masing-masing toko secara dinamis untuk mendeteksi asal Toko.
+
+*   **Webhook URL:** `https://your-domain.com/api/v2/moota/webhook`
 *   **Headers:**
     *   `Signature: <hmac_sha256_signature_from_moota>`
-*   **Request Body (JSON dari Moota):**
-    ```json
-    [
-      {
-        "mutation_id": "1234567",
-        "amount": 100245,
-        "type": "CR",
-        "note": "TRANSFER DARI JOHN DOE UNTUK INV01",
-        "bank_id": "ab12cd34-ef56-78gh-ij90-kl12md34ef56",
-        "date": "2026-06-11 12:00:00"
-      }
-    ]
-    ```
 *   **Response (200 OK):**
     ```json
     {
       "status": true,
       "message": "Webhook verified and logged successfully",
+      "id_toko": 5,
       "data": [
         {
           "mutation_id": "1234567",
           "amount": 100245,
           "type": "CR",
-          "note": "TRANSFER DARI JOHN DOE UNTUK INV01",
+          "note": "TRANSFER DARI JOHN DOE",
           "bank_id": "ab12cd34-ef56-78gh-ij90-kl12md34ef56",
           "date": "2026-06-11 12:00:00"
         }
       ]
     }
     ```
+    *(Response sukses akan mengembalikan `"id_toko": 5` yang menandakan mutasi ini milik Toko ID 5)*

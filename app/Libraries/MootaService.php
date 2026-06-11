@@ -2,18 +2,39 @@
 
 namespace App\Libraries;
 
+use App\Models\TokoMetaModel;
 use Exception;
 
 class MootaService
 {
-    private string $token;
-    private string $secret;
+    private string $token = '';
+    private string $secret = '';
     private string $baseUrl = "https://app.moota.co/api/v2";
+    private TokoMetaModel $tokoMetaModel;
 
     public function __construct()
     {
         $this->token = getenv('MOOTA_TOKEN') ?: '';
         $this->secret = getenv('MOOTA_SECRET') ?: '';
+        $this->tokoMetaModel = new TokoMetaModel();
+    }
+
+    /**
+     * Initialize Moota credentials for a specific Toko (Shop/Application)
+     */
+    public function initializeForToko(int $idToko): self
+    {
+        $token = $this->tokoMetaModel->getMeta($idToko, 'moota_token');
+        $secret = $this->tokoMetaModel->getMeta($idToko, 'moota_secret');
+
+        if (!empty($token)) {
+            $this->token = $token;
+        }
+        if (!empty($secret)) {
+            $this->secret = $secret;
+        }
+
+        return $this;
     }
 
     /**
@@ -22,7 +43,7 @@ class MootaService
     public function request(string $method, string $endpoint, array $data = []): array
     {
         if (empty($this->token)) {
-            throw new Exception("Moota token (MOOTA_TOKEN) is not configured in .env file.");
+            throw new Exception("Moota token is not configured for this application.");
         }
 
         $url = $this->baseUrl . $endpoint;
@@ -80,22 +101,40 @@ class MootaService
     }
 
     /**
-     * Verify Webhook Signature using MOOTA_SECRET
+     * Verify Webhook Signature using MOOTA_SECRET and automatically load credentials for matching Toko
      */
-    public function verifySignature(string $rawPayload, string $signatureHeader): bool
+    public function verifyAndLoadWebhookConfig(string $rawPayload, string $signatureHeader): ?int
     {
-        if (empty($this->secret)) {
-            return false;
+        // 1. Try global secret first
+        if (!empty($this->secret)) {
+            $localSignature = hash_hmac('sha256', $rawPayload, $this->secret);
+            if (hash_equals($localSignature, $signatureHeader)) {
+                return 0; // Configured globally in .env (return 0 or main toko)
+            }
         }
 
-        $localSignature = hash_hmac('sha256', $rawPayload, $this->secret);
+        // 2. Search all Toko Meta secrets to match signature
+        $secrets = $this->tokoMetaModel->where('meta_key', 'moota_secret')->findAll();
+        foreach ($secrets as $row) {
+            $tokoSecret = $row['meta_value'];
+            if (empty($tokoSecret)) {
+                continue;
+            }
 
-        return hash_equals($localSignature, $signatureHeader);
+            $localSignature = hash_hmac('sha256', $rawPayload, $tokoSecret);
+            if (hash_equals($localSignature, $signatureHeader)) {
+                $idToko = (int)$row['id_toko'];
+                // Load token and secret for this specific shop
+                $this->initializeForToko($idToko);
+                return $idToko;
+            }
+        }
+
+        return null; // No match found
     }
 
     /**
      * Store Bank Account to Moota
-     * POST /bank/store
      */
     public function addBankAccount(array $data): array
     {
@@ -104,7 +143,6 @@ class MootaService
 
     /**
      * Get Registered Bank Accounts in Moota
-     * GET /bank
      */
     public function getBankAccounts(array $filters = []): array
     {
@@ -113,18 +151,9 @@ class MootaService
 
     /**
      * Get Mutations from Moota
-     * GET /mutation
      */
     public function getMutations(array $filters = []): array
     {
         return $this->request('GET', '/mutation', $filters);
-    }
-
-    /**
-     * Attach webhook to mutation or register webhook (general helper)
-     */
-    public function createWebhook(string $mutationId, array $data): array
-    {
-        return $this->request('POST', "/mutation/{$mutationId}/webhook", $data);
     }
 }
