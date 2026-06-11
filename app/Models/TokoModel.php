@@ -24,7 +24,12 @@ class TokoModel extends TenantScopedModel
         "kecamatan",
         "kelurahan",
         "kode_pos",
-        "type"
+        "type",
+        "moota_connection",
+        "moota_bank_type",
+        "moota_username",
+        "moota_password",
+        "moota_bank_id"
     ];
     protected $useSoftDeletes = true;
     protected $protectFields = true;

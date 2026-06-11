@@ -6,6 +6,7 @@ use App\Controllers\BaseController;
 use App\Models\JsonResponse;
 use App\Models\TokoModel;
 use App\Models\AccountModel;
+use App\Libraries\TenantContext;
 use CodeIgniter\HTTP\ResponseInterface;
 
 /**
@@ -324,6 +325,129 @@ class TokoController extends BaseController
             return $this->jsonResponse->oneResp('', $formattedResult, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    public function updateBankConfig($id = null)
+    {
+        try {
+            $data = $this->request->getJSON(true);
+            
+            $toko = $this->modelToko->find($id);
+            if (!$toko) {
+                return $this->jsonResponse->error("Toko tidak ditemukan", 404);
+            }
+
+            $mootaConnection = filter_var($data['moota_connection'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+            $updateData = [
+                'bank' => $data['bank_type'] ?? $toko['bank'],
+                'nama_pemilik' => $data['name_holder'] ?? $toko['nama_pemilik'],
+                'nomer_rekening' => $data['account_number'] ?? $toko['nomer_rekening'],
+                'moota_connection' => $mootaConnection ? 1 : 0
+            ];
+
+            if ($mootaConnection) {
+                if (empty($data['bank_type']) || empty($data['username']) || empty($data['password'])) {
+                    return $this->jsonResponse->error("bank_type, username, and password are required when moota_connection is true", 400);
+                }
+
+                $tenantId = TenantContext::id();
+                $tenant = $this->db->table('tenants')->where('id', $tenantId)->get()->getRowArray();
+                $mootaAppId = $tenant['moota_app_id'] ?? null;
+
+                $mootaService = new \App\Libraries\MootaService();
+                $mootaService->initializeForToko((int)$id);
+
+                $mootaPayload = [
+                    'corporate_id'   => $mootaAppId,
+                    'bank_type'      => $data['bank_type'],
+                    'username'       => $data['username'],
+                    'password'       => $data['password'],
+                    'account_number' => (string)$data['account_number'],
+                    'active'         => filter_var($data['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN)
+                ];
+
+                $mootaResponse = $mootaService->request('POST', '/bank/store', $mootaPayload);
+                $mootaBankId = $mootaResponse['bank_id'] ?? $mootaResponse['id'] ?? null;
+
+                $updateData['moota_bank_type'] = $data['bank_type'];
+                $updateData['moota_username']  = $data['username'];
+                $updateData['moota_password']  = $data['password'];
+                $updateData['moota_bank_id']   = $mootaBankId;
+            } else {
+                $updateData['moota_bank_type'] = null;
+                $updateData['moota_username']  = null;
+                $updateData['moota_password']  = null;
+                $updateData['moota_bank_id']   = null;
+            }
+
+            $this->modelToko->update($id, $updateData);
+
+            return $this->jsonResponse->oneResp("Toko bank configuration updated successfully", $updateData, 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    public function getBankConfig($id = null)
+    {
+        try {
+            $toko = $this->modelToko->find($id);
+            if (!$toko) {
+                return $this->jsonResponse->error("Toko tidak ditemukan", 404);
+            }
+
+            $tenantId = TenantContext::id();
+            $tenant = $this->db->table('tenants')->where('id', $tenantId)->get()->getRowArray();
+            $mootaAppId = $tenant['moota_app_id'] ?? null;
+
+            return $this->jsonResponse->oneResp("Success fetching bank config", [
+                'corporate_id'     => $mootaAppId,
+                'bank_type'        => $toko['moota_bank_type'] ?? $toko['bank'],
+                'username'         => $toko['moota_username'],
+                'password'         => $toko['moota_password'],
+                'name_holder'      => $toko['nama_pemilik'],
+                'account_number'   => $toko['nomer_rekening'],
+                'moota_connection' => (bool)$toko['moota_connection'],
+                'moota_bank_id'    => $toko['moota_bank_id']
+            ], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    public function deleteBankConfig($id = null)
+    {
+        try {
+            $toko = $this->modelToko->find($id);
+            if (!$toko) {
+                return $this->jsonResponse->error("Toko tidak ditemukan", 404);
+            }
+
+            $mootaBankId = $toko['moota_bank_id'];
+            if (!empty($mootaBankId)) {
+                try {
+                    $mootaService = new \App\Libraries\MootaService();
+                    $mootaService->initializeForToko((int)$id);
+                    $mootaService->request('POST', "/bank/{$mootaBankId}/destroy");
+                } catch (\Exception $ex) {
+                    log_message('error', 'Failed to delete bank from Moota: ' . $ex->getMessage());
+                }
+            }
+
+            $this->modelToko->update($id, [
+                'moota_connection' => 0,
+                'moota_bank_type'  => null,
+                'moota_username'   => null,
+                'moota_password'   => null,
+                'moota_bank_id'    => null
+            ]);
+
+            return $this->jsonResponse->oneResp("Bank configuration cleared successfully", null, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
 }

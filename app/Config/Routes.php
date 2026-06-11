@@ -246,6 +246,11 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         // Moota Integration
         $routes->post('moota/bank', 'MootaController::addBank');
         $routes->get('moota/bank', 'MootaController::getBanks');
+        
+        // Toko Bank Config (Moota Connection)
+        $routes->post('toko/(:num)/bank', 'TokoController::updateBankConfig/$1');
+        $routes->get('toko/(:num)/bank', 'TokoController::getBankConfig/$1');
+        $routes->delete('toko/(:num)/bank', 'TokoController::deleteBankConfig/$1');
 
         // Accounting & Journal
         $routes->get('journal', 'JournalController::index');

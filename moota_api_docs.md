@@ -1,69 +1,111 @@
 # Dokumentasi API Integrasi Moota (Multi-Application/Multi-Toko)
 
-Sistem ini mendukung pemisahan integrasi Moota per aplikasi/toko (`id_toko`). Setiap toko dapat memiliki setting kredensial Moota masing-masing yang disimpan di tabel `toko_meta`.
+Sistem ini mendukung pemisahan integrasi Moota per aplikasi/toko (`id_toko`). Setiap toko dapat memiliki setting kredensial Moota masing-masing yang disimpan di tabel `toko_meta` atau dikonfigurasi langsung sebagai bank utama Toko tersebut.
 
 ---
 
-## 1. Konfigurasi Kredensial Per Toko
-Simpan kredensial Moota per Toko di tabel `toko_meta` dengan keys berikut:
-*   `moota_token`: Token API Moota untuk Toko tersebut.
-*   `moota_secret`: Webhook Secret Token Moota untuk Toko tersebut.
+## 1. Database Schema Updates
 
-> **Catatan:** Jika kredensial per toko kosong, sistem akan menggunakan variabel global `MOOTA_TOKEN` dan `MOOTA_SECRET` dari file `.env` sebagai fallback.
+### A. Tabel `tenants`
+Ditambahkan kolom `moota_app_id` (VARCHAR 100) untuk menampung Application ID dari Moota.
+*   **Query / Migration:** `2026-06-11-170000_AddMootaAppIdToTenants.php`
+
+### B. Tabel `toko`
+Ditambahkan kolom-kolom berikut untuk mengintegrasikan rekening bank Toko ke Moota secara otomatis:
+*   `moota_connection` (TINYINT 1, default 0): Menentukan apakah rekening bank Toko dihubungkan ke Moota.
+*   `moota_bank_type` (VARCHAR 50): Tipe bank yang didaftarkan ke Moota.
+*   `moota_username` (VARCHAR 100): Username iBanking (atau nomor ponsel untuk Gojek/Ovo).
+*   `moota_password` (VARCHAR 255): Password iBanking.
+*   `moota_bank_id` (VARCHAR 100): ID Bank yang didapatkan setelah sukses didaftarkan ke Moota.
+*   **Query / Migration:** `2026-06-11-171000_AddMootaFieldsToToko.php`
 
 ---
 
 ## 2. API Endpoints
 
-### A. Tambah Rekening Bank ke Moota (Per Toko)
-Mendaftarkan akun iBanking baru ke Moota menggunakan kredensial Toko tertentu.
+### A. Konfigurasi Bank Toko & Koneksi Moota
+Menyimpan konfigurasi rekening bank Toko. Jika `moota_connection` diset ke `true`, sistem akan otomatis mendaftarkan rekening tersebut ke API Moota menggunakan `MOOTA_APP_ID` milik Tenant saat ini sebagai `corporate_id`.
 
-*   **Endpoint:** `POST /api/v2/moota/bank`
+*   **Endpoint:** `POST /api/v2/toko/(:num)/bank` (Contoh: `/api/v2/toko/5/bank`)
+*   **Headers:**
+    *   `Authorization: Bearer <JWT_Token>`
+    *   `X-Tenant: <Tenant_ID>`
+    *   `Content-Type: application/json`
 *   **Request Body (JSON):**
     ```json
     {
-      "id_toko": 5,
       "bank_type": "bca",
-      "account_number": "1234567890",
-      "username": "myibankinguser",
-      "password": "mypassword",
-      "pin": "123456"
+      "account_number": 16899030,
+      "name_holder": "Loream Kasma",
+      "moota_connection": true,
+      "username": "loream",
+      "password": "yourpassword",
+      "is_active": true
     }
     ```
-*   **Keterangan:** Ganti `id_toko` dengan ID Toko yang sesuai. API akan otomatis mengambil token Moota milik Toko 5 di database.
+    > **Catatan tipe bank (`bank_type`):**
+    > `bca`, `bcaSyariah`, `bni`, `bniSyariah`, `bri`, `briCms`, `briGiro`, `briSyariah`, `briSyariahCms`, `mandiriOnline`, `mandiriBisnis`, `mandiriMcm`, `mandiriSyariah`, `mandiriSyariahMcm`, `mandiriSyariahBisnis`, `bniBisnis`, `muamalat`, `bniBisnisSyariah`, `gojek`, `ovo`.
+    > *(Khusus tipe `gojek` dan `ovo`, isi field `username` dengan nomor ponsel Anda).*
 
----
-
-### B. List Rekening Bank Terdaftar (Per Toko)
-Mengambil daftar seluruh rekening bank terdaftar di akun Moota milik Toko tertentu.
-
-*   **Endpoint:** `GET /api/v2/moota/bank?id_toko=5`
-*   **Keterangan:** Sertakan query parameter `id_toko` agar sistem menggunakan token API Moota dari Toko tersebut.
-
----
-
-### C. Webhook Callback (Auto-Detect Toko)
-Moota akan mengirimkan notifikasi mutasi masuk ke endpoint tunggal ini. Sistem akan otomatis memverifikasi signature menggunakan secret key masing-masing toko secara dinamis untuk mendeteksi asal Toko.
-
-*   **Webhook URL:** `https://your-domain.com/api/v2/moota/webhook`
-*   **Headers:**
-    *   `Signature: <hmac_sha256_signature_from_moota>`
 *   **Response (200 OK):**
     ```json
     {
-      "status": true,
-      "message": "Webhook verified and logged successfully",
-      "id_toko": 5,
-      "data": [
-        {
-          "mutation_id": "1234567",
-          "amount": 100245,
-          "type": "CR",
-          "note": "TRANSFER DARI JOHN DOE",
-          "bank_id": "ab12cd34-ef56-78gh-ij90-kl12md34ef56",
-          "date": "2026-06-11 12:00:00"
-        }
-      ]
+      "status": "Success",
+      "message": "Toko bank configuration updated successfully",
+      "data": {
+        "bank": "bca",
+        "nama_pemilik": "Loream Kasma",
+        "nomer_rekening": 16899030,
+        "moota_connection": 1,
+        "moota_bank_type": "bca",
+        "moota_username": "loream",
+        "moota_password": "yourpassword",
+        "moota_bank_id": "moota-bank-uuid-from-response"
+      }
     }
     ```
-    *(Response sukses akan mengembalikan `"id_toko": 5` yang menandakan mutasi ini milik Toko ID 5)*
+
+---
+
+### B. Ambil Konfigurasi Bank Toko
+Mengambil konfigurasi bank Toko termasuk informasi koneksi Moota dan `corporate_id` (diisi `moota_app_id` milik Tenant).
+
+*   **Endpoint:** `GET /api/v2/toko/(:num)/bank` (Contoh: `/api/v2/toko/5/bank`)
+*   **Headers:**
+    *   `Authorization: Bearer <JWT_Token>`
+    *   `X-Tenant: <Tenant_ID>`
+*   **Response (200 OK):**
+    ```json
+    {
+      "status": "Success",
+      "message": "Success fetching bank config",
+      "data": {
+        "corporate_id": "your-moota-app-id",
+        "bank_type": "bca",
+        "username": "loream",
+        "password": "yourpassword",
+        "name_holder": "Loream Kasma",
+        "account_number": "16899030",
+        "moota_connection": true,
+        "moota_bank_id": "moota-bank-uuid"
+      }
+    }
+    ```
+
+---
+
+### C. Putus Koneksi / Hapus Konfigurasi Bank Toko
+Memutuskan hubungan Moota dan menghapus data konfigurasi bank Toko. Jika sebelumnya terhubung, API juga akan otomatis menghapus bank tersebut dari server Moota.
+
+*   **Endpoint:** `DELETE /api/v2/toko/(:num)/bank` (Contoh: `/api/v2/toko/5/bank`)
+*   **Headers:**
+    *   `Authorization: Bearer <JWT_Token>`
+    *   `X-Tenant: <Tenant_ID>`
+*   **Response (200 OK):**
+    ```json
+    {
+      "status": "Success",
+      "message": "Bank configuration cleared successfully",
+      "data": null
+    }
+    ```
