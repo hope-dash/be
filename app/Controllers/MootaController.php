@@ -86,74 +86,73 @@ class MootaController extends BaseController
     {
         try {
             $rawPayload = $this->request->getBody();
-            
-            // Get Signature header
-            $signature = $this->request->getHeaderLine('Signature') ?: $this->request->getHeaderLine('signature');
-            
-            if (empty($signature)) {
-                return $this->response->setStatusCode(401)->setJSON([
-                    'status'  => false,
-                    'message' => 'Signature header missing'
-                ]);
-            }
-
-            // Verify signature and load credentials for the matching Toko
-            $idToko = $this->mootaService->verifyAndLoadWebhookConfig($rawPayload, $signature);
-            if ($idToko === null) {
-                return $this->response->setStatusCode(401)->setJSON([
-                    'status'  => false,
-                    'message' => 'Invalid webhook signature'
-                ]);
-            }
-
             $payload = json_decode($rawPayload, true);
-            
-            // Log received webhook data for debugging/future processing
-            log_message('info', "[Moota Webhook] Received for Toko ID {$idToko}: " . $rawPayload);
+
+            if (empty($payload)) {
+                $payload = $this->request->getJSON(true) ?: $this->request->getPost();
+            }
+
+            // Log webhook payload
+            log_message('info', "[Moota Webhook Received] Payload: " . json_encode($payload));
+
+            if (!is_array($payload)) {
+                return $this->response->setStatusCode(400)->setJSON([
+                    'status'  => false,
+                    'message' => 'Invalid webhook payload structure'
+                ]);
+            }
+
+            // If it's a single associative array, wrap it in a list
+            if (!empty($payload) && array_is_list($payload) === false) {
+                $payload = [$payload];
+            }
 
             $processedCount = 0;
-            if (is_array($payload)) {
-                $db = \Config\Database::connect();
-                $transactionController = new \App\Controllers\TransactionControllerV2();
+            $db = \Config\Database::connect();
+            $transactionController = new \App\Controllers\TransactionControllerV2();
 
-                foreach ($payload as $mutation) {
-                    $type = strtoupper($mutation['type'] ?? '');
-                    // Only process Credit mutations (CR)
-                    if ($type !== 'CR') {
-                        continue;
-                    }
+            foreach ($payload as $mutation) {
+                $paymentDetail = $mutation['payment_detail'] ?? null;
+                if (empty($paymentDetail)) {
+                    continue;
+                }
 
-                    $trxIdMoota = $mutation['payment_detail']['trx_id'] ?? null;
-                    if (empty($trxIdMoota)) {
-                        continue;
-                    }
+                $trxIdMoota = $paymentDetail['trx_id'] ?? null;
+                $status = strtolower($paymentDetail['status'] ?? '');
 
-                    $amount = (float)($mutation['amount'] ?? 0);
+                if (empty($trxIdMoota)) {
+                    continue;
+                }
 
-                    // Look up matching moota_trx_id key in transaction_meta
-                    $meta = $db->table('transaction_meta')
-                               ->where('key', 'moota_trx_id')
-                               ->where('value', $trxIdMoota)
-                               ->get()
-                               ->getRowArray();
+                // If status is present, verify it indicates success/completion
+                if (!empty($status) && !in_array($status, ['completed', 'success', 'paid'])) {
+                    continue;
+                }
 
-                    if ($meta) {
-                        $transactionId = (int)$meta['transaction_id'];
-                        try {
-                            // Call the exposed public method to add payment details automatically
-                            $transactionController->internalAddPayment($transactionId, $amount, 'BANK_TRANSFER', null, 0);
-                            $processedCount++;
-                        } catch (\Exception $ex) {
-                            log_message('error', "[Moota Webhook] Error processing payment for Transaction ID {$transactionId}: " . $ex->getMessage());
-                        }
+                $amount = (float)($mutation['amount'] ?? $paymentDetail['amount_captured'] ?? $paymentDetail['total'] ?? 0);
+
+                // Look up matching moota_trx_id key in transaction_meta
+                $meta = $db->table('transaction_meta')
+                           ->where('key', 'moota_trx_id')
+                           ->where('value', $trxIdMoota)
+                           ->get()
+                           ->getRowArray();
+
+                if ($meta) {
+                    $transactionId = (int)$meta['transaction_id'];
+                    try {
+                        // Call the exposed public method to add payment details automatically
+                        $transactionController->internalAddPayment($transactionId, $amount, 'BANK_TRANSFER', null, 0);
+                        $processedCount++;
+                    } catch (\Exception $ex) {
+                        log_message('error', "[Moota Webhook] Error processing payment for Transaction ID {$transactionId}: " . $ex->getMessage());
                     }
                 }
             }
 
             return $this->response->setStatusCode(200)->setJSON([
                 'status'          => true,
-                'message'         => 'Webhook verified and processed successfully',
-                'id_toko'         => $idToko,
+                'message'         => 'Webhook processed successfully',
                 'processed_count' => $processedCount
             ]);
 
