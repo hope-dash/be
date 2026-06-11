@@ -397,7 +397,11 @@ if (!function_exists('send_invoice_email')) {
         $bankOwner = $transaction['nama_pemilik'] ?? '-';
         $totalAmount = number_format($transaction['actual_total'], 0, ',', '.');
 
-        $paymentDetailsHtml = '<p><strong>Total Tagihan:</strong> Rp ' . $totalAmount . '</p>';
+        $paymentDetailsHtml = '';
+        if (!empty($transaction['meta']['points_used']) && (float)$transaction['meta']['points_used'] > 0) {
+            $paymentDetailsHtml .= '<p style="color: #059669; margin-bottom: 5px;"><strong>Penggunaan Poin:</strong> - Rp ' . number_format($transaction['meta']['points_used'], 0, ',', '.') . '</p>';
+        }
+        $paymentDetailsHtml .= '<p><strong>Total Tagihan:</strong> Rp ' . $totalAmount . '</p>';
         if (!empty($transaction['meta']['moota_unique_code'])) {
             $uniqueCode = (int)$transaction['meta']['moota_unique_code'];
             $uniqueNote = $transaction['meta']['moota_unique_note'] ?? '';
@@ -634,6 +638,7 @@ if (!function_exists('send_invoice_adjusted_email')) {
                 <p><strong>Jenis Penyesuaian:</strong> ' . $sign . '</p>
                 <p><strong>Nominal Penyesuaian:</strong> ' . $formattedAdjustment . '</p>
                 <hr style="border-top: 1px solid #ddd; border-bottom: none; border-left: none; border-right: none;" />
+                ' . (!empty($transaction['meta']['points_used']) && (float)$transaction['meta']['points_used'] > 0 ? '<p style="color: #059669; margin-bottom: 5px;"><strong>Penggunaan Poin:</strong> - Rp ' . number_format($transaction['meta']['points_used'], 0, ',', '.') . '</p>' : '') . '
                 <p><strong>Total Tagihan Baru:</strong> Rp ' . $newTotalStr . '</p>
                 ' . $paymentDetailsHtml . '
             </div>

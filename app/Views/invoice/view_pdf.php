@@ -650,6 +650,14 @@
                             endforeach;
                         endif;
                         ?>
+                        <?php if (!empty($transaction['meta']['points_used']) && (float)$transaction['meta']['points_used'] > 0): ?>
+                            <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #059669; font-weight: 500;">
+                                <tr>
+                                    <td>Penggunaan Poin:</td>
+                                    <td class="text-right">- Rp <?= number_format($transaction['meta']['points_used'], 0, ',', '.') ?></td>
+                                </tr>
+                            </table>
+                        <?php endif; ?>
                         <table class="summary-row total" cellpadding="0" cellspacing="0">
                             <tr>
                                 <td>Total Tagihan:</td>

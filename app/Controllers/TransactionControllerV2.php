@@ -297,7 +297,8 @@ class TransactionControllerV2 extends ResourceController
                 }
             }
 
-            $amountToPay = $grandTotal - $pointsToUse;
+            $actualTotal = $grandTotal - $pointsToUse;
+            $amountToPay = $actualTotal;
 
             // Fetch Toko configuration to check if Moota is integrated
             $tokoModel = new \App\Models\TokoModel();
@@ -313,9 +314,9 @@ class TransactionControllerV2 extends ResourceController
                 'invoice' => 'INV-TMP-' . time(),
                 'id_toko' => $data->id_toko,
                 'amount' => $grossAmount, // amount = total dari semua total barang
-                'actual_total' => $grandTotal, // actual_total = total dari amount stlh discount dan ada ppn atau ongkir lain lain
-                'total_payment' => $pointsToUse,
-                'status' => ($pointsToUse >= $grandTotal) ? 'PAID' : (($pointsToUse > 0) ? 'PARTIALLY_PAID' : 'WAITING_PAYMENT'),
+                'actual_total' => $actualTotal, // actual_total is reduced directly by used points
+                'total_payment' => 0,
+                'status' => ($actualTotal <= 0) ? 'PAID' : 'WAITING_PAYMENT',
                 'delivery_status' => 'NOT_READY',
                 'discount_type' => $txDiscountType,
                 'discount_amount' => $txDiscountAmount,
@@ -351,16 +352,6 @@ class TransactionControllerV2 extends ResourceController
                     'balance_after' => $newBalance,
                     'type' => 'REDEEMED',
                     'description' => "Point used for discount in invoice {$invoice}"
-                ]);
-
-                // Record points payment
-                $this->paymentModel->insert([
-                    'transaction_id' => $trxId,
-                    'amount' => $pointsToUse,
-                    'payment_method' => 'POINTS',
-                    'status' => 'VERIFIED',
-                    'paid_at' => date('Y-m-d H:i:s'),
-                    'note' => "Paid via points deduction"
                 ]);
             }
 
