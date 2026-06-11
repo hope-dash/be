@@ -31,6 +31,7 @@ $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
 
 // Webhooks
 // (Routes removed for rebuild)
+$routes->post('api/v2/moota/webhook', 'MootaController::webhook');
 
 // Wilayah Indonesia API
 $routes->group('api/wilayah', function ($routes) {
@@ -241,6 +242,10 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('transaction/(:num)/teknisi', 'TransactionControllerV2::updateTeknisi/$1');
         $routes->post('transaction/(:num)/service-status', 'TransactionControllerV2::updateServiceStatus/$1');
         $routes->post('transaction/(:num)/service-details', 'TransactionControllerV2::updateServiceDetail/$1');
+
+        // Moota Integration
+        $routes->post('moota/bank', 'MootaController::addBank');
+        $routes->get('moota/bank', 'MootaController::getBanks');
 
         // Accounting & Journal
         $routes->get('journal', 'JournalController::index');
