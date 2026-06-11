@@ -323,31 +323,6 @@ class TransactionControllerV2 extends ResourceController
                     $mootaService = new \App\Libraries\MootaService();
                     $mootaService->initializeForToko((int)$data->id_toko);
 
-                    // Build items payload
-                    $mootaItems = [];
-                    if (!empty($productsInput)) {
-                        foreach ($productsInput as $prod) {
-                            $prodObj = (object)$prod;
-                            $mootaItems[] = [
-                                'name' => $prodObj->name ?? $prodObj->product_name ?? 'Product',
-                                'description' => $prodObj->description ?? '',
-                                'qty' => (int)($prodObj->qty ?? 1),
-                                'price' => (int)($prodObj->price ?? 0)
-                            ];
-                        }
-                    }
-                    if (!empty($servicesInput)) {
-                        foreach ($servicesInput as $serv) {
-                            $servObj = (object)$serv;
-                            $mootaItems[] = [
-                                'name' => $servObj->name ?? $servObj->service_name ?? 'Service',
-                                'description' => $servObj->description ?? '',
-                                'qty' => (int)($servObj->qty ?? 1),
-                                'price' => (int)($servObj->price ?? 0)
-                            ];
-                        }
-                    }
-
                     // Build Moota request payload
                     $mootaPayload = [
                         'order_id' => $invoice,
@@ -355,15 +330,19 @@ class TransactionControllerV2 extends ResourceController
                         'customers' => [
                             'name' => $data->customer_name ?? 'Customer'
                         ],
+                        'items' => [
+                            [
+                                'name' => 'Invoice ' . $invoice,
+                                'description' => 'Pembayaran Belanja',
+                                'qty' => 1,
+                                'price' => (int)$grandTotal
+                            ]
+                        ],
                         'description' => 'Invoice ' . $invoice,
                         'note' => null,
                         'redirect_url' => 'https://hope-sparepart.com',
                         'total' => (int)$grandTotal
                     ];
-
-                    if (!empty($mootaItems)) {
-                        $mootaPayload['items'] = $mootaItems;
-                    }
 
                     $mootaResult = $mootaService->createTransaction($mootaPayload);
                     log_message('info', '[Moota createTransaction] Response: ' . json_encode($mootaResult));
@@ -585,7 +564,8 @@ class TransactionControllerV2 extends ResourceController
                             'bank' => $toko['bank'] ?? '',
                             'nomer_rekening' => $toko['nomer_rekening'] ?? '',
                             'nama_pemilik' => $toko['nama_pemilik'] ?? '',
-                            'actual_total' => $grandTotal
+                            'actual_total' => $grandTotal,
+                            'meta' => $metaData
                         ]);
 
                         send_invoice_email($emailData);
@@ -1176,6 +1156,75 @@ class TransactionControllerV2 extends ResourceController
                 'updated_by' => $userId
             ]);
 
+            // If Moota is connected, re-create the transaction with the new amount on Moota
+            $tokoModel = new \App\Models\TokoModel();
+            $toko = $tokoModel->find($trx['id_toko']);
+
+            if ($toko && !empty($toko['moota_connection'])) {
+                try {
+                    $mootaService = new \App\Libraries\MootaService();
+                    $mootaService->initializeForToko((int)$trx['id_toko']);
+
+                    // Build Moota request payload with new actual total
+                    $mootaPayload = [
+                        'order_id' => $trx['invoice'] . '-' . time(),
+                        'bank_account_id' => $toko['moota_bank_id'] ?? '',
+                        'customers' => [
+                            'name' => $metaMap['customer_name']['value'] ?? 'Customer'
+                        ],
+                        'items' => [
+                            [
+                                'name' => 'Invoice ' . $trx['invoice'],
+                                'description' => 'Penyesuaian Pembayaran Belanja',
+                                'qty' => 1,
+                                'price' => (int)$newActualTotal
+                            ]
+                        ],
+                        'description' => 'Adjustment Invoice ' . $trx['invoice'],
+                        'note' => null,
+                        'redirect_url' => 'https://hope-sparepart.com',
+                        'total' => (int)$newActualTotal
+                    ];
+
+                    $mootaResult = $mootaService->createTransaction($mootaPayload);
+                    log_message('info', '[Moota createTransaction Adjust] Response: ' . json_encode($mootaResult));
+
+                    if (($mootaResult['status'] ?? '') === 'success' && isset($mootaResult['data'])) {
+                        $mootaUniqueCode = (int)($mootaResult['data']['unique_code'] ?? 0);
+                        $mootaTrxId = $mootaResult['data']['trx_id'] ?? '';
+                        $mootaPaymentUrl = $mootaResult['data']['payment_url'] ?? '';
+                        $mootaUniqueNote = $mootaResult['data']['unique_note'] ?? '';
+
+                        // Update or insert Moota meta data keys
+                        $mootaKeys = [
+                            'moota_unique_code' => (string)$mootaUniqueCode,
+                            'moota_bank_id' => $toko['moota_bank_id'] ?? '',
+                            'moota_bank_type' => $toko['moota_bank_type'] ?? '',
+                            'moota_nomer_rekening' => $toko['nomer_rekening'] ?? '',
+                            'moota_trx_id' => $mootaTrxId,
+                            'moota_payment_url' => $mootaPaymentUrl,
+                            'moota_unique_note' => $mootaUniqueNote,
+                            'moota_expired_at' => date('Y-m-d H:i:s', strtotime('+1 year'))
+                        ];
+
+                        foreach ($mootaKeys as $k => $v) {
+                            $existingMeta = $this->transactionMetaModel->where('transaction_id', $id)->where('key', $k)->first();
+                            if ($existingMeta) {
+                                $this->transactionMetaModel->update($existingMeta['id'], ['value' => $v]);
+                            } else {
+                                $this->transactionMetaModel->insert([
+                                    'transaction_id' => $id,
+                                    'key' => $k,
+                                    'value' => $v
+                                ]);
+                            }
+                        }
+                    }
+                } catch (\Exception $ex) {
+                    log_message('error', 'Failed to update Moota transaction on adjust: ' . $ex->getMessage());
+                }
+            }
+
             // Save adjustments to meta
             $adjustmentsJSON = $this->transactionMetaModel->where('transaction_id', $id)->where('key', 'adjustments')->first();
             $adjustmentsRecord = $adjustmentsJSON ? json_decode($adjustmentsJSON['value'], true) : [];
@@ -1232,6 +1281,23 @@ class TransactionControllerV2 extends ResourceController
 
             if ($custData) {
                 $trx['customer'] = $custData;
+                
+                // Load updated meta for email
+                $updatedMetas = $this->transactionMetaModel->where('transaction_id', $id)->findAll();
+                $updatedMetaMap = [];
+                foreach ($updatedMetas as $um) {
+                    $updatedMetaMap[$um['key']] = $um['value'];
+                }
+                $trx['meta'] = $updatedMetaMap;
+
+                // Load bank info from toko
+                $toko = $this->db->table('toko')->where('id', $trx['id_toko'])->get()->getRowArray();
+                if ($toko) {
+                    $trx['bank'] = $toko['bank'] ?? '';
+                    $trx['nomer_rekening'] = $toko['nomer_rekening'] ?? '';
+                    $trx['nama_pemilik'] = $toko['nama_pemilik'] ?? '';
+                }
+
                 send_invoice_adjusted_email($trx, $componentNames, "Multiple", array_sum(array_column($logDetails, 'amount')), $newActualTotal);
             }
 

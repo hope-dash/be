@@ -391,12 +391,25 @@ if (!function_exists('send_invoice_email')) {
 
         $email = $transaction['customer']['email'];
         $name = $transaction['customer']['nama_customer'];
-        $invoiceDisplay = $transaction['invoice'];
-
-        $bankName = $transaction['bank'] ?? '-';
-        $bankAccount = $transaction['nomer_rekening'] ?? '-';
+        $invoiceDisplay = $transaction['invoice'];        
+        $bankName = !empty($transaction['meta']['moota_bank_type']) ? $transaction['meta']['moota_bank_type'] : ($transaction['bank'] ?? '-');
+        $bankAccount = !empty($transaction['meta']['moota_nomer_rekening']) ? $transaction['meta']['moota_nomer_rekening'] : ($transaction['nomer_rekening'] ?? '-');
         $bankOwner = $transaction['nama_pemilik'] ?? '-';
         $totalAmount = number_format($transaction['actual_total'], 0, ',', '.');
+
+        $paymentDetailsHtml = '<p><strong>Total Tagihan:</strong> Rp ' . $totalAmount . '</p>';
+        if (!empty($transaction['meta']['moota_unique_code'])) {
+            $uniqueCode = (int)$transaction['meta']['moota_unique_code'];
+            $uniqueNote = $transaction['meta']['moota_unique_note'] ?? '';
+            $totalTransfer = (float)$transaction['actual_total'] + $uniqueCode;
+            
+            $paymentDetailsHtml .= '<p><strong>Kode Unik Transfer:</strong> ' . $uniqueCode . '</p>';
+            if (!empty($uniqueNote)) {
+                $paymentDetailsHtml .= '<p><strong>Berita/Catatan Transfer:</strong> ' . htmlspecialchars($uniqueNote) . '</p>';
+            }
+            $paymentDetailsHtml .= '<p style="font-size: 16px; color: #b91c1c; background: #f8f9fa; padding: 10px; border: 1px solid #ddd; margin-top: 10px; border-radius: 4px;"><strong>Total Transfer:</strong> <strong>Rp ' . number_format($totalTransfer, 0, ',', '.') . '</strong></p>';
+            $paymentDetailsHtml .= '<p style="font-size: 12px; color: #555; margin-top: 5px; line-height: 1.4;">Mohon transfer dengan nominal tepat <strong>Rp ' . number_format($totalTransfer, 0, ',', '.') . '</strong> agar terverifikasi otomatis' . (!empty($uniqueNote) ? ', atau cantumkan catatan <strong>"' . htmlspecialchars($uniqueNote) . '"</strong>.' : '.') . '</p>';
+        }
 
         $content = '
             <h2>Halo, ' . htmlspecialchars($name) . '!</h2>
@@ -404,7 +417,7 @@ if (!function_exists('send_invoice_email')) {
             
             <div class="info-box">
                 <h3>Detail Pembayaran:</h3>
-                <p><strong>Total Tagihan:</strong> Rp ' . $totalAmount . '</p>
+                ' . $paymentDetailsHtml . '
                 <p><strong>Bank:</strong> ' . htmlspecialchars($bankName) . '</p>
                 <p><strong>Nomor Rekening:</strong> ' . htmlspecialchars($bankAccount) . '</p>
                 <p><strong>Atas Nama:</strong> ' . htmlspecialchars($bankOwner) . '</p>
@@ -585,7 +598,32 @@ if (!function_exists('send_invoice_adjusted_email')) {
             $formattedAdjustment = 'Rp ' . number_format($amount, 0, ',', '.');
         }
 
+        $bankName = !empty($transaction['meta']['moota_bank_type']) ? $transaction['meta']['moota_bank_type'] : ($transaction['bank'] ?? '-');
+        $bankAccount = !empty($transaction['meta']['moota_nomer_rekening']) ? $transaction['meta']['moota_nomer_rekening'] : ($transaction['nomer_rekening'] ?? '-');
+        $bankOwner = $transaction['nama_pemilik'] ?? '-';
         $newTotalStr = number_format($newActualTotal, 0, ',', '.');
+
+        $paymentDetailsHtml = '';
+        if (!empty($transaction['meta']['moota_unique_code'])) {
+            $uniqueCode = (int)$transaction['meta']['moota_unique_code'];
+            $uniqueNote = $transaction['meta']['moota_unique_note'] ?? '';
+            $totalTransfer = (float)$newActualTotal + $uniqueCode;
+            
+            $paymentDetailsHtml .= '
+                <hr style="border-top: 1px solid #ddd; border-bottom: none; border-left: none; border-right: none; margin: 15px 0;" />
+                <h3>Detail Transfer Terbaru:</h3>
+                <p><strong>Bank:</strong> ' . htmlspecialchars($bankName) . '</p>
+                <p><strong>Nomor Rekening:</strong> ' . htmlspecialchars($bankAccount) . '</p>
+                <p><strong>Atas Nama:</strong> ' . htmlspecialchars($bankOwner) . '</p>
+                <p><strong>Kode Unik Transfer:</strong> ' . $uniqueCode . '</p>';
+            if (!empty($uniqueNote)) {
+                $paymentDetailsHtml .= '<p><strong>Berita/Catatan Transfer:</strong> ' . htmlspecialchars($uniqueNote) . '</p>';
+            }
+            $paymentDetailsHtml .= '
+                <p style="font-size: 16px; color: #b91c1c; background: #f8f9fa; padding: 10px; border: 1px solid #ddd; margin-top: 10px; border-radius: 4px;"><strong>Total Transfer Baru:</strong> <strong>Rp ' . number_format($totalTransfer, 0, ',', '.') . '</strong></p>
+                <p style="font-size: 12px; color: #555; margin-top: 5px; line-height: 1.4;">Mohon transfer dengan nominal tepat <strong>Rp ' . number_format($totalTransfer, 0, ',', '.') . '</strong> agar terverifikasi otomatis' . (!empty($uniqueNote) ? ', atau cantumkan catatan <strong>"' . htmlspecialchars($uniqueNote) . '"</strong>.' : '.') . '</p>
+            ';
+        }
 
         $content = '
             <h2>Pembaruan Invoice</h2>
@@ -597,6 +635,7 @@ if (!function_exists('send_invoice_adjusted_email')) {
                 <p><strong>Nominal Penyesuaian:</strong> ' . $formattedAdjustment . '</p>
                 <hr style="border-top: 1px solid #ddd; border-bottom: none; border-left: none; border-right: none;" />
                 <p><strong>Total Tagihan Baru:</strong> Rp ' . $newTotalStr . '</p>
+                ' . $paymentDetailsHtml . '
             </div>
             
             <p>Anda dapat melihat detail pesanan Anda melalui link di bawah ini:</p>

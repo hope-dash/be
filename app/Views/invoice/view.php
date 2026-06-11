@@ -670,11 +670,21 @@
                 endif;
                 ?>
                 <div class="summary-row total">
-                    <span>TOTAL:</span>
+                    <span>Total Tagihan:</span>
                     <span>Rp
                         <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?>
                     </span>
                 </div>
+                <?php if (!empty($transaction['meta']['moota_unique_code'])): ?>
+                    <div class="summary-row" style="font-weight: 500; font-size: 13px; color: #4338ca;">
+                        <span>Kode Unik Transfer:</span>
+                        <span>+ Rp <?= number_format($transaction['meta']['moota_unique_code'], 0, ',', '.') ?></span>
+                    </div>
+                    <div class="summary-row total" style="background: #eef2ff; border: 2px solid #c7d2fe; padding: 10px; margin-top: 10px; color: #b91c1c; font-size: 18px; border-radius: 4px;">
+                        <span>Total Transfer:</span>
+                        <span>Rp <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) + (int)$transaction['meta']['moota_unique_code'], 0, ',', '.') ?></span>
+                    </div>
+                <?php endif; ?>
                 <?php if (isset($transaction['total_paid']) && $transaction['total_paid'] > 0): ?>
                     <div class="summary-row" style="color: #059669; font-weight: 500;">
                         <span>Dibayar:</span>
@@ -694,25 +704,46 @@
                 <!-- Bank Info exactly below Totals -->
                 <div class="bank-summary">
                     <h4>Informasi Pembayaran (Transfer)</h4>
-                    <?php if (!empty($transaction['bank'])): ?>
+                    <?php
+                    $bankName = !empty($transaction['meta']['moota_bank_type']) ? $transaction['meta']['moota_bank_type'] : ($transaction['bank'] ?? '');
+                    $accNo = !empty($transaction['meta']['moota_nomer_rekening']) ? $transaction['meta']['moota_nomer_rekening'] : ($transaction['nomer_rekening'] ?? '');
+                    $ownerName = $transaction['nama_pemilik'] ?? '';
+                    $hasMoota = !empty($transaction['meta']['moota_unique_code']);
+                    ?>
+                    <?php if (!empty($bankName)): ?>
                         <p style="font-size: 14px; margin-bottom: 5px;"><strong>Bank:</strong>
-                            <span style="color: #2c3e50;"><?= esc($transaction['bank']) ?></span>
+                            <span style="color: #2c3e50; text-transform: uppercase;"><?= esc($bankName) ?></span>
                         </p>
-                        <?php
-                    endif; ?>
-                    <?php if (!empty($transaction['nomer_rekening'])): ?>
+                    <?php endif; ?>
+                    <?php if (!empty($accNo)): ?>
                         <p style="font-size: 18px; margin-bottom: 5px; color: #c92a2a;"><strong>No. Rekening:</strong>
                             <span
-                                style="font-weight: 800; letter-spacing: 1px;"><?= esc($transaction['nomer_rekening']) ?></span>
+                                style="font-weight: 800; letter-spacing: 1px;"><?= esc($accNo) ?></span>
                         </p>
-                        <?php
-                    endif; ?>
-                    <?php if (!empty($transaction['nama_pemilik'])): ?>
+                    <?php endif; ?>
+                    <?php if (!empty($ownerName)): ?>
                         <p style="font-size: 14px;"><strong>Atas Nama:</strong>
-                            <?= esc($transaction['nama_pemilik']) ?>
+                            <?= esc($ownerName) ?>
                         </p>
-                        <?php
-                    endif; ?>
+                    <?php endif; ?>
+
+                    <?php if ($hasMoota): ?>
+                        <div style="margin-top: 10px; padding: 10px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 4px; font-size: 12px; color: #1e1b4b;">
+                            <p style="margin-bottom: 3px;"><strong>Kode Unik Transfer:</strong> <span style="font-weight: bold; color: #4338ca; font-family: monospace; font-size: 13px;"><?= esc($transaction['meta']['moota_unique_code']) ?></span></p>
+                            <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
+                                <p style="margin-bottom: 5px;"><strong>Berita/Catatan Transfer:</strong> <span style="font-weight: bold; color: #4338ca; font-family: monospace; font-size: 13px;"><?= esc($transaction['meta']['moota_unique_note']) ?></span></p>
+                            <?php endif; ?>
+                            <?php
+                            $totalTransfer = (float)($transaction['actual_total'] ?? 0) + (int)$transaction['meta']['moota_unique_code'];
+                            ?>
+                            <p style="line-height: 1.4; font-size: 11px; margin-top: 5px;">
+                                Mohon transfer dengan nominal tepat <strong style="color: #b91c1c; font-size: 12px;">Rp <?= number_format($totalTransfer, 0, ',', '.') ?></strong> agar terverifikasi otomatis, 
+                                <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
+                                    ATAU cantumkan catatan <strong style="color: #4338ca;">"<?= esc($transaction['meta']['moota_unique_note']) ?>"</strong> pada berita acara transfer bank Anda.
+                                <?php endif; ?>
+                            </p>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>

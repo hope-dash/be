@@ -358,20 +358,44 @@
                     <div class="info-box">
                         <h3>Informasi Pembayaran</h3>
                         <div class="bank-info">
-                            <?php if (!empty($transaction['bank'])): ?>
+                            <?php
+                            $bankName = !empty($transaction['meta']['moota_bank_type']) ? $transaction['meta']['moota_bank_type'] : ($transaction['bank'] ?? '');
+                            $accNo = !empty($transaction['meta']['moota_nomer_rekening']) ? $transaction['meta']['moota_nomer_rekening'] : ($transaction['nomer_rekening'] ?? '');
+                            $ownerName = $transaction['nama_pemilik'] ?? '';
+                            $hasMoota = !empty($transaction['meta']['moota_unique_code']);
+                            ?>
+                            <?php if (!empty($bankName)): ?>
                                 <p><strong>Bank:</strong>
-                                    <?= esc($transaction['bank']) ?>
+                                    <?= esc($bankName) ?>
                                 </p>
                             <?php endif; ?>
-                            <?php if (!empty($transaction['nomer_rekening'])): ?>
+                            <?php if (!empty($accNo)): ?>
                                 <p><strong>No. Rekening:</strong>
-                                    <?= esc($transaction['nomer_rekening']) ?>
+                                    <?= esc($accNo) ?>
                                 </p>
                             <?php endif; ?>
-                            <?php if (!empty($transaction['nama_pemilik'])): ?>
+                            <?php if (!empty($ownerName)): ?>
                                 <p><strong>Atas Nama:</strong>
-                                    <?= esc($transaction['nama_pemilik']) ?>
+                                    <?= esc($ownerName) ?>
                                 </p>
+                            <?php endif; ?>
+
+                            <?php if ($hasMoota): ?>
+                                <div style="margin-top: 8px; padding: 6px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 4px; font-size: 10px; color: #1e1b4b; line-height: 1.3;">
+                                    <p style="margin-bottom: 2px;"><strong>Kode Unik Transfer:</strong> <span style="font-weight: bold; color: #4338ca; font-family: monospace;"><?= esc($transaction['meta']['moota_unique_code']) ?></span></p>
+                                    <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
+                                        <p style="margin-bottom: 3px;"><strong>Berita/Catatan:</strong> <span style="font-weight: bold; color: #4338ca; font-family: monospace;"><?= esc($transaction['meta']['moota_unique_note']) ?></span></p>
+                                    <?php endif; ?>
+                                    <?php
+                                    $totalTransfer = (float)($transaction['actual_total'] ?? 0) + (int)$transaction['meta']['moota_unique_code'];
+                                    ?>
+                                    <p style="font-size: 9px; margin-top: 3px;">
+                                        Mohon transfer dengan nominal tepat <strong style="color: #b91c1c;">Rp <?= number_format($totalTransfer, 0, ',', '.') ?></strong> agar terverifikasi otomatis, 
+                                        <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
+                                            ATAU cantumkan catatan <strong style="color: #4338ca;">"<?= esc($transaction['meta']['moota_unique_note']) ?>"</strong>.
+                                        <?php endif; ?>
+                                    </p>
+                                </div>
                             <?php endif; ?>
                         </div>
                         <p style="margin-top: 8px;"><strong>Status:</strong>
@@ -628,12 +652,30 @@
                         ?>
                         <table class="summary-row total" cellpadding="0" cellspacing="0">
                             <tr>
-                                <td>TOTAL:</td>
+                                <td>Total Tagihan:</td>
                                 <td class="text-right">Rp
                                     <?= number_format($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal, 0, ',', '.') ?>
                                 </td>
                             </tr>
                         </table>
+                        <?php if (!empty($transaction['meta']['moota_unique_code'])): ?>
+                            <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #4338ca; font-weight: 500; font-size: 13px;">
+                                <tr>
+                                    <td>Kode Unik Transfer:</td>
+                                    <td class="text-right">+ Rp
+                                        <?= number_format($transaction['meta']['moota_unique_code'], 0, ',', '.') ?>
+                                    </td>
+                                </tr>
+                            </table>
+                            <table class="summary-row total" cellpadding="0" cellspacing="0" style="background: #eef2ff; border: 2px solid #c7d2fe; padding: 6px; margin-top: 6px; color: #b91c1c; font-size: 16px; border-radius: 4px;">
+                                <tr>
+                                    <td>Total Transfer:</td>
+                                    <td class="text-right"><strong>Rp
+                                        <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) + (int)$transaction['meta']['moota_unique_code'], 0, ',', '.') ?>
+                                    </strong></td>
+                                </tr>
+                            </table>
+                        <?php endif; ?>
                         <?php if (isset($transaction['total_paid']) && $transaction['total_paid'] > 0): ?>
                             <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #059669;">
                                 <tr>
