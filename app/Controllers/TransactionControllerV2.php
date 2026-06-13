@@ -829,6 +829,60 @@ class TransactionControllerV2 extends ResourceController
                 'updated_by' => $userId
             ]);
 
+            // If partially paid and Moota connection is active, recreate Moota transaction for the remaining amount
+            $remainingAmount = (float)$trx['actual_total'] - $newTotalPaid;
+            if ($newStatus === 'PARTIALLY_PAID' && $remainingAmount > 0) {
+                // Fetch Toko config to check if Moota is integrated
+                $tokoModel = new \App\Models\TokoModel();
+                $toko = $tokoModel->find($trx['id_toko']);
+                if ($toko && !empty($toko['moota_connection'])) {
+                    try {
+                        $mootaService = new \App\Libraries\MootaService();
+                        $mootaService->initializeForToko((int)$trx['id_toko']);
+
+                        $mootaPayload = [
+                            'order_id' => $trx['invoice'] . '-' . time(),
+                            'bank_account_id' => $toko['moota_bank_id'] ?? '',
+                            'customers' => [
+                                'name' => $metaMap['customer_name'] ?? 'Customer'
+                            ],
+                            'items' => [
+                                [
+                                    'name' => 'Invoice ' . $trx['invoice'],
+                                    'description' => 'Sisa Pembayaran',
+                                    'qty' => 1,
+                                    'price' => (int)$remainingAmount
+                                ]
+                            ],
+                            'description' => 'Sisa Pembayaran Invoice ' . $trx['invoice'],
+                            'note' => null,
+                            'redirect_url' => 'https://hope-sparepart.com',
+                            'total' => (int)$remainingAmount
+                        ];
+
+                        $mootaResult = $mootaService->createTransaction($mootaPayload);
+                        log_message('info', '[Moota Recreate Transaction on Partial Payment] Response: ' . json_encode($mootaResult));
+
+                        if (($mootaResult['status'] ?? '') === 'success' && isset($mootaResult['data'])) {
+                            $mootaUniqueCode = (int)($mootaResult['data']['unique_code'] ?? 0);
+                            $mootaTrxId = $mootaResult['data']['trx_id'] ?? '';
+                            $mootaPaymentUrl = $mootaResult['data']['payment_url'] ?? '';
+                            $mootaUniqueNote = $mootaResult['data']['unique_note'] ?? '';
+
+                            if ($mootaUniqueCode > 0 || !empty($mootaTrxId)) {
+                                $this->updateMeta($id, 'moota_unique_code', (string)$mootaUniqueCode);
+                                $this->updateMeta($id, 'moota_trx_id', $mootaTrxId);
+                                $this->updateMeta($id, 'moota_payment_url', $mootaPaymentUrl);
+                                $this->updateMeta($id, 'moota_unique_note', $mootaUniqueNote);
+                                $this->updateMeta($id, 'moota_expired_at', date('Y-m-d H:i:s', strtotime('+1 year')));
+                            }
+                        }
+                    } catch (\Exception $ex) {
+                        log_message('error', 'Failed to recreate Moota transaction on partial payment: ' . $ex->getMessage());
+                    }
+                }
+            }
+
             $this->db->transComplete();
 
             log_aktivitas([

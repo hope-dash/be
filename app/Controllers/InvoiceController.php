@@ -329,6 +329,13 @@ class InvoiceController extends Controller
         }
 
         $transaction['meta'] = $metaMap;
+        $transaction['nama_teknisi'] = $metaMap['nama_teknisi'] ?? null;
+        if (empty($transaction['nama_teknisi']) && !empty($metaMap['teknisi_id'])) {
+            $user = $db->table('users')->select('name')->where('user_id', $metaMap['teknisi_id'])->get()->getRowArray();
+            if ($user) {
+                $transaction['nama_teknisi'] = $user['name'];
+            }
+        }
 
         // 3. Get Items (Sales Product)
         $items = $db->table('sales_product sp')
@@ -338,11 +345,15 @@ class InvoiceController extends Controller
                 p.berat,
                 mb.nama_model,
                 s.seri,
-                CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) as nama_lengkap_barang
+                CASE WHEN sp.is_service = 1 THEN js.nama_jasa ELSE CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) END as nama_lengkap_barang,
+                u.name as nama_teknisi
             ")
             ->join('product p', 'sp.kode_barang = p.id_barang AND p.tenant_id = sp.tenant_id', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id AND mb.tenant_id = sp.tenant_id', 'left')
             ->join('seri s', 'p.id_seri_barang = s.id AND s.tenant_id = sp.tenant_id', 'left')
+            ->join('jasa_service js', 'sp.id_jasa = js.id AND js.tenant_id = sp.tenant_id', 'left')
+            ->join('teknisi_komisi tk', 'sp.id = tk.sales_product_id', 'left')
+            ->join('users u', 'tk.teknisi_id = u.user_id', 'left')
             ->where('sp.id_transaction', $id)
             ->where('sp.tenant_id', TenantContext::id())
             ->get()

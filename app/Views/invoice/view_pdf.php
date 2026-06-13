@@ -357,47 +357,60 @@
                 <td>
                     <div class="info-box">
                         <h3>Informasi Pembayaran</h3>
-                        <div class="bank-info">
-                            <?php
-                            $bankName = !empty($transaction['meta']['moota_bank_type']) ? $transaction['meta']['moota_bank_type'] : ($transaction['bank'] ?? '');
-                            $accNo = !empty($transaction['meta']['moota_nomer_rekening']) ? $transaction['meta']['moota_nomer_rekening'] : ($transaction['nomer_rekening'] ?? '');
-                            $ownerName = $transaction['nama_pemilik'] ?? '';
-                            $hasMoota = !empty($transaction['meta']['moota_unique_code']);
+                        <?php
+                        $trxStatus = strtoupper($transaction['status'] ?? '');
+                        if ($trxStatus === 'WAITING_PAYMENT' || $trxStatus === 'PARTIALLY_PAID'):
                             ?>
-                            <?php if (!empty($bankName)): ?>
-                                <p><strong>Bank:</strong>
-                                    <?= esc($bankName) ?>
-                                </p>
-                            <?php endif; ?>
-                            <?php if (!empty($accNo)): ?>
-                                <p><strong>No. Rekening:</strong>
-                                    <?= esc($accNo) ?>
-                                </p>
-                            <?php endif; ?>
-                            <?php if (!empty($ownerName)): ?>
-                                <p><strong>Atas Nama:</strong>
-                                    <?= esc($ownerName) ?>
-                                </p>
-                            <?php endif; ?>
-
-                            <?php if ($hasMoota): ?>
-                                <div style="margin-top: 8px; padding: 6px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 4px; font-size: 10px; color: #1e1b4b; line-height: 1.3;">
-                                    <p style="margin-bottom: 2px;"><strong>Kode Unik Transfer:</strong> <span style="font-weight: bold; color: #4338ca; font-family: monospace;"><?= esc($transaction['meta']['moota_unique_code']) ?></span></p>
-                                    <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
-                                        <p style="margin-bottom: 3px;"><strong>Berita/Catatan:</strong> <span style="font-weight: bold; color: #4338ca; font-family: monospace;"><?= esc($transaction['meta']['moota_unique_note']) ?></span></p>
-                                    <?php endif; ?>
-                                    <?php
-                                    $totalTransfer = (float)($transaction['actual_total'] ?? 0) + (int)$transaction['meta']['moota_unique_code'];
-                                    ?>
-                                    <p style="font-size: 9px; margin-top: 3px;">
-                                        Mohon transfer dengan nominal tepat <strong style="color: #b91c1c;">Rp <?= number_format($totalTransfer, 0, ',', '.') ?></strong> agar terverifikasi otomatis, 
-                                        <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
-                                            ATAU cantumkan catatan <strong style="color: #4338ca;">"<?= esc($transaction['meta']['moota_unique_note']) ?>"</strong>.
-                                        <?php endif; ?>
+                            <div class="bank-info">
+                                <?php
+                                $bankName = !empty($transaction['meta']['moota_bank_type']) ? $transaction['meta']['moota_bank_type'] : ($transaction['bank'] ?? '');
+                                $accNo = !empty($transaction['meta']['moota_nomer_rekening']) ? $transaction['meta']['moota_nomer_rekening'] : ($transaction['nomer_rekening'] ?? '');
+                                $ownerName = $transaction['nama_pemilik'] ?? '';
+                                $hasMoota = !empty($transaction['meta']['moota_unique_code']);
+                                ?>
+                                <?php if (!empty($bankName)): ?>
+                                    <p><strong>Bank:</strong>
+                                        <?= esc($bankName) ?>
                                     </p>
-                                </div>
-                            <?php endif; ?>
-                        </div>
+                                <?php endif; ?>
+                                <?php if (!empty($accNo)): ?>
+                                    <p><strong>No. Rekening:</strong>
+                                        <?= esc($accNo) ?>
+                                    </p>
+                                <?php endif; ?>
+                                <?php if (!empty($ownerName)): ?>
+                                    <p><strong>Atas Nama:</strong>
+                                        <?= esc($ownerName) ?>
+                                    </p>
+                                <?php endif; ?>
+
+                                <?php if ($hasMoota): ?>
+                                    <div
+                                        style="margin-top: 8px; padding: 6px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 4px; font-size: 10px; color: #1e1b4b; line-height: 1.3;">
+                                        <p style="margin-bottom: 2px;"><strong>Kode Unik Transfer:</strong> <span
+                                                style="font-weight: bold; color: #4338ca; font-family: monospace;"><?= esc($transaction['meta']['moota_unique_code']) ?></span>
+                                        </p>
+                                        <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
+                                            <p style="margin-bottom: 3px;"><strong>Berita/Catatan:</strong> <span
+                                                    style="font-weight: bold; color: #4338ca; font-family: monospace;"><?= esc($transaction['meta']['moota_unique_note']) ?></span>
+                                            </p>
+                                        <?php endif; ?>
+                                        <?php
+                                        $totalTransfer = (float) ($transaction['actual_total'] ?? 0) + (int) $transaction['meta']['moota_unique_code'];
+                                        ?>
+                                        <p style="font-size: 9px; margin-top: 3px;">
+                                            Mohon transfer dengan nominal tepat <strong style="color: #b91c1c;">Rp
+                                                <?= number_format($totalTransfer, 0, ',', '.') ?></strong> agar terverifikasi
+                                            otomatis,
+                                            <?php if (!empty($transaction['meta']['moota_unique_note'])): ?>
+                                                ATAU cantumkan catatan <strong
+                                                    style="color: #4338ca;">"<?= esc($transaction['meta']['moota_unique_note']) ?>"</strong>.
+                                            <?php endif; ?>
+                                        </p>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
                         <p style="margin-top: 8px;"><strong>Status:</strong>
                             <?php
                             $status = strtolower($transaction['status'] ?? 'unpaid');
@@ -442,24 +455,46 @@
 
         <!-- Service Details (for Service Invoice) -->
         <?php if ((isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($transaction['services'])): ?>
-            <div style="margin-bottom: 15px; background: #fff9db; border: 1px solid #ffe066; padding: 10px; border-radius: 4px;">
-                <h3 style="font-size: 11px; font-weight: bold; color: #b45309; border-bottom: 1px solid #ffe066; padding-bottom: 4px; margin-bottom: 6px; text-transform: uppercase;">Detail Jasa Service</h3>
+            <div
+                style="margin-bottom: 15px; background: #fff9db; border: 1px solid #ffe066; padding: 10px; border-radius: 4px;">
+                <h3
+                    style="font-size: 11px; font-weight: bold; color: #b45309; border-bottom: 1px solid #ffe066; padding-bottom: 4px; margin-bottom: 6px; text-transform: uppercase;">
+                    DETAIL BARANG</h3>
                 <table style="width: 100%; border-collapse: collapse; margin-bottom: 0;">
                     <tr>
-                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>IMEI / SN:</strong></td>
-                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['imei'] ?? '-') ?></td>
-                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Teknisi:</strong></td>
-                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['nama_teknisi'] ?? '-') ?></td>
+                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <strong>IMEI / SN:</strong>
+                        </td>
+                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <?= esc($transaction['meta']['imei'] ?? '-') ?>
+                        </td>
+                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <strong>Teknisi:</strong>
+                        </td>
+                        <td style="width: 25%; padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <?= esc($transaction['nama_teknisi'] ?? '-') ?>
+                        </td>
                     </tr>
                     <tr>
-                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Estimasi Selesai:</strong></td>
-                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['estimasi_selesai'] ?? '-') ?></td>
-                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Kerusakan:</strong></td>
-                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['kerusakan'] ?? '-') ?></td>
+                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Estimasi
+                                Selesai:</strong></td>
+                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <?= esc($transaction['meta']['estimasi_selesai'] ?? '-') ?>
+                        </td>
+                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <strong>Kerusakan:</strong>
+                        </td>
+                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <?= esc($transaction['meta']['kerusakan'] ?? '-') ?>
+                        </td>
                     </tr>
                     <tr>
-                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><strong>Keterangan Teknisi:</strong></td>
-                        <td colspan="3" style="padding: 2px 0; font-size: 10px; border: none; background: transparent;"><?= esc($transaction['meta']['keterangan_teknisi'] ?? '-') ?></td>
+                        <td style="padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <strong>Keterangan Teknisi:</strong>
+                        </td>
+                        <td colspan="3" style="padding: 2px 0; font-size: 10px; border: none; background: transparent;">
+                            <?= esc($transaction['meta']['keterangan_teknisi'] ?? '-') ?>
+                        </td>
                     </tr>
                 </table>
             </div>
@@ -467,30 +502,21 @@
 
         <!-- Items Table -->
         <?php
-        $services = [];
-        $products = [];
-        foreach ($transaction['items'] as $item) {
-            $isService = (isset($item['is_service']) && ($item['is_service'] == 1 || $item['is_service'] === true || $item['is_service'] === '1'));
-            if ($isService) {
-                $services[] = $item;
-            } else {
-                $products[] = $item;
-            }
-        }
-        $isTrxService = (isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($services);
         $subtotal = 0;
 
-        $renderTablePdf = function($items, $title, $showTech = false) use (&$subtotal) {
-            if (empty($items)) return;
+        $renderTablePdf = function ($items) use (&$subtotal) {
+            if (empty($items))
+                return;
             ?>
-            <h3 style="font-size: 10px; color: #2c3e50; margin: 15px 0 5px 0; border-bottom: 1px solid #2c3e50; padding-bottom: 3px; text-transform: uppercase;">
-                <?= esc($title) ?>
+            <h3
+                style="font-size: 10px; color: #2c3e50; margin: 15px 0 5px 0; border-bottom: 1px solid #2c3e50; padding-bottom: 3px; text-transform: uppercase;">
+                Daftar Produk / Jasa Service
             </h3>
             <table class="items" cellpadding="0" cellspacing="0">
                 <thead>
                     <tr>
                         <th style="width: 5%;">No</th>
-                        <th style="width: 43%;"><?= $showTech ? 'Jasa Service' : 'Nama Barang' ?></th>
+                        <th style="width: 43%;">Nama Barang / Jasa Service</th>
                         <th style="width: 10%;" class="text-center">Jumlah</th>
                         <th style="width: 25%;" class="text-right">Harga Satuan</th>
                         <th style="width: 17%;" class="text-right">Total</th>
@@ -508,6 +534,7 @@
                         $discAmount = (float) ($item['discount_amount'] ?? $item['diskon'] ?? 0);
                         $hargaJual = (float) $item['harga_jual'];
                         $hasDiscount = ($discAmount > 0 || $basePrice > $hargaJual);
+                        $isService = (isset($item['is_service']) && ($item['is_service'] == 1 || $item['is_service'] === true || $item['is_service'] === '1'));
                         ?>
                         <tr>
                             <td class="text-center">
@@ -516,8 +543,11 @@
                             <td>
                                 <strong>
                                     <?= esc($item['nama_lengkap_barang']) ?>
+                                    <?php if ($isService): ?>
+                                        <span style="color: #ea580c; font-size: 9px; font-weight: bold;">(Service)</span>
+                                    <?php endif; ?>
                                 </strong>
-                                <?php if ($showTech && !empty($item['nama_teknisi'])): ?>
+                                <?php if ($isService && !empty($item['nama_teknisi'])): ?>
                                     <br><span style="color: #2563eb; font-size: 9px; font-weight: bold;">
                                         Teknisi: <?= esc($item['nama_teknisi']) ?>
                                     </span>
@@ -559,12 +589,7 @@
             <?php
         };
 
-        if ($isTrxService) {
-            $renderTablePdf($services, 'Daftar Jasa Service', true);
-            $renderTablePdf($products, 'Daftar Produk / Sparepart', false);
-        } else {
-            $renderTablePdf($transaction['items'], 'Daftar Produk', false);
-        }
+        $renderTablePdf($transaction['items']);
         ?>
 
         <!-- Summary -->
@@ -650,11 +675,14 @@
                             endforeach;
                         endif;
                         ?>
-                        <?php if (!empty($transaction['meta']['points_used']) && (float)$transaction['meta']['points_used'] > 0): ?>
-                            <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #059669; font-weight: 500;">
+                        <?php if (!empty($transaction['meta']['points_used']) && (float) $transaction['meta']['points_used'] > 0): ?>
+                            <table class="summary-row" cellpadding="0" cellspacing="0"
+                                style="color: #059669; font-weight: 500;">
                                 <tr>
                                     <td>Penggunaan Poin:</td>
-                                    <td class="text-right">- Rp <?= number_format($transaction['meta']['points_used'], 0, ',', '.') ?></td>
+                                    <td class="text-right">- Rp
+                                        <?= number_format($transaction['meta']['points_used'], 0, ',', '.') ?>
+                                    </td>
                                 </tr>
                             </table>
                         <?php endif; ?>
@@ -667,7 +695,8 @@
                             </tr>
                         </table>
                         <?php if (!empty($transaction['meta']['moota_unique_code'])): ?>
-                            <table class="summary-row" cellpadding="0" cellspacing="0" style="color: #4338ca; font-weight: 500; font-size: 13px;">
+                            <table class="summary-row" cellpadding="0" cellspacing="0"
+                                style="color: #4338ca; font-weight: 500; font-size: 13px;">
                                 <tr>
                                     <td>Kode Unik Transfer:</td>
                                     <td class="text-right">+ Rp
@@ -675,12 +704,13 @@
                                     </td>
                                 </tr>
                             </table>
-                            <table class="summary-row total" cellpadding="0" cellspacing="0" style="background: #eef2ff; border: 2px solid #c7d2fe; padding: 6px; margin-top: 6px; color: #b91c1c; font-size: 16px; border-radius: 4px;">
+                            <table class="summary-row total" cellpadding="0" cellspacing="0"
+                                style="background: #eef2ff; border: 2px solid #c7d2fe; padding: 6px; margin-top: 6px; color: #b91c1c; font-size: 16px; border-radius: 4px;">
                                 <tr>
                                     <td>Total Transfer:</td>
                                     <td class="text-right"><strong>Rp
-                                        <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) + (int)$transaction['meta']['moota_unique_code'], 0, ',', '.') ?>
-                                    </strong></td>
+                                            <?= number_format(($transaction['actual_total'] ?? $transaction['total_harga'] ?? $subtotal) + (int) $transaction['meta']['moota_unique_code'], 0, ',', '.') ?>
+                                        </strong></td>
                                 </tr>
                             </table>
                         <?php endif; ?>

@@ -281,7 +281,7 @@
 
         <?php if ((isset($transaction['is_service']) && ($transaction['is_service'] == 1 || $transaction['is_service'] === true || $transaction['is_service'] === '1')) || !empty($transaction['services'])): ?>
             <div style="border-bottom: 1px solid #000; padding: 1.5mm 2mm; font-size: 6.8pt; background-color: #fffde6;">
-                <strong style="text-transform: uppercase;">Detail Jasa Service:</strong>
+                <strong style="text-transform: uppercase;">DETAIL BARANG:</strong>
                 <?php if (!empty($transaction['meta']['imei'])): ?>
                     <span style="margin-left: 2mm;"><strong>IMEI/SN:</strong> <?= esc($transaction['meta']['imei']) ?></span>
                 <?php endif; ?>
@@ -292,7 +292,8 @@
                     <br><strong>Kerusakan:</strong> <?= esc($transaction['meta']['kerusakan']) ?>
                 <?php endif; ?>
                 <?php if (!empty($transaction['meta']['estimasi_selesai'])): ?>
-                    <span style="margin-left: 2mm;"><strong>Estimasi:</strong> <?= esc($transaction['meta']['estimasi_selesai']) ?></span>
+                    <span style="margin-left: 2mm;"><strong>Estimasi:</strong>
+                        <?= esc($transaction['meta']['estimasi_selesai']) ?></span>
                 <?php endif; ?>
                 <?php if (!empty($transaction['meta']['keterangan_teknisi'])): ?>
                     <br><strong>Ket. Teknisi:</strong> <?= esc($transaction['meta']['keterangan_teknisi']) ?>
