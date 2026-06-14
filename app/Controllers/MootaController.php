@@ -130,6 +130,19 @@ class MootaController extends BaseController
                 }
 
                 $amount = (float)($mutation['amount'] ?? $paymentDetail['amount_captured'] ?? $paymentDetail['total'] ?? 0);
+                $uniqueCode = (float)($paymentDetail['unique_code'] ?? 0);
+                $amountCaptured = (float)($paymentDetail['amount_captured'] ?? 0);
+
+                // Calculate total items price
+                $totalItemsPrice = 0;
+                if (!empty($paymentDetail['items']) && is_array($paymentDetail['items'])) {
+                    foreach ($paymentDetail['items'] as $item) {
+                        $price = (float)($item['price'] ?? 0);
+                        $qty = (float)($item['qty'] ?? 1);
+                        $ratio = (float)($item['ratio'] ?? 1);
+                        $totalItemsPrice += $price * $qty * $ratio;
+                    }
+                }
 
                 // Look up matching moota_trx_id key in transaction_meta
                 $meta = $db->table('transaction_meta')
@@ -138,8 +151,48 @@ class MootaController extends BaseController
                            ->get()
                            ->getRowArray();
 
+                $transactionId = null;
                 if ($meta) {
                     $transactionId = (int)$meta['transaction_id'];
+                } else if (!empty($paymentDetail['order_id'])) {
+                    // Fallback: lookup by parsing invoice prefix from order_id
+                    $invoicePart = explode('-', $paymentDetail['order_id'])[0];
+                    $trxDb = $db->table('transaction')
+                                ->where('invoice', $invoicePart)
+                                ->get()
+                                ->getRowArray();
+                    if ($trxDb) {
+                        $transactionId = (int)$trxDb['id'];
+                    }
+                }
+
+                if ($transactionId) {
+                    // Check unique code matching condition
+                    if ($uniqueCode > 0 && ($uniqueCode + $totalItemsPrice) == $amountCaptured) {
+                        // Save/update moota_unique_code in transaction_meta
+                        $existingUniqueCodeMeta = $db->table('transaction_meta')
+                            ->where('transaction_id', $transactionId)
+                            ->where('key', 'moota_unique_code')
+                            ->get()
+                            ->getRowArray();
+
+                        if ($existingUniqueCodeMeta) {
+                            $db->table('transaction_meta')
+                               ->where('id', $existingUniqueCodeMeta['id'])
+                               ->update(['value' => (string)$uniqueCode]);
+                        } else {
+                            $db->table('transaction_meta')
+                               ->insert([
+                                   'transaction_id' => $transactionId,
+                                   'key' => 'moota_unique_code',
+                                   'value' => (string)$uniqueCode
+                               ]);
+                        }
+
+                        // Use captured amount as the payment amount to ensure correct ledger splits
+                        $amount = $amountCaptured;
+                    }
+
                     try {
                         // Call the exposed public method to add payment details automatically
                         $transactionController->internalAddPayment($transactionId, $amount, 'BANK_TRANSFER', null, 0);
