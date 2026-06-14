@@ -117,8 +117,8 @@ class TiktokService
             $signString .= $key . $value;
         }
 
-        if ($body !== null) {
-            $jsonBody = empty($body) ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($body !== null && !empty($body)) {
+            $jsonBody = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $signString .= $jsonBody;
         }
 

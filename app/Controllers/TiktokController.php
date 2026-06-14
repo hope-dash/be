@@ -46,9 +46,11 @@ class TiktokController extends ResourceController
 
         $url = "https://auth.tiktok-shops.com/oauth/authorize?" . http_build_query($params);
 
-        return $this->jsonResponse->oneResp('Sukses',
+        return $this->jsonResponse->oneResp(
+            'Sukses',
             $url,
-            200);
+            200
+        );
     }
 
     /**
@@ -184,8 +186,7 @@ class TiktokController extends ResourceController
             $response = $this->makeTiktokRequest($idToko, 'POST', $path, $params, []);
 
             return $this->jsonResponse->oneResp('Sukses', $response, 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -209,30 +210,40 @@ class TiktokController extends ResourceController
                 $productModel = new \App\Models\ProductModel();
                 $stockModel = new \App\Models\StockModel();
 
-                $product = $productModel->find($idProduct);
+                $product = $productModel->select('product.*, CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(mb.nama_model, ""), " ", COALESCE(s.seri, "")) as nama_lengkap_barang')
+                    ->join('model_barang mb', 'mb.id = product.id_model_barang', 'left')
+                    ->join('seri s', 's.id = product.id_seri_barang', 'left')
+                    ->find($idProduct);
                 if (!$product) {
                     return $this->jsonResponse->error('Produk lokal tidak ditemukan', 404);
                 }
 
                 $sku = !empty($product['tiktok_sku']) ? $product['tiktok_sku'] : $product['id_barang'];
                 $stockRecord = $stockModel->where('id_barang', $product['id_barang'])
-                                          ->where('id_toko', $idToko)
-                                          ->first();
-                $quantity = $stockRecord ? (int)$stockRecord['stock'] : 0;
+                    ->where('id_toko', $idToko)
+                    ->first();
+                $quantity = $stockRecord ? (int) $stockRecord['stock'] : 0;
 
-                $weight = !empty($product['berat']) ? (int)$product['berat'] : 100;
-                $length = !empty($product['package_length']) ? (int)$product['package_length'] : 10;
-                $width  = !empty($product['package_width'])  ? (int)$product['package_width']  : 10;
-                $height = !empty($product['package_height']) ? (int)$product['package_height'] : 10;
+                $weightKg = !empty($product['berat']) ? (float) $product['berat'] / 1000 : 0.1;
+                $weightStr = number_format($weightKg, 2, '.', '');
 
-                $categoryId = !empty($product['tiktok_category_id']) ? $product['tiktok_category_id'] : '810051';
+                $warehouseId = $this->getTiktokWarehouseId($idToko);
+                if (!$warehouseId) {
+                    return $this->jsonResponse->error('Gagal mengambil Warehouse ID dari TikTok Shop. Harap pastikan toko Anda memiliki gudang aktif di TikTok.', 400);
+                }
+
+                $length = !empty($product['package_length']) ? (int) $product['package_length'] : 10;
+                $width = !empty($product['package_width']) ? (int) $product['package_width'] : 10;
+                $height = !empty($product['package_height']) ? (int) $product['package_height'] : 10;
+
+                $categoryId = !empty($product['tiktok_category_id']) ? $product['tiktok_category_id'] : '909832';
 
                 // Fetch and upload main images to TikTok Shop
                 $imageModel = new \App\Models\ImageModel();
                 $localImages = $imageModel->where('type', 'product')
-                                          ->where('kode', $product['id'])
-                                          ->orderBy('index', 'ASC')
-                                          ->findAll();
+                    ->where('kode', $product['id'])
+                    ->orderBy('index', 'ASC')
+                    ->findAll();
 
                 $mainImages = [];
                 $debugLogs = [];
@@ -298,44 +309,62 @@ class TiktokController extends ResourceController
 
                 $path = "/product/202309/products";
                 $body = [
-                    'title' => $product['nama_barang'],
+                    'save_mode' => 'LISTING',
+                    'listing_platforms' => [
+                        'TIKTOK_SHOP',
+                        'TOKOPEDIA'
+                    ],
+                    'title' => !empty($product['nama_lengkap_barang']) ? trim($product['nama_lengkap_barang']) : $product['nama_barang'],
                     'description' => !empty($product['description']) ? $product['description'] : $product['nama_barang'],
                     'category_id' => $categoryId,
+                    "is_cod_allowed" => true,
+                    "category_version" => "v2",
                     'brand_id' => '0',
                     'main_images' => $mainImages,
-                    'package_weight' => [
-                        'value' => (string)$weight,
-                        'unit' => 'g'
+                    'product_attributes' => [
+                        [
+                            'id' => '101734',
+                            'values' => [
+                                [
+                                    'id' => '1000059'
+                                ]
+                            ]
+                        ]
                     ],
-                    'package_dimension' => [
-                        'length' => (string)$length,
-                        'width' => (string)$width,
-                        'height' => (string)$height,
-                        'unit' => 'cm'
+                    'package_weight' => [
+                        'value' => $weightStr,
+                        'unit' => 'KILOGRAM'
+                    ],
+                    'package_dimensions' => [
+                        'length' => (string) $length,
+                        'width' => (string) $width,
+                        'height' => (string) $height,
+                        'unit' => 'CENTIMETER'
                     ],
                     'skus' => [
                         [
                             'seller_sku' => $sku,
                             'price' => [
-                                'amount' => (string)(int)$product['harga_jual'],
+                                'amount' => (string) (int) $product['harga_jual'],
                                 'currency' => 'IDR'
                             ],
                             'inventory' => [
                                 [
                                     'quantity' => $quantity,
-                                    'warehouse_id' => 'default'
+                                    'warehouse_id' => $warehouseId
                                 ]
                             ]
                         ]
                     ]
                 ];
+                //return $this->jsonResponse->oneResp('Sukses mengambil daftar kategori dari TikTok Shop', $body, 200);
 
                 $response = $this->makeTiktokRequest($idToko, 'POST', $path, [], $body);
                 log_message('info', "[TikTok createProduct] Product ID {$product['id']} Response: " . json_encode($response));
 
                 if (($response['code'] ?? 0) === 0 && !empty($response['data']['product_id'])) {
                     $productId = $response['data']['product_id'];
-                    
+
                     $productModel->update($product['id'], [
                         'tiktok_product_id' => $productId,
                         'tiktok_sku' => $sku,
@@ -350,7 +379,11 @@ class TiktokController extends ResourceController
                         'response' => $response
                     ], 200);
                 } else {
-                    return $this->jsonResponse->error($response['message'] ?? 'Gagal membuat produk di TikTok Shop', 400, $response);
+                    $errorMsg = $response['message'] ?? 'Gagal membuat produk di TikTok Shop';
+                    if (isset($response['code'])) {
+                        $errorMsg .= " (Code: " . $response['code'] . ")";
+                    }
+                    return $this->jsonResponse->error($errorMsg, 400, $response);
                 }
             } else {
                 // Fallback to sending raw productData as before
@@ -358,8 +391,7 @@ class TiktokController extends ResourceController
                 $response = $this->makeTiktokRequest($idToko, 'POST', $path, [], $productData);
                 return $this->jsonResponse->oneResp('Sukses', $response, 200);
             }
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -399,7 +431,7 @@ class TiktokController extends ResourceController
                 $product = $response['data']['products'][0];
                 $productId = $product['id'];
                 $categoryId = $product['category_chains'][0]['id'] ?? null;
-                
+
                 if (!empty($product['skus'])) {
                     foreach ($product['skus'] as $s) {
                         if ($s['seller_sku'] === $tiktokSku) {
@@ -422,10 +454,10 @@ class TiktokController extends ResourceController
             }
 
             $updateData = [
-                'tiktok_product_id'  => $productId,
-                'tiktok_sku'         => $tiktokSku,
+                'tiktok_product_id' => $productId,
+                'tiktok_sku' => $tiktokSku,
                 'tiktok_category_id' => $categoryId,
-                'tiktok_meta'        => json_encode($response['data']['products'][0])
+                'tiktok_meta' => json_encode($response['data']['products'][0])
             ];
 
             $productModel->update($idProduct, $updateData);
@@ -433,21 +465,20 @@ class TiktokController extends ResourceController
             // 3. Immediately trigger stock sync to TikTok for this product
             $stockModel = new \App\Models\StockModel();
             $stockRecord = $stockModel->where('id_barang', $localProduct['id_barang'])
-                                      ->where('id_toko', $idToko)
-                                      ->first();
-            
-            $currentStock = $stockRecord ? (int)$stockRecord['stock'] : 0;
-            
+                ->where('id_toko', $idToko)
+                ->first();
+
+            $currentStock = $stockRecord ? (int) $stockRecord['stock'] : 0;
+
             $tiktokService = new \App\Libraries\TiktokService();
-            $tiktokService->syncProductStock((int)$idProduct, (int)$idToko);
+            $tiktokService->syncProductStock((int) $idProduct, (int) $idToko);
 
             return $this->jsonResponse->oneResp('Produk berhasil di-sync dengan Tokopedia/TikTok Shop', [
                 'tiktok_product_id' => $productId,
-                'tiktok_sku'        => $tiktokSku,
-                'stock_synced'      => $currentStock
+                'tiktok_sku' => $tiktokSku,
+                'stock_synced' => $currentStock
             ], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -467,10 +498,18 @@ class TiktokController extends ResourceController
             $stockModel = new \App\Models\StockModel();
 
             // Fetch all products that have not been uploaded to TikTok yet
-            $products = $productModel->where('tiktok_product_id', null)->findAll();
+            $products = $productModel->select('product.*, CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(mb.nama_model, ""), " ", COALESCE(s.seri, "")) as nama_lengkap_barang')
+                ->join('model_barang mb', 'mb.id = product.id_model_barang', 'left')
+                ->join('seri s', 's.id = product.id_seri_barang', 'left')
+                ->where('tiktok_product_id', null)->findAll();
 
             if (empty($products)) {
                 return $this->jsonResponse->oneResp('Semua produk sudah terunggah ke TikTok Shop', [], 200);
+            }
+
+            $warehouseId = $this->getTiktokWarehouseId($idToko);
+            if (!$warehouseId) {
+                return $this->jsonResponse->error('Gagal mengambil Warehouse ID dari TikTok Shop. Harap pastikan toko Anda memiliki gudang aktif di TikTok.', 400);
             }
 
             $successCount = 0;
@@ -481,24 +520,25 @@ class TiktokController extends ResourceController
                 try {
                     $sku = !empty($product['tiktok_sku']) ? $product['tiktok_sku'] : $product['id_barang'];
                     $stockRecord = $stockModel->where('id_barang', $product['id_barang'])
-                                              ->where('id_toko', $idToko)
-                                              ->first();
-                    $quantity = $stockRecord ? (int)$stockRecord['stock'] : 0;
+                        ->where('id_toko', $idToko)
+                        ->first();
+                    $quantity = $stockRecord ? (int) $stockRecord['stock'] : 0;
 
-                    // Fallback package weight (in grams) and dimensions
-                    $weight = !empty($product['berat']) ? (int)$product['berat'] : 100;
-                    $length = !empty($product['package_length']) ? (int)$product['package_length'] : 10;
-                    $width  = !empty($product['package_width'])  ? (int)$product['package_width']  : 10;
-                    $height = !empty($product['package_height']) ? (int)$product['package_height'] : 10;
+                    $weightKg = !empty($product['berat']) ? (float) $product['berat'] / 1000 : 0.1;
+                    $weightStr = number_format($weightKg, 2, '.', '');
 
-                    $categoryId = !empty($product['tiktok_category_id']) ? $product['tiktok_category_id'] : '810051';
+                    $length = !empty($product['package_length']) ? (int) $product['package_length'] : 10;
+                    $width = !empty($product['package_width']) ? (int) $product['package_width'] : 10;
+                    $height = !empty($product['package_height']) ? (int) $product['package_height'] : 10;
+
+                    $categoryId = !empty($product['tiktok_category_id']) ? $product['tiktok_category_id'] : '909832';
 
                     // Fetch and upload main images to TikTok Shop
                     $imageModel = new \App\Models\ImageModel();
                     $localImages = $imageModel->where('type', 'product')
-                                              ->where('kode', $product['id'])
-                                              ->orderBy('index', 'ASC')
-                                              ->findAll();
+                        ->where('kode', $product['id'])
+                        ->orderBy('index', 'ASC')
+                        ->findAll();
 
                     $mainImages = [];
                     foreach ($localImages as $img) {
@@ -550,32 +590,47 @@ class TiktokController extends ResourceController
 
                     $path = "/product/202309/products";
                     $body = [
-                        'title' => $product['nama_barang'],
+                        'save_mode' => 'LISTING',
+                        'listing_platforms' => [
+                            'TIKTOK_SHOP',
+                            'TOKOPEDIA'
+                        ],
+                        'title' => !empty($product['nama_lengkap_barang']) ? trim($product['nama_lengkap_barang']) : $product['nama_barang'],
                         'description' => !empty($product['description']) ? $product['description'] : $product['nama_barang'],
                         'category_id' => $categoryId,
                         'brand_id' => '0',
                         'main_images' => $mainImages,
-                        'package_weight' => [
-                            'value' => (string)$weight,
-                            'unit' => 'g'
+                        'product_attributes' => [
+                            [
+                                'id' => '101734',
+                                'values' => [
+                                    [
+                                        'id' => '1000059'
+                                    ]
+                                ]
+                            ]
                         ],
-                        'package_dimension' => [
-                            'length' => (string)$length,
-                            'width' => (string)$width,
-                            'height' => (string)$height,
-                            'unit' => 'cm'
+                        'package_weight' => [
+                            'value' => $weightStr,
+                            'unit' => 'KILOGRAM'
+                        ],
+                        'package_dimensions' => [
+                            'length' => (string) $length,
+                            'width' => (string) $width,
+                            'height' => (string) $height,
+                            'unit' => 'CENTIMETER'
                         ],
                         'skus' => [
                             [
                                 'seller_sku' => $sku,
                                 'price' => [
-                                    'amount' => (string)(int)$product['harga_jual'],
+                                    'amount' => (string) (int) $product['harga_jual'],
                                     'currency' => 'IDR'
                                 ],
                                 'inventory' => [
                                     [
                                         'quantity' => $quantity,
-                                        'warehouse_id' => 'default'
+                                        'warehouse_id' => $warehouseId
                                     ]
                                 ]
                             ]
@@ -587,7 +642,7 @@ class TiktokController extends ResourceController
 
                     if (($response['code'] ?? 0) === 0 && !empty($response['data']['product_id'])) {
                         $productId = $response['data']['product_id'];
-                        
+
                         $productModel->update($product['id'], [
                             'tiktok_product_id' => $productId,
                             'tiktok_sku' => $sku,
@@ -607,11 +662,10 @@ class TiktokController extends ResourceController
 
             return $this->jsonResponse->oneResp('Proses upload selesai', [
                 'success_count' => $successCount,
-                'fail_count'    => $failCount,
-                'errors'        => $errors
+                'fail_count' => $failCount,
+                'errors' => $errors
             ], 200);
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
@@ -631,17 +685,105 @@ class TiktokController extends ResourceController
             }
 
             $tiktokService = new \App\Libraries\TiktokService();
-            $result = $tiktokService->syncProductStock((int)$idProduct, (int)$idToko);
+            $result = $tiktokService->syncProductStock((int) $idProduct, (int) $idToko);
 
             if ($result['success']) {
                 return $this->jsonResponse->oneResp('Stok produk berhasil disinkronkan ke TikTok Shop', $result['response'], 200);
             } else {
                 return $this->jsonResponse->error($result['message'] ?? 'Failed to sync stock', 400);
             }
-        }
-        catch (\Exception $e) {
+        } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
+    }
+
+    /**
+     * Get TikTok Shop Warehouses List
+     * GET /api/v2/toko/tiktok/warehouses/(:num)
+     */
+    public function getWarehouses($idToko = null)
+    {
+        try {
+            if (!$idToko) {
+                return $this->jsonResponse->error('id_toko wajib diisi', 400);
+            }
+
+            $path = "/logistics/202309/warehouses";
+            $response = $this->makeTiktokRequest($idToko, 'GET', $path, [], null);
+
+            return $this->jsonResponse->oneResp('Sukses mengambil daftar gudang dari TikTok Shop', $response, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Get TikTok Shop Categories List
+     * GET /api/v2/toko/tiktok/categories/(:num)
+     */
+    public function getCategories($idToko = null)
+    {
+        try {
+            if (!$idToko) {
+                return $this->jsonResponse->error('id_toko wajib diisi', 400);
+            }
+
+            $path = "/product/202309/categories";
+            $params = [
+                'category_version' => 'v1'
+            ];
+            $response = $this->makeTiktokRequest($idToko, 'GET', $path, $params, null);
+
+            return $this->jsonResponse->oneResp('Sukses mengambil daftar kategori dari TikTok Shop', $response['data'], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Get TikTok Shop Category Attributes
+     * GET /api/v2/toko/tiktok/attributes/(:num)/(:num)
+     */
+    public function getAttributes($idToko = null, $categoryId = null)
+    {
+        try {
+            if (!$idToko || !$categoryId) {
+                return $this->jsonResponse->error('id_toko dan category_id wajib diisi', 400);
+            }
+
+            $path = "/product/202309/categories/attributes";
+            $params = [
+                'category_id' => $categoryId,
+                'category_version' => 'v2'
+            ];
+            $response = $this->makeTiktokRequest($idToko, 'GET', $path, $params, null);
+
+            return $this->jsonResponse->oneResp('Sukses mengambil daftar atribut kategori dari TikTok Shop', $response, 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Fetch the first enabled Warehouse ID from TikTok Shop API
+     */
+    private function getTiktokWarehouseId($idToko)
+    {
+        try {
+            $path = "/logistics/202309/warehouses";
+            $response = $this->makeTiktokRequest($idToko, 'GET', $path, [], null);
+            if (($response['code'] ?? -1) === 0 && !empty($response['data']['warehouses'])) {
+                foreach ($response['data']['warehouses'] as $wh) {
+                    if (($wh['is_default'] ?? false) === true) {
+                        return $wh['id'];
+                    }
+                }
+                return $response['data']['warehouses'][0]['id'];
+            }
+        } catch (\Exception $e) {
+            log_message('error', '[TikTok getTiktokWarehouseId Error] ' . $e->getMessage());
+        }
+        return null;
     }
 
     /**
@@ -665,7 +807,9 @@ class TiktokController extends ResourceController
         $appKey = env('TIKTOK_APP_KEY');
         $appSecret = env('TIKTOK_APP_SECRET');
         $params['app_key'] = $appKey;
-        $params['shop_cipher'] = $shopCipher;
+        if (strpos($path, 'global_warehouses') === false) {
+            $params['shop_cipher'] = $shopCipher;
+        }
         $params['timestamp'] = time();
 
         $signature = $this->generateSign2($path, $params, $body, $appSecret);
@@ -686,7 +830,7 @@ class TiktokController extends ResourceController
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
         if ($method === 'POST' || $method === 'PUT') {
-            $jsonBody = empty($body) ? '{}' : json_encode($body);
+            $jsonBody = empty($body) ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonBody);
         }
 
@@ -720,8 +864,8 @@ class TiktokController extends ResourceController
         // 4. Always append the stringified body IF body is provided (usually for POST/PUT)
         // TikTok V2 signature requires {} for empty object body in POST
         // For GET requests, the body part should be omitted from the signature string
-        if ($body !== null) {
-            $jsonBody = empty($body) ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($body !== null && !empty($body)) {
+            $jsonBody = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $signString .= $jsonBody;
         }
 
@@ -786,13 +930,9 @@ class TiktokController extends ResourceController
 
         // Sign for multipart/form-data: pass null as body
         $signature = $this->generateSign2($path, $params, null, $appSecret);
-        
-        $urlParams = array_merge($params, [
-            'access_token' => $accessToken,
-            'sign' => $signature
-        ]);
+        $params['sign'] = $signature;
 
-        $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($urlParams);
+        $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($params);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -857,13 +997,9 @@ class TiktokController extends ResourceController
 
         // Sign for multipart/form-data: pass null as body
         $signature = $this->generateSign2($path, $params, null, $appSecret);
-        
-        $urlParams = array_merge($params, [
-            'access_token' => $accessToken,
-            'sign' => $signature
-        ]);
+        $params['sign'] = $signature;
 
-        $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($urlParams);
+        $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($params);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
@@ -898,5 +1034,95 @@ class TiktokController extends ResourceController
         }
 
         return ['success' => false, 'message' => 'HTTP ' . $httpCode . ' Response: ' . $response];
+    }
+
+    /**
+     * Refresh Token for TikTok Shop
+     * POST /api/v2/toko/tiktok/refresh-token/(:num)
+     */
+    public function refreshToken($idToko = null)
+    {
+        try {
+            if (!$idToko) {
+                return $this->jsonResponse->error('id_toko wajib diisi', 400);
+            }
+
+            $res = $this->performTokenRefresh($idToko);
+            if ($res['success']) {
+                return $this->jsonResponse->oneResp($res['message'], [
+                    'access_token' => $res['access_token'],
+                    'refresh_token' => $res['refresh_token']
+                ], 200);
+            } else {
+                return $this->jsonResponse->error($res['message'], 400, $res['response'] ?? null);
+            }
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Internal helper to refresh token
+     */
+    public function performTokenRefresh($idToko)
+    {
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $refreshToken = $tokoMetaModel->getMeta($idToko, 'tiktok_refresh_token');
+
+        if (!$refreshToken) {
+            return [
+                'success' => false,
+                'message' => 'Refresh token tidak ditemukan di database.'
+            ];
+        }
+
+        $appKey = env('TIKTOK_APP_KEY');
+        $appSecret = env('TIKTOK_APP_SECRET');
+
+        $rawBody = [
+            'app_key' => $appKey,
+            'refresh_token' => $refreshToken,
+            'grant_type' => 'refresh_token',
+            'timestamp' => time(),
+        ];
+
+        $sign = $this->createSign($rawBody, $appSecret);
+
+        $finalParams = array_merge($rawBody, [
+            'app_secret' => $appSecret,
+            'sign' => $sign,
+        ]);
+
+        $tokenUrl = "https://auth.tiktok-shops.com/api/v2/token/refresh?" . http_build_query($finalParams);
+
+        $chToken = curl_init();
+        curl_setopt($chToken, CURLOPT_URL, $tokenUrl);
+        curl_setopt($chToken, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($chToken, CURLOPT_HTTPHEADER, ["Content-Type: application/x-www-form-urlencoded"]);
+        $responseTokenJson = curl_exec($chToken);
+        curl_close($chToken);
+
+        $responseToken = json_decode($responseTokenJson, true);
+        $accessToken = $responseToken['data']['access_token'] ?? null;
+        $newRefreshToken = $responseToken['data']['refresh_token'] ?? null;
+
+        if (!$accessToken) {
+            log_message('error', "TikTok Refresh Token Error for Shop ID {$idToko}: " . $responseTokenJson);
+            return [
+                'success' => false,
+                'message' => 'Gagal memperbarui access token.',
+                'response' => $responseToken
+            ];
+        }
+
+        $tokoMetaModel->setMeta($idToko, 'tiktok_access_token', $accessToken);
+        $tokoMetaModel->setMeta($idToko, 'tiktok_refresh_token', $newRefreshToken);
+
+        return [
+            'success' => true,
+            'message' => 'Token berhasil diperbarui.',
+            'access_token' => $accessToken,
+            'refresh_token' => $newRefreshToken
+        ];
     }
 }

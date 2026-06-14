@@ -32,13 +32,16 @@ class JsonResponse
         return service('response')->setJSON($res)->setStatusCode($code);
     }
 
-    public function error($message = "", $code = 400): ResponseInterface
+    public function error($message = "", $code = 400, $data = null): ResponseInterface
     {
         $res = [
             "code" => $code,
             "status" => false,
             "message" => $message,
         ];
+        if ($data !== null) {
+            $res['data'] = $data;
+        }
         return service('response')->setJSON($res)->setStatusCode($code);
     }
 }

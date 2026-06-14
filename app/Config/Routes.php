@@ -313,11 +313,15 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
 
         // Tiktok Shop
         $routes->get('toko/tiktok-auth-url/(:num)', 'TiktokController::getAuthUrl/$1');
+        $routes->get('toko/tiktok/warehouses/(:num)', 'TiktokController::getWarehouses/$1');
+        $routes->get('toko/tiktok/categories/(:num)', 'TiktokController::getCategories/$1');
+        $routes->get('toko/tiktok/attributes/(:num)/(:num)', 'TiktokController::getAttributes/$1/$2');
         $routes->post('toko/tiktok/products/(:num)', 'TiktokController::getProducts/$1');
         $routes->post('toko/tiktok/product-create/(:num)', 'TiktokController::createProduct/$1');
         $routes->post('toko/tiktok/product-sync-sku/(:num)', 'TiktokController::syncProductBySku/$1');
         $routes->post('toko/tiktok/products-bulk-upload/(:num)', 'TiktokController::bulkUploadProducts/$1');
         $routes->post('toko/tiktok/product-sync-stock/(:num)', 'TiktokController::syncProductStock/$1');
+        $routes->post('toko/tiktok/refresh-token/(:num)', 'TiktokController::refreshToken/$1');
     });
 });
 
