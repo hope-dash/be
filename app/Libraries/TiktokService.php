@@ -35,8 +35,9 @@ class TiktokService
         }
 
         $this->idToko = $idToko;
-        $this->token = $toko['tiktok_access_token'] ?? null;
-        $this->shopCipher = $toko['tiktok_shop_cipher'] ?? null;
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $this->token = $tokoMetaModel->getMeta($idToko, 'tiktok_access_token');
+        $this->shopCipher = $tokoMetaModel->getMeta($idToko, 'tiktok_shop_cipher');
 
         return $this;
     }

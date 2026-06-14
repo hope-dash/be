@@ -152,12 +152,11 @@ class TiktokController extends ResourceController
         }
 
         // Step 3: Save to Database
-        $this->tokoModel->update($idToko, [
-            'tiktok_code' => $code,
-            'tiktok_shop_cipher' => $cipher,
-            'tiktok_access_token' => $accessToken,
-            'tiktok_refresh_token' => $refreshToken,
-        ]);
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $tokoMetaModel->setMeta($idToko, 'tiktok_code', $code);
+        $tokoMetaModel->setMeta($idToko, 'tiktok_shop_cipher', $cipher);
+        $tokoMetaModel->setMeta($idToko, 'tiktok_access_token', $accessToken);
+        $tokoMetaModel->setMeta($idToko, 'tiktok_refresh_token', $refreshToken);
 
         return view('tiktok/verif', [
             'status' => 'success',
@@ -198,12 +197,167 @@ class TiktokController extends ResourceController
     public function createProduct($idToko = null)
     {
         try {
-            $path = "/product/202309/products";
+            if (!$idToko) {
+                return $this->jsonResponse->error('id_toko wajib diisi', 400);
+            }
+
             $productData = $this->request->getJSON(true) ?: [];
+            $idProduct = $productData['id_product'] ?? null;
 
-            $response = $this->makeTiktokRequest($idToko, 'POST', $path, [], $productData);
+            if ($idProduct) {
+                // Upload a specific local product
+                $productModel = new \App\Models\ProductModel();
+                $stockModel = new \App\Models\StockModel();
 
-            return $this->jsonResponse->oneResp('Sukses', $response, 200);
+                $product = $productModel->find($idProduct);
+                if (!$product) {
+                    return $this->jsonResponse->error('Produk lokal tidak ditemukan', 404);
+                }
+
+                $sku = !empty($product['tiktok_sku']) ? $product['tiktok_sku'] : $product['id_barang'];
+                $stockRecord = $stockModel->where('id_barang', $product['id_barang'])
+                                          ->where('id_toko', $idToko)
+                                          ->first();
+                $quantity = $stockRecord ? (int)$stockRecord['stock'] : 0;
+
+                $weight = !empty($product['berat']) ? (int)$product['berat'] : 100;
+                $length = !empty($product['package_length']) ? (int)$product['package_length'] : 10;
+                $width  = !empty($product['package_width'])  ? (int)$product['package_width']  : 10;
+                $height = !empty($product['package_height']) ? (int)$product['package_height'] : 10;
+
+                $categoryId = !empty($product['tiktok_category_id']) ? $product['tiktok_category_id'] : '810051';
+
+                // Fetch and upload main images to TikTok Shop
+                $imageModel = new \App\Models\ImageModel();
+                $localImages = $imageModel->where('type', 'product')
+                                          ->where('kode', $product['id'])
+                                          ->orderBy('index', 'ASC')
+                                          ->findAll();
+
+                $mainImages = [];
+                $debugLogs = [];
+                foreach ($localImages as $img) {
+                    $url = $img['url'];
+                    $filename = basename($url);
+                    $filePath = ROOTPATH . 'public/hope/images/' . $filename;
+                    $tempFile = null;
+
+                    if (!file_exists($filePath)) {
+                        $debugLogs[] = "Local file not found at: {$filePath}. Trying to download from: {$url}";
+                        if (filter_var($url, FILTER_VALIDATE_URL)) {
+                            $tempDir = WRITEPATH . 'tmp';
+                            if (!is_dir($tempDir)) {
+                                @mkdir($tempDir, 0777, true);
+                            }
+                            $tempFile = $tempDir . '/' . uniqid('img_') . '_' . $filename;
+
+                            $ch = curl_init($url);
+                            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+                            $imgData = curl_exec($ch);
+                            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                            $curlErr = curl_error($ch);
+                            curl_close($ch);
+
+                            if ($imgData && $httpCode === 200) {
+                                file_put_contents($tempFile, $imgData);
+                                $filePath = $tempFile;
+                                $debugLogs[] = "Download success. Temp file: {$tempFile}";
+                            } else {
+                                $debugLogs[] = "Download failed. HTTP Code: {$httpCode}. Curl Error: {$curlErr}";
+                            }
+                        } else {
+                            $debugLogs[] = "Invalid URL: {$url}";
+                        }
+                    } else {
+                        $debugLogs[] = "Local file found at: {$filePath}";
+                    }
+
+                    if (file_exists($filePath)) {
+                        $debugLogs[] = "File size: " . filesize($filePath) . " bytes";
+                        $uploadRes = $this->uploadImageToTiktokDebug($idToko, $filePath);
+                        if ($uploadRes['success']) {
+                            $mainImages[] = ['uri' => $uploadRes['uri']];
+                            $debugLogs[] = "Upload success. TikTok URI: " . $uploadRes['uri'];
+                        } else {
+                            $debugLogs[] = "Upload failed. TikTok API response: " . $uploadRes['message'];
+                        }
+                        if ($tempFile && file_exists($tempFile)) {
+                            @unlink($tempFile);
+                        }
+                    } else {
+                        $debugLogs[] = "File does not exist: {$filePath}";
+                    }
+                }
+
+                if (empty($mainImages)) {
+                    return $this->jsonResponse->error('Produk ini belum memiliki gambar lokal yang valid. (Debug logs: ' . implode(' | ', $debugLogs) . ')', 400);
+                }
+
+                $path = "/product/202309/products";
+                $body = [
+                    'title' => $product['nama_barang'],
+                    'description' => !empty($product['description']) ? $product['description'] : $product['nama_barang'],
+                    'category_id' => $categoryId,
+                    'brand_id' => '0',
+                    'main_images' => $mainImages,
+                    'package_weight' => [
+                        'value' => (string)$weight,
+                        'unit' => 'g'
+                    ],
+                    'package_dimension' => [
+                        'length' => (string)$length,
+                        'width' => (string)$width,
+                        'height' => (string)$height,
+                        'unit' => 'cm'
+                    ],
+                    'skus' => [
+                        [
+                            'seller_sku' => $sku,
+                            'price' => [
+                                'amount' => (string)(int)$product['harga_jual'],
+                                'currency' => 'IDR'
+                            ],
+                            'inventory' => [
+                                [
+                                    'quantity' => $quantity,
+                                    'warehouse_id' => 'default'
+                                ]
+                            ]
+                        ]
+                    ]
+                ];
+
+                $response = $this->makeTiktokRequest($idToko, 'POST', $path, [], $body);
+                log_message('info', "[TikTok createProduct] Product ID {$product['id']} Response: " . json_encode($response));
+
+                if (($response['code'] ?? 0) === 0 && !empty($response['data']['product_id'])) {
+                    $productId = $response['data']['product_id'];
+                    
+                    $productModel->update($product['id'], [
+                        'tiktok_product_id' => $productId,
+                        'tiktok_sku' => $sku,
+                        'tiktok_category_id' => $categoryId,
+                        'tiktok_meta' => json_encode($response['data'])
+                    ]);
+
+                    return $this->jsonResponse->oneResp('Sukses upload produk ke TikTok Shop', [
+                        'tiktok_product_id' => $productId,
+                        'tiktok_sku' => $sku,
+                        'tiktok_category_id' => $categoryId,
+                        'response' => $response
+                    ], 200);
+                } else {
+                    return $this->jsonResponse->error($response['message'] ?? 'Gagal membuat produk di TikTok Shop', 400, $response);
+                }
+            } else {
+                // Fallback to sending raw productData as before
+                $path = "/product/202309/products";
+                $response = $this->makeTiktokRequest($idToko, 'POST', $path, [], $productData);
+                return $this->jsonResponse->oneResp('Sukses', $response, 200);
+            }
         }
         catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
@@ -339,12 +493,68 @@ class TiktokController extends ResourceController
 
                     $categoryId = !empty($product['tiktok_category_id']) ? $product['tiktok_category_id'] : '810051';
 
+                    // Fetch and upload main images to TikTok Shop
+                    $imageModel = new \App\Models\ImageModel();
+                    $localImages = $imageModel->where('type', 'product')
+                                              ->where('kode', $product['id'])
+                                              ->orderBy('index', 'ASC')
+                                              ->findAll();
+
+                    $mainImages = [];
+                    foreach ($localImages as $img) {
+                        $url = $img['url'];
+                        $filename = basename($url);
+                        $filePath = ROOTPATH . 'public/hope/images/' . $filename;
+                        $tempFile = null;
+
+                        if (!file_exists($filePath)) {
+                            if (filter_var($url, FILTER_VALIDATE_URL)) {
+                                $tempDir = WRITEPATH . 'tmp';
+                                if (!is_dir($tempDir)) {
+                                    @mkdir($tempDir, 0777, true);
+                                }
+                                $tempFile = $tempDir . '/' . uniqid('img_') . '_' . $filename;
+
+                                $ch = curl_init($url);
+                                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                                curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+                                $imgData = curl_exec($ch);
+                                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                                curl_close($ch);
+
+                                if ($imgData && $httpCode === 200) {
+                                    file_put_contents($tempFile, $imgData);
+                                    $filePath = $tempFile;
+                                }
+                            }
+                        }
+
+                        if (file_exists($filePath)) {
+                            $uri = $this->uploadImageToTiktok($idToko, $filePath);
+                            if ($uri) {
+                                $mainImages[] = ['uri' => $uri];
+                            }
+                            if ($tempFile && file_exists($tempFile)) {
+                                @unlink($tempFile);
+                            }
+                        }
+                    }
+
+                    if (empty($mainImages)) {
+                        $failCount++;
+                        $errors[] = "Produk #{$product['id']} ({$product['nama_barang']}): Belum memiliki gambar produk yang valid.";
+                        continue;
+                    }
+
                     $path = "/product/202309/products";
                     $body = [
                         'title' => $product['nama_barang'],
                         'description' => !empty($product['description']) ? $product['description'] : $product['nama_barang'],
                         'category_id' => $categoryId,
                         'brand_id' => '0',
+                        'main_images' => $mainImages,
                         'package_weight' => [
                             'value' => (string)$weight,
                             'unit' => 'g'
@@ -440,14 +650,20 @@ class TiktokController extends ResourceController
     private function makeTiktokRequest($idToko, $method, $path, $params = [], $body = [])
     {
         $toko = $this->tokoModel->find($idToko);
-        if (!$toko || !$toko['tiktok_access_token']) {
-            throw new \Exception("Toko tidak ditemukan atau belum terintegrasi TikTok.");
+        if (!$toko) {
+            throw new \Exception("Toko tidak ditemukan.");
+        }
+
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $accessToken = $tokoMetaModel->getMeta($idToko, 'tiktok_access_token');
+        $shopCipher = $tokoMetaModel->getMeta($idToko, 'tiktok_shop_cipher');
+
+        if (!$accessToken || !$shopCipher) {
+            throw new \Exception("Toko belum terintegrasi TikTok.");
         }
 
         $appKey = env('TIKTOK_APP_KEY');
         $appSecret = env('TIKTOK_APP_SECRET');
-        $accessToken = $toko['tiktok_access_token'];
-        $shopCipher = $toko['tiktok_shop_cipher'];
         $params['app_key'] = $appKey;
         $params['shop_cipher'] = $shopCipher;
         $params['timestamp'] = time();
@@ -535,5 +751,152 @@ class TiktokController extends ResourceController
 
         // 3. HMAC-SHA256 (Common for TikTok)
         return hash_hmac('sha256', $string, $secret);
+    }
+
+    /**
+     * Upload binary image to TikTok Shop using multipart/form-data
+     */
+    private function uploadImageToTiktok($idToko, $filePath)
+    {
+        if (!file_exists($filePath)) {
+            return null;
+        }
+
+        $toko = $this->tokoModel->find($idToko);
+        if (!$toko) {
+            return null;
+        }
+
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $accessToken = $tokoMetaModel->getMeta($idToko, 'tiktok_access_token');
+        $shopCipher = $tokoMetaModel->getMeta($idToko, 'tiktok_shop_cipher');
+
+        if (!$accessToken || !$shopCipher) {
+            return null;
+        }
+
+        $appKey = env('TIKTOK_APP_KEY');
+        $appSecret = env('TIKTOK_APP_SECRET');
+
+        $path = "/product/202309/images/upload";
+        $params = [
+            'app_key' => $appKey,
+            'timestamp' => time(),
+        ];
+
+        // Sign for multipart/form-data: pass null as body
+        $signature = $this->generateSign2($path, $params, null, $appSecret);
+        
+        $urlParams = array_merge($params, [
+            'access_token' => $accessToken,
+            'sign' => $signature
+        ]);
+
+        $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($urlParams);
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+
+        $headers = [
+            "Content-Type: multipart/form-data",
+            "x-tts-access-token: " . $accessToken
+        ];
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        $cfile = new \CURLFile($filePath, mime_content_type($filePath), basename($filePath));
+        $postData = [
+            'use_case' => 'MAIN_IMAGE',
+            'data' => $cfile
+        ];
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        $resDecoded = json_decode($response, true);
+        if (($resDecoded['code'] ?? -1) === 0 && !empty($resDecoded['data']['uri'])) {
+            return $resDecoded['data']['uri'];
+        }
+
+        log_message('error', '[TikTok Image Upload Error] Response: ' . $response);
+        return null;
+    }
+
+    /**
+     * Upload binary image to TikTok Shop returning debug status/response
+     */
+    private function uploadImageToTiktokDebug($idToko, $filePath)
+    {
+        if (!file_exists($filePath)) {
+            return ['success' => false, 'message' => 'File does not exist locally'];
+        }
+
+        $toko = $this->tokoModel->find($idToko);
+        if (!$toko) {
+            return ['success' => false, 'message' => 'Toko not found'];
+        }
+
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $accessToken = $tokoMetaModel->getMeta($idToko, 'tiktok_access_token');
+        $shopCipher = $tokoMetaModel->getMeta($idToko, 'tiktok_shop_cipher');
+
+        if (!$accessToken || !$shopCipher) {
+            return ['success' => false, 'message' => 'TikTok credentials not found in metadata'];
+        }
+
+        $appKey = env('TIKTOK_APP_KEY');
+        $appSecret = env('TIKTOK_APP_SECRET');
+
+        $path = "/product/202309/images/upload";
+        $params = [
+            'app_key' => $appKey,
+            'timestamp' => time(),
+        ];
+
+        // Sign for multipart/form-data: pass null as body
+        $signature = $this->generateSign2($path, $params, null, $appSecret);
+        
+        $urlParams = array_merge($params, [
+            'access_token' => $accessToken,
+            'sign' => $signature
+        ]);
+
+        $url = "https://open-api.tiktokglobalshop.com" . $path . "?" . http_build_query($urlParams);
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+
+        $headers = [
+            "Content-Type: multipart/form-data",
+            "x-tts-access-token: " . $accessToken
+        ];
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        $cfile = new \CURLFile($filePath, mime_content_type($filePath), basename($filePath));
+        $postData = [
+            'use_case' => 'MAIN_IMAGE',
+            'data' => $cfile
+        ];
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if ($err) {
+            return ['success' => false, 'message' => 'cURL Error: ' . $err];
+        }
+
+        $resDecoded = json_decode($response, true);
+        if (($resDecoded['code'] ?? -1) === 0 && !empty($resDecoded['data']['uri'])) {
+            return ['success' => true, 'uri' => $resDecoded['data']['uri']];
+        }
+
+        return ['success' => false, 'message' => 'HTTP ' . $httpCode . ' Response: ' . $response];
     }
 }
