@@ -41,9 +41,9 @@ class TokoController extends BaseController
                 'phone_number' => 'required|numeric|min_length[10]|max_length[15]',
                 'email_toko' => 'required|valid_email',
                 'image_logo' => 'permit_empty|valid_url',
-                'bank' => 'required|string',
-                'nama_pemilik' => 'required|string',
-                'nomer_rekening' => 'required|numeric',
+                'bank' => 'permit_empty|string',
+                'nama_pemilik' => 'permit_empty|string',
+                'nomer_rekening' => 'permit_empty|numeric',
                 'provinsi' => 'permit_empty',
                 'kota_kabupaten' => 'permit_empty',
                 'kecamatan' => 'permit_empty',
@@ -65,9 +65,9 @@ class TokoController extends BaseController
                 "email_toko" => $data->email_toko,
                 "created_by" => $token['user_id'],
                 "image_logo" => isset($data->image_logo) ? $data->image_logo : null,
-                "bank" => $data->bank,
-                "nama_pemilik" => $data->nama_pemilik,
-                "nomer_rekening" => $data->nomer_rekening,
+                "bank" => $data->bank ?? null,
+                "nama_pemilik" => $data->nama_pemilik ?? null,
+                "nomer_rekening" => $data->nomer_rekening ?? null,
                 "provinsi" => $data->provinsi ?? null,
                 "kota_kabupaten" => $data->kota_kabupaten ?? null,
                 "kecamatan" => $data->kecamatan ?? null,
@@ -136,9 +136,9 @@ class TokoController extends BaseController
                 'phone_number' => 'required|numeric|min_length[10]|max_length[15]',
                 'email_toko' => 'required|valid_email',
                 'image_logo' => 'permit_empty|valid_url',
-                'bank' => 'required|string',
-                'nama_pemilik' => 'required|string',
-                'nomer_rekening' => 'required|numeric',
+                'bank' => 'permit_empty|string',
+                'nama_pemilik' => 'permit_empty|string',
+                'nomer_rekening' => 'permit_empty|numeric',
                 'provinsi' => 'permit_empty',
                 'kota_kabupaten' => 'permit_empty',
                 'kecamatan' => 'permit_empty',
@@ -157,9 +157,9 @@ class TokoController extends BaseController
                 "email_toko" => $data->email_toko,
                 "updated_by" => $token['user_id'],
                 "image_logo" => isset($data->image_logo) ? $data->image_logo : null,
-                "bank" => $data->bank,
-                "nama_pemilik" => $data->nama_pemilik,
-                "nomer_rekening" => $data->nomer_rekening,
+                "bank" => $data->bank ?? null,
+                "nama_pemilik" => $data->nama_pemilik ?? null,
+                "nomer_rekening" => $data->nomer_rekening ?? null,
                 "provinsi" => $data->provinsi ?? null,
                 "kota_kabupaten" => $data->kota_kabupaten ?? null,
                 "kecamatan" => $data->kecamatan ?? null,
@@ -372,6 +372,20 @@ class TokoController extends BaseController
                 $mootaResponse = $mootaService->request('POST', '/bank/store', $mootaPayload);
                 log_message('info', '[Moota bank/store] Response: ' . json_encode($mootaResponse));
                 $mootaBankId = $mootaResponse['bank']['bank_id'] ?? $mootaResponse['bank']['id'] ?? $mootaResponse['bank_id'] ?? $mootaResponse['id'] ?? null;
+
+                // Attach webhook if MOOTA_WEBHOOK_ID exists in .env
+                $webhookId = getenv('MOOTA_WEBHOOK_ID') ?: '';
+                if (!empty($webhookId) && !empty($mootaBankId)) {
+                    try {
+                        $attachPayload = [
+                            'bank_account_id' => $mootaBankId
+                        ];
+                        $attachResponse = $mootaService->request('POST', '/integration/webhook/attach/' . $webhookId, $attachPayload);
+                        log_message('info', '[Moota webhook attach] Response: ' . json_encode($attachResponse));
+                    } catch (\Exception $ex) {
+                        log_message('error', 'Failed to attach webhook to bank: ' . $ex->getMessage());
+                    }
+                }
 
                 $updateData['moota_bank_type'] = $data['bank_type'];
                 $updateData['moota_username']  = $data['username'];
