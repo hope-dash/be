@@ -379,7 +379,7 @@ class TransactionControllerV2 extends ResourceController
                         'note' => null,
                         'redirect_url' => 'https://hope-sparepart.com',
                         'total' => (int)$amountToPay,
-                        'expired_in_minutes' => 129600
+                        'expired_in_minutes' => 2880
                     ];
 
                     $mootaResult = $mootaService->createTransaction($mootaPayload);
@@ -859,7 +859,7 @@ class TransactionControllerV2 extends ResourceController
                             'note' => null,
                             'redirect_url' => 'https://hope-sparepart.com',
                             'total' => (int)$remainingAmount,
-                            'expired_in_minutes' => 129600
+                            'expired_in_minutes' => 2880
                         ];
 
                         $mootaResult = $mootaService->createTransaction($mootaPayload);
@@ -1389,7 +1389,7 @@ class TransactionControllerV2 extends ResourceController
                         'note' => null,
                         'redirect_url' => 'https://hope-sparepart.com',
                         'total' => (int)$newActualTotal,
-                        'expired_in_minutes' => 129600
+                        'expired_in_minutes' => 2880
                     ];
 
                     $mootaResult = $mootaService->createTransaction($mootaPayload);
