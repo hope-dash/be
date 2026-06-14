@@ -78,6 +78,9 @@ class ProductController extends ResourceController
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
             'berat' => 'permit_empty',
+            'package_length' => 'permit_empty',
+            'package_width' => 'permit_empty',
+            'package_height' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -108,6 +111,9 @@ class ProductController extends ResourceController
             'notes' => $data->notes ?? null,
             'dropship' => $data->dropship ?? 0,
             'berat' => $data->berat ?? 0,
+            'package_length' => !empty($data->package_length) ? (int)$data->package_length : 10,
+            'package_width' => !empty($data->package_width) ? (int)$data->package_width : 10,
+            'package_height' => !empty($data->package_height) ? (int)$data->package_height : 10,
             "created_by" => $token['user_id'],
         ];
 
@@ -170,6 +176,9 @@ class ProductController extends ResourceController
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
             'berat' => 'permit_empty',
+            'package_length' => 'permit_empty',
+            'package_width' => 'permit_empty',
+            'package_height' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -200,6 +209,9 @@ class ProductController extends ResourceController
             'notes' => $data->notes ?? null,
             'berat' => $data->berat ?? 0,
             'dropship' => $data->dropship ?? 0,
+            'package_length' => !empty($data->package_length) ? (int)$data->package_length : 10,
+            'package_width' => !empty($data->package_width) ? (int)$data->package_width : 10,
+            'package_height' => !empty($data->package_height) ? (int)$data->package_height : 10,
             "created_by" => $token['user_id'],
         ];
 
@@ -369,7 +381,10 @@ class ProductController extends ResourceController
             'harga_jual_toko',
             'suplier',
             'id_model',
-            'notes'
+            'notes',
+            'package_length',
+            'package_width',
+            'package_height'
         ];
 
         foreach ($fields as $field) {
@@ -450,6 +465,9 @@ class ProductController extends ResourceController
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
             'berat' => 'permit_empty',
+            'package_length' => 'permit_empty',
+            'package_width' => 'permit_empty',
+            'package_height' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -478,6 +496,9 @@ class ProductController extends ResourceController
             'notes' => $data->notes ?? null,
             'dropship' => $data->dropship ?? 0,
             'berat' => $data->berat ?? 0,
+            'package_length' => !empty($data->package_length) ? (int)$data->package_length : 10,
+            'package_width' => !empty($data->package_width) ? (int)$data->package_width : 10,
+            'package_height' => !empty($data->package_height) ? (int)$data->package_height : 10,
             "updated_by" => $token['user_id'],
         ];
 
@@ -547,6 +568,9 @@ class ProductController extends ResourceController
             'description' => 'permit_empty',
             'dropship' => 'permit_empty',
             'berat' => 'permit_empty',
+            'package_length' => 'permit_empty',
+            'package_width' => 'permit_empty',
+            'package_height' => 'permit_empty',
         ]);
 
         if (!$this->validate($validation->getRules())) {
@@ -580,6 +604,9 @@ class ProductController extends ResourceController
                 'notes' => $data->notes ?? null,
                 'berat' => $data->berat ?? 0,
                 'dropship' => $data->dropship ?? 0,
+                'package_length' => !empty($data->package_length) ? (int)$data->package_length : 10,
+                'package_width' => !empty($data->package_width) ? (int)$data->package_width : 10,
+                'package_height' => !empty($data->package_height) ? (int)$data->package_height : 10,
                 "updated_by" => $token['user_id'],
             ];
 

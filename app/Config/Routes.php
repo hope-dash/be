@@ -315,6 +315,9 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->get('toko/tiktok-auth-url/(:num)', 'TiktokController::getAuthUrl/$1');
         $routes->post('toko/tiktok/products/(:num)', 'TiktokController::getProducts/$1');
         $routes->post('toko/tiktok/product-create/(:num)', 'TiktokController::createProduct/$1');
+        $routes->post('toko/tiktok/product-sync-sku/(:num)', 'TiktokController::syncProductBySku/$1');
+        $routes->post('toko/tiktok/products-bulk-upload/(:num)', 'TiktokController::bulkUploadProducts/$1');
+        $routes->post('toko/tiktok/product-sync-stock/(:num)', 'TiktokController::syncProductStock/$1');
     });
 });
 
