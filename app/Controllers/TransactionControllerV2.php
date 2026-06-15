@@ -583,6 +583,30 @@ class TransactionControllerV2 extends ResourceController
                 return $this->jsonResponse->error('Transaksi gagal disimpan', 500);
             }
 
+            // Sync stock to TikTok Shop for all purchased products
+            $syncedProductIds = [];
+            foreach ($productsInput as $prod) {
+                $prodObj = (object)$prod;
+                if (!empty($prodObj->id_barang) || !empty($prodObj->kode_barang)) {
+                    $code = $prodObj->id_barang ?? $prodObj->kode_barang;
+                    $pRec = $this->productModel->where('id_barang', $code)->first();
+                    if ($pRec) {
+                        $syncedProductIds[] = (int)$pRec['id'];
+                    }
+                }
+            }
+
+            if (!empty($syncedProductIds)) {
+                $tiktokService = new \App\Libraries\TiktokService();
+                foreach (array_unique($syncedProductIds) as $uProdId) {
+                    try {
+                        $tiktokService->syncProductStock($uProdId, (int)$data->id_toko);
+                    } catch (\Exception $ex) {
+                        log_message('error', "[createTransaction] TikTok stock sync failed for Product ID {$uProdId}: " . $ex->getMessage());
+                    }
+                }
+            }
+
             log_aktivitas([
                 'user_id' => $userId,
                 'action_type' => 'CREATE',
@@ -1545,6 +1569,7 @@ class TransactionControllerV2 extends ResourceController
             log_message('debug', '[CancelTransaction] Found ' . count($items) . ' items to restore for transaction ID: ' . $id);
             $goodsCOGSReversal = 0;
             $serviceCommissionReversal = 0;
+            $syncedProductIds = [];
 
             foreach ($items as $item) {
                 if ($item['is_service']) {
@@ -1557,6 +1582,11 @@ class TransactionControllerV2 extends ResourceController
                     log_message('debug', '[CancelTransaction] Restoring ' . $item['jumlah'] . ' of product ' . $item['kode_barang']);
                     $this->addStock($item['kode_barang'], $trx['id_toko'], $item['jumlah'], $id, "Cancel Transaction {$trx['invoice']}");
                     $goodsCOGSReversal += $item['total_modal'];
+
+                    $pRec = $this->productModel->where('id_barang', $item['kode_barang'])->first();
+                    if ($pRec) {
+                        $syncedProductIds[] = (int)$pRec['id'];
+                    }
                 }
             }
 
@@ -1728,6 +1758,17 @@ class TransactionControllerV2 extends ResourceController
 
             $this->db->transComplete();
 
+            if ($this->db->transStatus() !== false && !empty($syncedProductIds)) {
+                $tiktokService = new \App\Libraries\TiktokService();
+                foreach (array_unique($syncedProductIds) as $uProdId) {
+                    try {
+                        $tiktokService->syncProductStock($uProdId, (int)$trx['id_toko']);
+                    } catch (\Exception $ex) {
+                        log_message('error', "[cancelTransaction] TikTok stock sync failed for Product ID {$uProdId}: " . $ex->getMessage());
+                    }
+                }
+            }
+
             log_aktivitas([
                 'user_id' => $userId,
                 'action_type' => 'CANCEL',
@@ -1783,6 +1824,7 @@ class TransactionControllerV2 extends ResourceController
             $serviceCommissionReversalTotal = 0;
             $goodsGrossRevenueReduction = 0;
             $serviceGrossRevenueReduction = 0;
+            $syncedProductIds = [];
 
             foreach ($data->items as $item) {
                 $saleItem = $this->salesProductModel
@@ -1829,6 +1871,9 @@ class TransactionControllerV2 extends ResourceController
                 // 2. Restore Stock (only for non-service)
                 if (!$isService) {
                     $this->addStock($item->kode_barang, $trx['id_toko'], $qtyToReturn, $id, "Retur Barang ({$item->condition})", $isDamaged);
+                    if ($product) {
+                        $syncedProductIds[] = (int)$product['id'];
+                    }
                 }
 
                 // 3. Update Sales Product Record (Reduce quantity)
@@ -2065,6 +2110,17 @@ class TransactionControllerV2 extends ResourceController
             }
 
             $this->db->transComplete();
+
+            if ($this->db->transStatus() !== false && !empty($syncedProductIds)) {
+                $tiktokService = new \App\Libraries\TiktokService();
+                foreach (array_unique($syncedProductIds) as $uProdId) {
+                    try {
+                        $tiktokService->syncProductStock($uProdId, (int)$trx['id_toko']);
+                    } catch (\Exception $ex) {
+                        log_message('error', "[returnProduct] TikTok stock sync failed for Product ID {$uProdId}: " . $ex->getMessage());
+                    }
+                }
+            }
 
             log_aktivitas([
                 'user_id' => $userId,
