@@ -1470,25 +1470,25 @@ class TiktokController extends ResourceController
     private function getTokoIdByShopId($shopId)
     {
         $tokoMetaModel = new \App\Models\TokoMetaModel();
-        
+
         // 1. Try to find cached shop ID in toko_meta
         $meta = $tokoMetaModel->where('meta_key', 'tiktok_shop_id')
-                              ->where('meta_value', $shopId)
-                              ->first();
+            ->where('meta_value', $shopId)
+            ->first();
         if ($meta) {
-            return (int)$meta['toko_id'];
+            return (int) $meta['toko_id'];
         }
-        
+
         // 2. If not cached, fetch shops list for each integrated toko
         $integratedTokos = $tokoMetaModel->where('meta_key', 'tiktok_access_token')->findAll();
         foreach ($integratedTokos as $tToken) {
-            $tokoId = (int)$tToken['toko_id'];
+            $tokoId = (int) $tToken['toko_id'];
             try {
                 $path = "/authorization/202309/shops";
                 $response = $this->makeTiktokRequest($tokoId, 'GET', $path, [
                     'version' => '202309'
                 ], null);
-                
+
                 if (($response['code'] ?? -1) === 0 && !empty($response['data']['shops'])) {
                     foreach ($response['data']['shops'] as $shop) {
                         if ($shop['id'] == $shopId) {
@@ -1506,7 +1506,7 @@ class TiktokController extends ResourceController
                 log_message('error', "[getTokoIdByShopId] Error checking shops for Toko ID {$tokoId}: " . $e->getMessage());
             }
         }
-        
+
         return null;
     }
 
@@ -1516,20 +1516,20 @@ class TiktokController extends ResourceController
      */
     public function webhook()
     {
-        $payload = $this->request->getJSON(true);
+        $rawBody = file_get_contents('php://input');
+        log_message('error', '[TikTok Webhook Raw Body] ' . $rawBody);
+        $payload = json_decode($rawBody, true, 512, JSON_BIGINT_AS_STRING);
         if (!$payload) {
             return $this->response->setStatusCode(400)->setJSON(['message' => 'Invalid JSON payload']);
         }
 
-        log_message('info', '[TikTok Webhook] Received payload: ' . json_encode($payload));
-
-        $type = isset($payload['type']) ? (int)$payload['type'] : null;
+        $type = isset($payload['type']) ? (int) $payload['type'] : null;
         $shopId = $payload['shop_id'] ?? null;
 
-        if ($type === 5) {
+        if ($type === 5 || $type === 15) {
             $data = $payload['data'] ?? [];
             $productId = $data['product_id'] ?? null;
-            
+
             if ($productId && $shopId) {
                 // 1. Map shop_id to local toko_id
                 $idToko = $this->getTokoIdByShopId($shopId);
@@ -1538,65 +1538,86 @@ class TiktokController extends ResourceController
                         // 2. Fetch product details from TikTok Shop API
                         $path = "/product/202309/products/" . $productId;
                         $response = $this->makeTiktokRequest($idToko, 'GET', $path, [], null);
-                        
-                        log_message('info', "[TikTok Webhook Type 5] GET Product details response: " . json_encode($response));
-                        
+
+                        log_message('info', "[TikTok Webhook Type 5/15] GET Product details response: " . json_encode($response));
+
                         if (($response['code'] ?? -1) === 0 && !empty($response['data'])) {
                             $productData = $response['data'];
-                            $status = $productData['status'] ?? ($data['status'] ?? 'UNKNOWN');
-                            
+                            $tiktokStatus = $productData['status'] ?? ($data['status'] ?? 'UNKNOWN');
+
+                            // Parse Tokopedia Status
+                            $tokopediaStatus = null;
+                            if (!empty($productData['integrated_platform_statuses'])) {
+                                foreach ($productData['integrated_platform_statuses'] as $platStatus) {
+                                    if (strtoupper($platStatus['platform'] ?? '') === 'TOKOPEDIA') {
+                                        $tokopediaStatus = $platStatus['status'] ?? null;
+                                        break;
+                                    }
+                                }
+                            }
+
                             // Find matching product locally using seller_sku or product_id
                             $sellerSku = null;
                             if (!empty($productData['skus'])) {
                                 $sellerSku = $productData['skus'][0]['seller_sku'] ?? null;
                             }
-                            
+
                             $productModel = new \App\Models\ProductModel();
                             $localProduct = null;
-                            
+
                             if ($sellerSku) {
                                 $localProduct = $productModel->where('id_barang', $sellerSku)->first();
                             }
-                            
+
                             if (!$localProduct) {
                                 $localProduct = $productModel->where('tiktok_product_id', $productId)->first();
                             }
-                            
+
                             if ($localProduct) {
-                                // Update Product table
-                                $productModel->update($localProduct['id'], [
-                                    'tiktok_product_id' => $productId,
-                                    'tiktok_meta' => json_encode($productData)
-                                ]);
-                                
+                                // Update Product table (only tiktok_product_id if empty)
+                                if (empty($localProduct['tiktok_product_id'])) {
+                                    $productModel->update($localProduct['id'], [
+                                        'tiktok_product_id' => $productId
+                                    ]);
+                                }
+
                                 // Update Stock table
                                 $stockModel = new \App\Models\StockModel();
                                 $stockRecord = $stockModel->where('id_barang', $localProduct['id_barang'])
-                                                          ->where('id_toko', $idToko)
-                                                          ->first();
-                                
+                                    ->where('id_toko', $idToko)
+                                    ->first();
+
+                                $updateStockData = [
+                                    'tiktok_product_id' => $productId,
+                                    'product_tiktok_status' => $tiktokStatus
+                                ];
+                                if ($tokopediaStatus !== null) {
+                                    $updateStockData['product_tokopedia_status'] = $tokopediaStatus;
+                                }
+
                                 if ($stockRecord) {
-                                    $stockModel->update($stockRecord['id'], [
-                                        'tiktok_product_id' => $productId,
-                                        'product_tiktok_status' => $status
-                                    ]);
+                                    $stockModel->update($stockRecord['id'], $updateStockData);
                                 } else {
-                                    $stockModel->insert([
+                                    $insertStockData = [
                                         'tenant_id' => $localProduct['tenant_id'],
                                         'id_barang' => $localProduct['id_barang'],
                                         'id_toko' => $idToko,
                                         'stock' => 0,
                                         'tiktok_product_id' => $productId,
-                                        'product_tiktok_status' => $status
-                                    ]);
+                                        'product_tiktok_status' => $tiktokStatus
+                                    ];
+                                    if ($tokopediaStatus !== null) {
+                                        $insertStockData['product_tokopedia_status'] = $tokopediaStatus;
+                                    }
+                                    $stockModel->insert($insertStockData);
                                 }
-                                
+
                                 log_aktivitas([
                                     'user_id' => 0, // system
                                     'action_type' => 'TIKTOK_WEBHOOK_UPDATE',
                                     'target_table' => 'product',
                                     'target_id' => $localProduct['id'],
-                                    'description' => "Updated TikTok product {$localProduct['id_barang']} status via Webhook to {$status}"
+                                    'description' => "Updated TikTok product {$localProduct['id_barang']} status via Webhook to {$tiktokStatus} (Tokopedia: " . ($tokopediaStatus ?? 'N/A') . ")"
                                 ]);
                             } else {
                                 log_message('warning', "[TikTok Webhook Type 5] No matching local product found for SKU {$sellerSku} / TikTok ID {$productId}");
