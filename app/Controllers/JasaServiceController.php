@@ -266,4 +266,103 @@ class JasaServiceController extends ResourceController
 
         return $this->jsonResponse->multiResp('Commission report fetched successfully', $result, $total_data, $total_page, $page, $limit, 200);
     }
+
+    // GET: Technician commission summary
+    public function reportKomisiSummary()
+    {
+        $db = \Config\Database::connect();
+        
+        $idToko = $this->request->getGet('id_toko');
+        $teknisiId = $this->request->getGet('teknisi_id');
+        $dateStart = $this->request->getGet('date_start');
+        $dateEnd = $this->request->getGet('date_end');
+        $statusFilter = $this->request->getGet('status');
+        
+        $builder = $db->table('teknisi_komisi tk')
+            ->select('tk.*, t.invoice, t.status as transaction_status, t.date_time as transaction_date, u.name as nama_teknisi, js.nama_jasa')
+            ->join('transaction t', 'tk.transaction_id = t.id', 'inner')
+            ->join('users u', 'tk.teknisi_id = u.user_id', 'left')
+            ->join('jasa_service js', 'tk.jasa_service_id = js.id', 'left')
+            ->where('tk.tenant_id', \App\Libraries\TenantContext::id());
+
+        if (!empty($statusFilter)) {
+            $builder->whereIn('t.status', explode(',', $statusFilter));
+        } else {
+            $builder->whereIn('t.status', ['PAID', 'SUCCESS']);
+        }
+
+        if ($idToko !== null && $idToko !== '') {
+            $builder->where('tk.id_toko', (int) $idToko);
+        }
+
+        if ($teknisiId !== null && $teknisiId !== '') {
+            $builder->where('tk.teknisi_id', (int) $teknisiId);
+        }
+
+        if ($dateStart && $dateEnd) {
+            $builder->where('t.date_time >=', "{$dateStart} 00:00:00");
+            $builder->where('t.date_time <=', "{$dateEnd} 23:59:59");
+        } elseif ($dateStart) {
+            $builder->where('t.date_time >=', "{$dateStart} 00:00:00");
+        } elseif ($dateEnd) {
+            $builder->where('t.date_time <=', "{$dateEnd} 23:59:59");
+        }
+
+        // Fetch all matching rows to build the summary
+        $records = $builder->orderBy('t.date_time', 'desc')->get()->getResult();
+
+        $totalKomisi = 0;
+        $teknisiSummary = [];
+
+        foreach ($records as $row) {
+            $nominal = (float) $row->komisi_nominal;
+            $totalKomisi += $nominal;
+
+            $tId = $row->teknisi_id ?: 0;
+            $tName = $row->nama_teknisi ?: 'Teknisi Tidak Diketahui';
+
+            if (!isset($teknisiSummary[$tId])) {
+                $teknisiSummary[$tId] = [
+                    'teknisi_id' => $tId,
+                    'nama_teknisi' => $tName,
+                    'total_komisi' => 0,
+                    'rincian' => []
+                ];
+            }
+
+            $teknisiSummary[$tId]['total_komisi'] += $nominal;
+            $teknisiSummary[$tId]['rincian'][] = [
+                'id' => $row->id,
+                'transaction_id' => $row->transaction_id,
+                'invoice' => $row->invoice,
+                'transaction_date' => $row->transaction_date,
+                'transaction_status' => $row->transaction_status,
+                'nama_jasa' => $row->nama_jasa,
+                'harga_jasa' => (float) $row->harga_jasa,
+                'komisi_nominal' => $nominal,
+                'created_at' => $row->created_at
+            ];
+        }
+
+        // Convert associative array to indexed list
+        $teknisiSummaryList = array_values($teknisiSummary);
+
+        // Sort by total commission desc
+        usort($teknisiSummaryList, function($a, $b) {
+            return $b['total_komisi'] <=> $a['total_komisi'];
+        });
+
+        $dataResponse = [
+            'total_komisi' => $totalKomisi,
+            'summary_teknisi' => $teknisiSummaryList,
+            'filters' => [
+                'date_start' => $dateStart,
+                'date_end' => $dateEnd,
+                'id_toko' => $idToko,
+                'teknisi_id' => $teknisiId
+            ]
+        ];
+
+        return $this->jsonResponse->oneResp('Successfully fetched commission summary', $dataResponse, 200);
+    }
 }

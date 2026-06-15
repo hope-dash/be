@@ -33,6 +33,7 @@ $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
 // Webhooks
 // (Routes removed for rebuild)
 $routes->post('api/v2/moota/webhook', 'MootaController::webhook');
+$routes->post('api/v2/tiktok/webhook', 'TiktokController::webhook');
 
 // Wilayah Indonesia API
 $routes->group('api/wilayah', function ($routes) {
@@ -173,6 +174,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     $routes->get('jasa-service', 'JasaServiceController::index');
     $routes->get('jasa-service/dropdown', 'JasaServiceController::dropdown');
     $routes->get('jasa-service/komisi', 'JasaServiceController::reportKomisi');
+    $routes->get('jasa-service/komisi-summary', 'JasaServiceController::reportKomisiSummary');
     $routes->get('jasa-service/(:num)', 'JasaServiceController::show/$1');
     $routes->post('jasa-service', 'JasaServiceController::create');
     $routes->put('jasa-service/(:num)', 'JasaServiceController::update/$1');
