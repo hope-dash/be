@@ -247,7 +247,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         // Moota Integration
         $routes->post('moota/bank', 'MootaController::addBank');
         $routes->get('moota/bank', 'MootaController::getBanks');
-        
+
         // Toko Bank Config (Moota Connection)
         $routes->post('toko/(:num)/bank', 'TokoController::updateBankConfig/$1');
         $routes->get('toko/(:num)/bank', 'TokoController::getBankConfig/$1');
@@ -295,6 +295,8 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('product/(:num)/move-to-cacat', 'ProductController::moveToCacat/$1');
         $routes->post('product/(:num)/move-to-normal', 'ProductController::moveToNormal/$1');
         $routes->post('product/(:num)/write-off-cacat', 'ProductController::writeOffCacat/$1');
+        $routes->post('product/(:num)/sync-tiktok', 'ProductController::syncTiktokAllShops/$1');
+        $routes->post('product/tiktok-connect', 'ProductController::connectTiktok');
 
         // Subscription
         $routes->get('subscription', 'SubscriptionControllerV2::detail');
@@ -317,11 +319,19 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->get('toko/tiktok/categories/(:num)', 'TiktokController::getCategories/$1');
         $routes->get('toko/tiktok/attributes/(:num)/(:num)', 'TiktokController::getAttributes/$1/$2');
         $routes->post('toko/tiktok/products/(:num)', 'TiktokController::getProducts/$1');
+        $routes->post('toko/tiktok/products-search/(:num)', 'TiktokController::searchProducts/$1');
         $routes->post('toko/tiktok/product-create/(:num)', 'TiktokController::createProduct/$1');
         $routes->post('toko/tiktok/product-sync-sku/(:num)', 'TiktokController::syncProductBySku/$1');
         $routes->post('toko/tiktok/products-bulk-upload/(:num)', 'TiktokController::bulkUploadProducts/$1');
         $routes->post('toko/tiktok/product-sync-stock/(:num)', 'TiktokController::syncProductStock/$1');
         $routes->post('toko/tiktok/refresh-token/(:num)', 'TiktokController::refreshToken/$1');
+        $routes->delete('toko/tiktok/products/delete/(:num)', 'TiktokController::deleteProducts/$1');
+        $routes->post('toko/tiktok/products/deactivate/(:num)', 'TiktokController::deactivateProducts/$1');
+        $routes->post('toko/tiktok/products/activate/(:num)', 'TiktokController::activateProducts/$1');
+        $routes->get('toko/tiktok/products/get/(:num)/(:any)', 'TiktokController::getProductDetails/$1/$2');
+        $routes->post('toko/tiktok/products/price-update/(:num)/(:any)', 'TiktokController::updateProductPrice/$1/$2');
+        $routes->post('toko/tiktok/products/inventory-update/(:num)/(:any)', 'TiktokController::updateProductInventory/$1/$2');
+        $routes->put('toko/tiktok/products/edit/(:num)/(:any)', 'TiktokController::editProduct/$1/$2');
     });
 });
 

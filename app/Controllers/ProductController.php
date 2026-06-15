@@ -1239,7 +1239,7 @@ class ProductController extends ResourceController
             $tokoMap = [];
             if (!empty($productCodes)) {
                 $stockQuery = $this->stockModel
-                    ->select('id_barang, dropship, stock, barang_cacat, id_toko')
+                    ->select('id_barang, dropship, stock, barang_cacat, id_toko, tiktok_product_id, product_tiktok_status, product_tokopedia_status')
                     ->whereIn('id_barang', $productCodes);
 
                 if ($only_toko) {
@@ -1379,7 +1379,10 @@ class ProductController extends ResourceController
                         'stock_coming_soon' => $comingSoonVal,
                         'toko_name' => $tokoName,
                         'id_toko' => $tokoId,
-                        'dropship' => $dropship
+                        'dropship' => $dropship,
+                        'tiktok_product_id' => $s['tiktok_product_id'] ?? null,
+                        'product_tiktok_status' => $s['product_tiktok_status'] ?? null,
+                        'product_tokopedia_status' => $s['product_tokopedia_status'] ?? null
                     ];
                     $totalStockReady += $stockReady;
                     $totalCacat += $cacatVal;
@@ -2311,6 +2314,117 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error('Terjadi kesalahan saat mengambil summary modal produk.', 500);
         }
     }
+    /**
+     * Sync Product to all shops connected to TikTok Shop
+     * POST /api/v2/product/(:num)/sync-tiktok
+     */
+    public function syncTiktokAllShops($idProduct = null)
+    {
+        try {
+            if (!$idProduct) {
+                return $this->jsonResponse->error('id_product wajib diisi', 400);
+            }
+
+            $productModel = new \App\Models\ProductModel();
+            $product = $productModel->select('product.*, CONCAT(COALESCE(product.nama_barang, ""), " ", COALESCE(mb.nama_model, ""), " ", COALESCE(s.seri, "")) as nama_lengkap_barang')
+                ->join('model_barang mb', 'mb.id = product.id_model_barang', 'left')
+                ->join('seri s', 's.id = product.id_seri_barang', 'left')
+                ->find($idProduct);
+
+            if (!$product) {
+                return $this->jsonResponse->error('Produk lokal tidak ditemukan', 404);
+            }
+
+            // 1. Get all integrated TikTok shops
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            $tokoModel = new \App\Models\TokoModel();
+            
+            // Find all meta entries with tiktok_access_token
+            $integratedTokens = $tokoMetaModel->where('meta_key', 'tiktok_access_token')
+                ->where('meta_value !=', '')
+                ->findAll();
+
+            if (empty($integratedTokens)) {
+                return $this->jsonResponse->error('Tidak ada toko yang terhubung dengan TikTok Shop.', 400);
+            }
+
+            $token = $this->request->user;
+            $userId = $token['user_id'] ?? null;
+            $idBarang = $product['id_barang'];
+            $productIdentifier = $product['nama_barang'] . ' ' . ($product['nama_model'] ?? '') . ' ' . ($product['seri'] ?? '');
+
+            $successList = [];
+            $failList = [];
+
+            $tiktokController = new \App\Controllers\TiktokController();
+            $stockModel = new \App\Models\StockModel();
+
+            foreach ($integratedTokens as $tokenMeta) {
+                $idToko = $tokenMeta['toko_id'];
+                $toko = $tokoModel->find($idToko);
+                if (!$toko) {
+                    continue;
+                }
+
+                // Check if this product is already uploaded to this toko
+                $stockRecord = $stockModel->where('id_barang', $product['id_barang'])
+                    ->where('id_toko', $idToko)
+                    ->first();
+
+                if ($stockRecord && !empty($stockRecord['tiktok_product_id'])) {
+                    // Already uploaded to this store. Do nothing.
+                    continue;
+                }
+
+                // Not uploaded yet, upload it
+                $uploadRes = $tiktokController->uploadProductToTiktok($idProduct, $idToko);
+
+                if ($uploadRes['success']) {
+                    $itemSuccess = [
+                        'toko_id' => $idToko,
+                        'toko_name' => $toko['toko_name'],
+                        'status' => 'UPLOADED_SUCCESS',
+                        'tiktok_product_id' => $uploadRes['tiktok_product_id']
+                    ];
+                    $successList[] = $itemSuccess;
+
+                    log_aktivitas([
+                        'user_id' => $userId,
+                        'action_type' => 'SYNC_TIKTOK',
+                        'target_table' => 'product',
+                        'target_id' => $idProduct,
+                        'description' => "Sinkronisasi produk {$idBarang} ke TikTok Shop {$toko['toko_name']} selesai.",
+                        'detail' => $itemSuccess
+                    ]);
+                } else {
+                    $itemFailed = [
+                        'toko_id' => $idToko,
+                        'toko_name' => $toko['toko_name'],
+                        'message' => $uploadRes['message']
+                    ];
+                    $failList[] = $itemFailed;
+
+                    log_aktivitas([
+                        'user_id' => $userId,
+                        'action_type' => 'SYNC_TIKTOK',
+                        'target_table' => 'product',
+                        'target_id' => $idProduct,
+                        'description' => "Sinkronisasi produk {$idBarang} ke TikTok Shop {$toko['toko_name']} {$uploadRes['message']}.",
+                        'detail' => $itemFailed
+                    ]);
+                }
+            }
+
+            return $this->jsonResponse->oneResp('Proses sinkronisasi produk ke semua toko TikTok selesai.', [
+                'success' => $successList,
+                'failed' => $failList
+            ], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
     public function deleteByProductId($id)
     {
         $token = $this->request->user;
@@ -2716,5 +2830,86 @@ class ProductController extends ResourceController
             'credit' => $credit,
             'created_at' => date('Y-m-d H:i:s')
         ]);
+    }
+
+    /**
+     * Connect local product to TikTok Shop and update integration status in stocks
+     * POST /api/v2/product/tiktok-connect
+     */
+    public function connectTiktok()
+    {
+        try {
+            $payload = $this->request->getJSON(true) ?: [];
+            
+            $idProduct = $payload['id_product'] ?? null;
+            $idToko = $payload['id_toko'] ?? null;
+            $tiktokProductId = $payload['id'] ?? null; // this is the 'id' of the product in tiktok
+            $tiktokStatus = $payload['status'] ?? null; // e.g. "FAILED", "ACTIVE"
+            $integratedPlatformStatuses = $payload['integrated_platform_statuses'] ?? [];
+
+            if (!$idProduct || !$idToko || !$tiktokProductId) {
+                return $this->jsonResponse->error('id_product, id_toko, dan id (tiktok_product_id) wajib diisi', 400);
+            }
+
+            $productModel = new \App\Models\ProductModel();
+            $product = $productModel->find($idProduct);
+            if (!$product) {
+                return $this->jsonResponse->error('Produk lokal tidak ditemukan', 404);
+            }
+
+            $idBarang = $product['id_barang'];
+
+            $stockModel = new \App\Models\StockModel();
+            $stockRecord = $stockModel->where('id_barang', $idBarang)
+                ->where('id_toko', $idToko)
+                ->first();
+
+            if (!$stockRecord) {
+                return $this->jsonResponse->error('Stock record untuk barang dan toko tersebut tidak ditemukan', 404);
+            }
+
+            $tokopediaStatus = null;
+            foreach ($integratedPlatformStatuses as $platformStatus) {
+                $platform = strtoupper($platformStatus['platform'] ?? '');
+                $status = $platformStatus['status'] ?? null;
+
+                if ($platform === 'TOKOPEDIA') {
+                    $tokopediaStatus = $status;
+                } elseif ($platform === 'TIKTOK' || $platform === 'TIKTOK_SHOP') {
+                    $tiktokStatus = $status;
+                }
+            }
+
+            $updateData = [
+                'tiktok_product_id' => $tiktokProductId
+            ];
+
+            if ($tiktokStatus !== null) {
+                $updateData['product_tiktok_status'] = $tiktokStatus;
+            }
+            if ($tokopediaStatus !== null) {
+                $updateData['product_tokopedia_status'] = $tokopediaStatus;
+            }
+
+            $stockModel->update($stockRecord['id'], $updateData);
+
+            // Also update the main product's tiktok_product_id if not set or matches
+            if (empty($product['tiktok_product_id']) || $product['tiktok_product_id'] !== $tiktokProductId) {
+                $productModel->update($idProduct, [
+                    'tiktok_product_id' => $tiktokProductId
+                ]);
+            }
+
+            return $this->jsonResponse->oneResp('Hubungan TikTok Shop berhasil diperbarui', [
+                'id_product' => $idProduct,
+                'id_toko' => $idToko,
+                'tiktok_product_id' => $tiktokProductId,
+                'product_tiktok_status' => $tiktokStatus,
+                'product_tokopedia_status' => $tokopediaStatus
+            ], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
     }
 }

@@ -6,7 +6,7 @@ class StockModel extends TenantScopedModel
 {
     protected $table = 'stock';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['tenant_id', 'id_barang', 'id_toko', 'stock', 'barang_cacat', 'dropship'];
+    protected $allowedFields = ['tenant_id', 'id_barang', 'id_toko', 'stock', 'barang_cacat', 'dropship', 'tiktok_product_id', 'product_tiktok_status', 'product_tokopedia_status'];
 
     protected $afterInsert = ['syncToTiktok'];
     protected $afterUpdate = ['syncToTiktok'];

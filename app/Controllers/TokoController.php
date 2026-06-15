@@ -273,6 +273,14 @@ class TokoController extends BaseController
                 ->get()
                 ->getResult();
 
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            foreach ($result as &$tokoObj) {
+                $tokoObj->tiktok_shop_cipher = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_shop_cipher');
+                $tokoObj->tiktok_access_token = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_access_token');
+                $tokoObj->tiktok_refresh_token = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_refresh_token');
+                $tokoObj->is_tiktok_integrated = !empty($tokoObj->tiktok_access_token);
+            }
+
             return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
