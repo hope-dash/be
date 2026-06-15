@@ -91,7 +91,7 @@ class TiktokService
         }
 
         $decoded = json_decode($response, true);
-        
+
         // Log API failures
         if (($decoded['code'] ?? 0) !== 0) {
             log_message('error', "[TikTok API Error] Path: {$path}. Response: " . $response);
@@ -161,19 +161,19 @@ class TiktokService
 
         $stockModel = new StockModel();
         $stockRecord = $stockModel->where('id_barang', $product['id_barang'])
-                                  ->where('id_toko', $idToko)
-                                  ->first();
+            ->where('id_toko', $idToko)
+            ->first();
 
-        $currentStock = $stockRecord ? (int)$stockRecord['stock'] : 0;
-        
+        $currentStock = $stockRecord ? (int) $stockRecord['stock'] : 0;
+
         $tiktokSkuId = $product['tiktok_sku'];
         $warehouseId = null;
 
         if (!empty($product['tiktok_meta'])) {
             $meta = json_decode($product['tiktok_meta'], true);
             $tiktokSkuId = $meta['skus'][0]['id'] ?? $product['tiktok_sku'];
-            $warehouseId = $meta['skus'][0]['inventory'][0]['warehouse_id'] 
-                ?? $meta['skus'][0]['stock_infos'][0]['warehouse_id'] 
+            $warehouseId = $meta['skus'][0]['inventory'][0]['warehouse_id']
+                ?? $meta['skus'][0]['stock_infos'][0]['warehouse_id']
                 ?? null;
         }
 
@@ -210,13 +210,14 @@ class TiktokService
                 if (isset($request->user['user_id'])) {
                     $userId = $request->user['user_id'];
                 }
-            } catch (\Exception $e) {}
+            } catch (\Exception $e) {
+            }
 
             log_aktivitas([
                 'user_id' => $userId,
                 'action_type' => 'SYNC_TIKTOK_STOCK',
-                'target_table' => 'stock',
-                'target_id' => $stockRecord ? $stockRecord['id'] : null,
+                'target_table' => 'product',
+                'target_id' => $idProduct,
                 'description' => "Sinkronisasi stok produk {$product['id_barang']} ke TikTok Shop (" . ($response['message'] ?? 'SUKSES') . "). Stok: {$currentStock}.",
                 'detail' => [
                     'id_product' => $idProduct,
@@ -250,7 +251,7 @@ class TiktokService
             return ['success' => false, 'message' => 'Product is not mapped to TikTok Shop yet'];
         }
 
-        $price = (float)$product['harga_jual'];
+        $price = (float) $product['harga_jual'];
 
         $tiktokSkuId = $product['tiktok_sku'];
         if (!empty($product['tiktok_meta'])) {
@@ -267,7 +268,7 @@ class TiktokService
                 [
                     'id' => $tiktokSkuId,
                     'price' => [
-                        'amount' => (string)(int)$price,
+                        'amount' => (string) (int) $price,
                         'currency' => 'IDR'
                     ]
                 ]
@@ -285,7 +286,8 @@ class TiktokService
                 if (isset($request->user['user_id'])) {
                     $userId = $request->user['user_id'];
                 }
-            } catch (\Exception $e) {}
+            } catch (\Exception $e) {
+            }
 
             log_aktivitas([
                 'user_id' => $userId,
@@ -324,13 +326,13 @@ class TiktokService
 
         $stockModel = new StockModel();
         $stockRecords = $stockModel->where('id_barang', $product['id_barang'])
-                                   ->where('tiktok_product_id !=', '')
-                                   ->where('tiktok_product_id !=', null)
-                                   ->findAll();
+            ->where('tiktok_product_id !=', '')
+            ->where('tiktok_product_id !=', null)
+            ->findAll();
 
         $results = [];
         foreach ($stockRecords as $sr) {
-            $res = $this->syncProductPrice($idProduct, (int)$sr['id_toko']);
+            $res = $this->syncProductPrice($idProduct, (int) $sr['id_toko']);
             $results[$sr['id_toko']] = $res;
         }
 
