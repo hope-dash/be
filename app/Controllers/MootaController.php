@@ -188,14 +188,17 @@ class MootaController extends BaseController
                                    'value' => (string)$uniqueCode
                                ]);
                         }
+                    }
 
-                        // Use captured amount as the payment amount to ensure correct ledger splits
-                        $amount = $amountCaptured;
+                    // Subtract the unique code from the payment amount if it exists
+                    $paymentAmount = $amount;
+                    if ($uniqueCode > 0) {
+                        $paymentAmount = $amount - $uniqueCode;
                     }
 
                     try {
                         // Call the exposed public method to add payment details automatically
-                        $transactionController->internalAddPayment($transactionId, $amount, 'BANK_TRANSFER', null, 0);
+                        $transactionController->internalAddPayment($transactionId, $paymentAmount, 'BANK_TRANSFER', null, 0);
                         $processedCount++;
                     } catch (\Exception $ex) {
                         log_message('error', "[Moota Webhook] Error processing payment for Transaction ID {$transactionId}: " . $ex->getMessage());
