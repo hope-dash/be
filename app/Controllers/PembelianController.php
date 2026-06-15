@@ -315,6 +315,8 @@ class PembelianController extends ResourceController
 
             $biayaTambahanPerUnitItem = $totalJumlahSemuaItem > 0 ? $totalBiayaTambahanDariTabel / $totalJumlahSemuaItem : 0;
 
+            $updatedProductIds = [];
+
             foreach ($pembelianDetails as $item) {
                 $kodeBarang = $item['kode_barang'];
                 $jumlahBeli = intval($item['jumlah']);
@@ -330,6 +332,7 @@ class PembelianController extends ResourceController
                     throw new \Exception("Produk dengan kode {$kodeBarang} tidak ditemukan.");
                 }
                 $productId = $product['id'];
+                $updatedProductIds[] = (int)$productId;
                 $hargaModalLama = floatval($product['harga_modal']);
 
                 $stock = $this->stockModel->where('id_barang', $kodeBarang)
@@ -417,6 +420,19 @@ class PembelianController extends ResourceController
             }
 
             $db->transCommit();
+
+            // Sync price and stock to TikTok Shop for all updated products
+            if (!empty($updatedProductIds)) {
+                $tiktokService = new \App\Libraries\TiktokService();
+                foreach (array_unique($updatedProductIds) as $uProdId) {
+                    try {
+                        $tiktokService->syncPriceToAllShops($uProdId);
+                        $tiktokService->syncProductStock($uProdId, (int)$idToko);
+                    } catch (\Exception $ex) {
+                        log_message('error', "[executePembelian] TikTok sync failed for Product ID {$uProdId}: " . $ex->getMessage());
+                    }
+                }
+            }
 
             return $this->jsonResponse->oneResp(
                 'Pembelian berhasil dieksekusi',

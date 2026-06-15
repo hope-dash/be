@@ -503,6 +503,19 @@ class ProductController extends ResourceController
         ];
 
         $this->productModel->update($id, $productData);
+
+        // Sync price to TikTok Shop if there is a price change
+        $oldPrice = (float)($oldProductData['harga_jual'] ?? 0);
+        $newPrice = (float)($data->harga_jual ?? 0);
+        if ($oldPrice !== $newPrice) {
+            try {
+                $tiktokService = new \App\Libraries\TiktokService();
+                $tiktokService->syncPriceToAllShops((int)$id);
+            } catch (\Exception $ex) {
+                log_message('error', '[updateProduct] Failed to sync price to TikTok: ' . $ex->getMessage());
+            }
+        }
+
         $changeLog = $this->generateChangeLogString($oldProductData, $data);
 
         log_aktivitas([
@@ -734,6 +747,18 @@ class ProductController extends ResourceController
                 throw new \Exception("Gagal melakukan update produk dan revaluasi jurnal.");
             }
 
+            // Sync price to TikTok Shop if there is a price change
+            $oldPrice = (float)($oldProductData['harga_jual'] ?? 0);
+            $newPrice = (float)($data->harga_jual ?? 0);
+            if ($oldPrice !== $newPrice) {
+                try {
+                    $tiktokService = new \App\Libraries\TiktokService();
+                    $tiktokService->syncPriceToAllShops((int)$id);
+                } catch (\Exception $ex) {
+                    log_message('error', '[updateProductV2] Failed to sync price to TikTok: ' . $ex->getMessage());
+                }
+            }
+
             return $this->jsonResponse->oneResp('Update ' . ($data->nama_barang ?? 'product') . ' successfully', ['id' => $id, 'id_barang' => $oldProductData['id_barang']], 200);
         } catch (\Exception $e) {
             $this->db->transRollback();
@@ -874,13 +899,16 @@ class ProductController extends ResourceController
                 $descParts[] = "cacat {$oldCacat}->{$data->barang_cacat}";
 
             if (!empty($descParts)) {
+                $tokoModel = new \App\Models\TokoModel();
+                $toko = $tokoModel->find($data->id_toko);
+                $tokoName = $toko ? $toko['toko_name'] : "Toko ID {$data->id_toko}";
                 $descText = implode(', ', $descParts);
                 log_aktivitas([
                     'user_id' => $token['user_id'],
                     'action_type' => 'ADJUST_STOCK',
-                    'target_table' => 'stock',
-                    'target_id' => $stockId,
-                    'description' => "Opname: {$descText}, ket: {$alasan}",
+                    'target_table' => 'product',
+                    'target_id' => $id,
+                    'description' => "Opname Produk {$id_barang} di {$tokoName}: {$descText}, ket: {$alasan}",
                     'detail' => [
                         'old' => ['stock' => $oldStock, 'barang_cacat' => $oldCacat],
                         'new' => ['stock' => $data->stock, 'barang_cacat' => $data->barang_cacat],
@@ -890,6 +918,15 @@ class ProductController extends ResourceController
             }
 
             $this->db->transComplete();
+
+            // Sync stock to TikTok Shop
+            try {
+                $tiktokService = new \App\Libraries\TiktokService();
+                $tiktokService->syncProductStock((int)$id, (int)$data->id_toko);
+            } catch (\Exception $ex) {
+                log_message('error', '[adjustStock] TikTok stock sync failed: ' . $ex->getMessage());
+            }
+
             return $this->jsonResponse->oneResp('Penyesuaian stok berhasil', ['id' => $id, 'id_barang' => $id_barang, 'id_toko' => $data->id_toko], 200);
         } catch (\Exception $e) {
             $this->db->transRollback();
@@ -2435,6 +2472,30 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error("Product Not Found", 404);
         }
 
+        // Find and delete connected TikTok products
+        $stockModel = new \App\Models\StockModel();
+        $stockRecords = $stockModel->where('id_barang', $product['id_barang'])
+                                   ->where('tiktok_product_id !=', '')
+                                   ->where('tiktok_product_id !=', null)
+                                   ->findAll();
+
+        if (!empty($stockRecords)) {
+            $tiktokController = new \App\Controllers\TiktokController();
+            foreach ($stockRecords as $sr) {
+                try {
+                    $tiktokController->makeTiktokRequest(
+                        $sr['id_toko'],
+                        'DELETE',
+                        '/product/202309/products',
+                        [],
+                        ['product_ids' => [$sr['tiktok_product_id']]]
+                    );
+                } catch (\Exception $ex) {
+                    log_message('error', "[deleteByProductId] Failed to delete product {$sr['tiktok_product_id']} from TikTok Shop for store {$sr['id_toko']}: " . $ex->getMessage());
+                }
+            }
+        }
+
         try {
             $this->db->transBegin();
 
@@ -2668,15 +2729,27 @@ class ProductController extends ResourceController
                 $this->internalAddJournalItem($jid, '10' . $idToko . '4', 0, $cogsTotal, $idToko);
             }
 
+            $tokoModel = new \App\Models\TokoModel();
+            $toko = $tokoModel->find($idToko);
+            $tokoName = $toko ? $toko['toko_name'] : "Toko ID {$idToko}";
             log_aktivitas([
                 'user_id' => $token['user_id'],
                 'action_type' => 'MOVE_TO_CACAT',
                 'target_table' => 'stock',
                 'target_id' => $stock['id'],
-                'description' => "Pindah stock normal ke cacat: {$product['nama_barang']} Qty: {$qty}. Notes: {$notes}"
+                'description' => "Pindah stock normal ke cacat Produk {$product['id_barang']} di {$tokoName}. Qty: {$qty}. Notes: {$notes}"
             ]);
 
             $this->db->transComplete();
+
+            // Sync stock to TikTok Shop
+            try {
+                $tiktokService = new \App\Libraries\TiktokService();
+                $tiktokService->syncProductStock((int)$id, (int)$idToko);
+            } catch (\Exception $ex) {
+                log_message('error', '[moveToCacat] TikTok stock sync failed: ' . $ex->getMessage());
+            }
+
             return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang cacat", null, 200);
         } catch (\Exception $e) {
             $this->db->transRollback();
@@ -2723,15 +2796,27 @@ class ProductController extends ResourceController
                 $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko);
             }
 
+            $tokoModel = new \App\Models\TokoModel();
+            $toko = $tokoModel->find($idToko);
+            $tokoName = $toko ? $toko['toko_name'] : "Toko ID {$idToko}";
             log_aktivitas([
                 'user_id' => $token['user_id'],
                 'action_type' => 'MOVE_TO_NORMAL',
                 'target_table' => 'stock',
                 'target_id' => $stock['id'],
-                'description' => "Pindah stock cacat ke normal: {$product['nama_barang']} Qty: {$qty}. Notes: {$notes}"
+                'description' => "Pindah stock cacat ke normal Produk {$product['id_barang']} di {$tokoName}. Qty: {$qty}. Notes: {$notes}"
             ]);
 
             $this->db->transComplete();
+
+            // Sync stock to TikTok Shop
+            try {
+                $tiktokService = new \App\Libraries\TiktokService();
+                $tiktokService->syncProductStock((int)$id, (int)$idToko);
+            } catch (\Exception $ex) {
+                log_message('error', '[moveToNormal] TikTok stock sync failed: ' . $ex->getMessage());
+            }
+
             return $this->jsonResponse->oneResp("Berhasil memindahkan ke barang normal", null, 200);
         } catch (\Exception $e) {
             $this->db->transRollback();
@@ -2777,12 +2862,15 @@ class ProductController extends ResourceController
                 $this->internalAddJournalItem($jid, '10' . $idToko . '7', 0, $cogsTotal, $idToko);
             }
 
+            $tokoModel = new \App\Models\TokoModel();
+            $toko = $tokoModel->find($idToko);
+            $tokoName = $toko ? $toko['toko_name'] : "Toko ID {$idToko}";
             log_aktivitas([
                 'user_id' => $token['user_id'],
                 'action_type' => 'WRITE_OFF_CACAT',
                 'target_table' => 'stock',
                 'target_id' => $stock['id'],
-                'description' => "Write-off (anggap rugi) stock cacat: {$product['nama_barang']} Qty: {$qty}. Notes: {$notes}"
+                'description' => "Write-off (anggap rugi) stock cacat Produk {$product['id_barang']} di {$tokoName}. Qty: {$qty}. Notes: {$notes}"
             ]);
 
             $this->db->transComplete();
@@ -2900,12 +2988,30 @@ class ProductController extends ResourceController
                 ]);
             }
 
+            // Immediately sync stock to TikTok Shop for this product and store
+            $stockSynced = false;
+            $syncMessage = '';
+            try {
+                $tiktokService = new \App\Libraries\TiktokService();
+                $syncRes = $tiktokService->syncProductStock((int)$idProduct, (int)$idToko);
+                if ($syncRes['success'] ?? false) {
+                    $stockSynced = true;
+                } else {
+                    $syncMessage = $syncRes['message'] ?? 'Failed to sync stock';
+                }
+            } catch (\Exception $ex) {
+                log_message('error', '[connectTiktok] Failed to auto-sync stock to TikTok: ' . $ex->getMessage());
+                $syncMessage = $ex->getMessage();
+            }
+
             return $this->jsonResponse->oneResp('Hubungan TikTok Shop berhasil diperbarui', [
                 'id_product' => $idProduct,
                 'id_toko' => $idToko,
                 'tiktok_product_id' => $tiktokProductId,
                 'product_tiktok_status' => $tiktokStatus,
-                'product_tokopedia_status' => $tokopediaStatus
+                'product_tokopedia_status' => $tokopediaStatus,
+                'stock_synced' => $stockSynced,
+                'sync_message' => $syncMessage
             ], 200);
 
         } catch (\Exception $e) {

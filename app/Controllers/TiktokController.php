@@ -893,7 +893,7 @@ class TiktokController extends ResourceController
     /**
      * Helper to make signed requests to TikTok Shop API
      */
-    private function makeTiktokRequest($idToko, $method, $path, $params = [], $body = [])
+    public function makeTiktokRequest($idToko, $method, $path, $params = [], $body = [])
     {
         $toko = $this->tokoModel->find($idToko);
         if (!$toko) {
