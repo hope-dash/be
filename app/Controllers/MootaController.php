@@ -199,6 +199,93 @@ class MootaController extends BaseController
                     try {
                         // Call the exposed public method to add payment details automatically
                         $transactionController->internalAddPayment($transactionId, $paymentAmount, 'BANK_TRANSFER', null, 0);
+                        
+                        // Handle Unique Code: Add to customer points and write corresponding journal entries
+                        if ($uniqueCode > 0) {
+                            $transactionMetaModel = new \App\Models\TransactionMetaModel();
+                            $customerModel = new \App\Models\CustomerModel();
+                            $pointHistoryModel = new \App\Models\CustomerPointHistoryModel();
+                            $journalModel = new \App\Models\JournalModel();
+                            $journalItemModel = new \App\Models\JournalItemModel();
+                            $accountModel = new \App\Models\AccountModel();
+
+                            $metas = $transactionMetaModel->where('transaction_id', $transactionId)->findAll();
+                            $metaMap = [];
+                            foreach ($metas as $m) {
+                                $metaMap[$m['key']] = $m['value'];
+                            }
+
+                            $customerId = $metaMap['customer_id'] ?? null;
+
+                            if ($customerId) {
+                                $customer = $customerModel->find($customerId);
+                                if ($customer) {
+                                    $newBalance = (float)$customer['points_balance'] + $uniqueCode;
+                                    $customerModel->update($customerId, [
+                                        'points_balance' => $newBalance
+                                    ]);
+
+                                    $trx = $db->table('transaction')->where('id', $transactionId)->get()->getRowArray();
+                                    $invoice = $trx['invoice'] ?? ('INV-' . $transactionId);
+                                    $idToko = $trx['id_toko'] ?? null;
+
+                                    $pointHistoryModel->insert([
+                                        'customer_id' => $customerId,
+                                        'transaction_id' => $transactionId,
+                                        'points_change' => $uniqueCode,
+                                        'balance_after' => $newBalance,
+                                        'type' => 'EARNED',
+                                        'description' => "Point earned from unique code transfer for invoice {$invoice}"
+                                    ]);
+
+                                    // Create Journal entry for the unique code payment part
+                                    $journalData = [
+                                        'id_toko' => $idToko,
+                                        'reference_type' => 'PAYMENT',
+                                        'reference_id' => $transactionId,
+                                        'reference_no' => $invoice,
+                                        'date' => date('Y-m-d'),
+                                        'description' => "Payment unique code for {$invoice}",
+                                        'created_at' => date('Y-m-d H:i:s')
+                                    ];
+                                    $journalModel->insert($journalData);
+                                    $journalId = $journalModel->getInsertID();
+
+                                    // Dr Bank (10 + id_toko + 2)
+                                    $bankCode = '10' . $idToko . '2';
+                                    $bankAccount = $accountModel->getByBaseCode($bankCode, $idToko);
+                                    if (!$bankAccount) {
+                                        $bankAccount = $accountModel->where('code', $bankCode)->first();
+                                    }
+                                    if ($bankAccount) {
+                                        $journalItemModel->insert([
+                                            'journal_id' => $journalId,
+                                            'account_id' => $bankAccount['id'],
+                                            'debit' => $uniqueCode,
+                                            'credit' => 0,
+                                            'created_at' => date('Y-m-d H:i:s')
+                                        ]);
+                                    }
+
+                                    // Cr Customer Points (20 + id_toko + 3)
+                                    $pointsCode = '20' . $idToko . '3';
+                                    $pointsAccount = $accountModel->getByBaseCode($pointsCode, $idToko);
+                                    if (!$pointsAccount) {
+                                        $pointsAccount = $accountModel->where('code', $pointsCode)->first();
+                                    }
+                                    if ($pointsAccount) {
+                                        $journalItemModel->insert([
+                                            'journal_id' => $journalId,
+                                            'account_id' => $pointsAccount['id'],
+                                            'debit' => 0,
+                                            'credit' => $uniqueCode,
+                                            'created_at' => date('Y-m-d H:i:s')
+                                        ]);
+                                    }
+                                }
+                            }
+                        }
+
                         $processedCount++;
                     } catch (\Exception $ex) {
                         log_message('error', "[Moota Webhook] Error processing payment for Transaction ID {$transactionId}: " . $ex->getMessage());
