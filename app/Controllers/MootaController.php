@@ -253,9 +253,14 @@ class MootaController extends BaseController
 
                                     // Dr Bank (10 + id_toko + 2)
                                     $bankCode = '10' . $idToko . '2';
-                                    $bankAccount = $accountModel->getByBaseCode($bankCode, $idToko);
+                                    $bankAccount = $db->table('accounts')
+                                        ->where('base_code', $bankCode)
+                                        ->where('id_toko', $idToko)
+                                        ->get()->getRowArray();
                                     if (!$bankAccount) {
-                                        $bankAccount = $accountModel->where('code', $bankCode)->first();
+                                        $bankAccount = $db->table('accounts')
+                                            ->where('code', $bankCode)
+                                            ->get()->getRowArray();
                                     }
                                     if ($bankAccount) {
                                         $journalItemModel->insert([
@@ -269,9 +274,14 @@ class MootaController extends BaseController
 
                                     // Cr Customer Points (20 + id_toko + 3)
                                     $pointsCode = '20' . $idToko . '3';
-                                    $pointsAccount = $accountModel->getByBaseCode($pointsCode, $idToko);
+                                    $pointsAccount = $db->table('accounts')
+                                        ->where('base_code', $pointsCode)
+                                        ->where('id_toko', $idToko)
+                                        ->get()->getRowArray();
                                     if (!$pointsAccount) {
-                                        $pointsAccount = $accountModel->where('code', $pointsCode)->first();
+                                        $pointsAccount = $db->table('accounts')
+                                            ->where('code', $pointsCode)
+                                            ->get()->getRowArray();
                                     }
                                     if ($pointsAccount) {
                                         $journalItemModel->insert([

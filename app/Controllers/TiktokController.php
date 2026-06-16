@@ -1976,12 +1976,18 @@ class TiktokController extends ResourceController
 
     private function addJournalItem($journalId, $accountCode, $debit, $credit, $tokoId = null)
     {
-        $accountModel = new \App\Models\AccountModel();
+        $db = \Config\Database::connect();
         $journalItemModel = new \App\Models\JournalItemModel();
 
-        $account = $accountModel->getByBaseCode($accountCode, $tokoId);
+        $account = $db->table('accounts')
+            ->where('base_code', $accountCode)
+            ->where('id_toko', $tokoId)
+            ->get()->getRowArray();
+
         if (!$account) {
-            $account = $accountModel->where('code', $accountCode)->first();
+            $account = $db->table('accounts')
+                ->where('code', $accountCode)
+                ->get()->getRowArray();
         }
 
         if (!$account) {

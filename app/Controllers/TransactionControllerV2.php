@@ -2401,13 +2401,20 @@ class TransactionControllerV2 extends ResourceController
 
     private function addJournalItem($journalId, $accountCode, $debit, $credit, $tokoId = null)
     {
-        $account = $this->accountModel->getByBaseCode($accountCode, $tokoId);
+        $account = $this->db->table('accounts')
+            ->where('base_code', $accountCode)
+            ->where('id_toko', $tokoId)
+            ->get()->getRowArray();
+
         if (!$account) {
-            $account = $this->accountModel->where('code', $accountCode)->first();
+            $account = $this->db->table('accounts')
+                ->where('code', $accountCode)
+                ->get()->getRowArray();
         }
 
-        if (!$account)
+        if (!$account) {
             return;
+        }
 
         $this->journalItemModel->insert([
             'journal_id' => $journalId,
