@@ -173,6 +173,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     // Jasa Service
     $routes->get('jasa-service', 'JasaServiceController::index');
     $routes->get('jasa-service/dropdown', 'JasaServiceController::dropdown');
+    $routes->post('jasa-service/list', 'JasaServiceController::listPost');
     $routes->get('jasa-service/komisi', 'JasaServiceController::reportKomisi');
     $routes->get('jasa-service/komisi-summary', 'JasaServiceController::reportKomisiSummary');
     $routes->get('jasa-service/(:num)', 'JasaServiceController::show/$1');

@@ -74,6 +74,78 @@ class JasaServiceController extends ResourceController
         return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
     }
 
+    // POST: List all services with filters, search, pagination, and EXCLUSIONS
+    public function listPost()
+    {
+        $input = $this->request->getJSON();
+        
+        $sortBy = $this->request->getGet('sortBy') ?? 'id';
+        $allowedSortFields = ['id', 'nama_jasa', 'kategori', 'harga', 'komisi', 'created_at', 'id_toko'];
+        if (!in_array($sortBy, $allowedSortFields)) {
+            $sortBy = 'jasa_service.id';
+        } else {
+            $sortBy = 'jasa_service.' . $sortBy;
+        }
+
+        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? 'desc');
+        if (!in_array($sortMethod, ['asc', 'desc'])) {
+            $sortMethod = 'desc';
+        }
+
+        $search = trim($this->request->getGet('search') ?? '');
+        $kategori = trim($this->request->getGet('kategori') ?? '');
+        $idToko = $this->request->getGet('id_toko');
+        $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+        $page = max((int) ($this->request->getGet('page') ?: 1), 1);
+        $offset = ($page - 1) * $limit;
+
+        $builder = $this->jasaServiceModel
+            ->select('jasa_service.*, toko.toko_name')
+            ->join('toko', 'toko.id = jasa_service.id_toko', 'left');
+
+        if (!empty($search)) {
+            $builder->like('jasa_service.nama_jasa', $search, 'both');
+        }
+
+        if (!empty($kategori)) {
+            $builder->where('jasa_service.kategori', $kategori);
+        }
+
+        if ($idToko !== null && $idToko !== '') {
+            if ($this->request->getGet('strict_toko') === 'true') {
+                $builder->where('jasa_service.id_toko', (int) $idToko);
+            } else {
+                $builder->groupStart()
+                    ->where('jasa_service.id_toko', (int) $idToko)
+                    ->orWhere('jasa_service.id_toko', null)
+                    ->groupEnd();
+            }
+        }
+
+        // Apply Exclusions
+        if (isset($input->kode_exclude) && is_array($input->kode_exclude)) {
+            $excludedIds = [];
+            foreach ($input->kode_exclude as $kode) {
+                if (strpos($kode, 'SVC-') === 0) {
+                    $excludedIds[] = (int) str_replace('SVC-', '', $kode);
+                }
+            }
+            if (!empty($excludedIds)) {
+                $builder->whereNotIn('jasa_service.id', $excludedIds);
+            }
+        }
+
+        $total_data = $builder->countAllResults(false);
+        $total_page = ceil($total_data / $limit);
+
+        $result = $builder->orderBy($sortBy, $sortMethod)
+            ->limit($limit, $offset)
+            ->get()
+            ->getResult();
+
+        return $this->jsonResponse->multiResp('', $result, $total_data, $total_page, $page, $limit, 200);
+    }
+
     // GET: Formatted dropdown list
     public function dropdown()
     {
