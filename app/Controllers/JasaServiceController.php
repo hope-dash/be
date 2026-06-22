@@ -272,7 +272,7 @@ class JasaServiceController extends ResourceController
     {
         $db = \Config\Database::connect();
         
-        $idToko = $this->request->getGet('id_toko');
+        $idToko = $this->request->getGet('id_toko') ?? $this->request->getGet('idTko');
         $teknisiId = $this->request->getGet('teknisi_id');
         $dateStart = $this->request->getGet('date_start');
         $dateEnd = $this->request->getGet('date_end');

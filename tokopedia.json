@@ -1,0 +1,86 @@
+{
+  "code": 0,
+  "data": {
+    "orders": [
+      {
+        "buyer_email": "v4bEHUSH5DTBCV5GNTJMZTZZSDO2M@scs2.tiktok.com",
+        "commerce_platform": "TOKOPEDIA",
+        "create_time": 1781542033,
+        "delivery_option_id": "6956478737705600769",
+        "delivery_option_name": "Standard shipping",
+        "delivery_type": "HOME_DELIVERY",
+        "fulfillment_type": "FULFILLMENT_BY_SELLER",
+        "has_updated_recipient_address": false,
+        "id": "584548310527346118",
+        "is_cod": false,
+        "is_on_hold_order": false,
+        "is_replacement_order": false,
+        "is_sample_order": false,
+        "line_items": [
+          {
+            "buyer_service_fee": "1000",
+            "currency": "IDR",
+            "display_status": "UNPAID",
+            "gift_retail_price": "0",
+            "id": "584548310527411654",
+            "is_gift": false,
+            "original_price": "101000",
+            "platform_discount": "0",
+            "product_id": "1736091927132210853",
+            "product_name": "BACK CAMERA NEW IPHONE 6S",
+            "sale_price": "101000",
+            "seller_discount": "0",
+            "seller_sku": "NEW175612",
+            "sku_id": "1736091874872690341",
+            "sku_image": "https://p16-oec-sg.ibyteimg.com/tos-alisg-i-aphluv4xwc-sg/316b140d8a3d48899185354bda080e78~tplv-aphluv4xwc-origin-jpeg.jpeg?dr=15568&t=555f072d&ps=933b5bde&shp=54477afb&shcp=3c3d9ffb&idc=my2&from=1413970683",
+            "sku_name": "Default",
+            "sku_type": "NORMAL"
+          }
+        ],
+        "order_type": "NORMAL",
+        "packages": [],
+        "payment": {
+          "buyer_service_fee": "1000",
+          "currency": "IDR",
+          "original_shipping_fee": "11500",
+          "original_total_product_price": "101000",
+          "payment_platform_discount": "0",
+          "platform_discount": "0",
+          "seller_discount": "0",
+          "shipping_fee": "11500",
+          "shipping_fee_cofunded_discount": "0",
+          "shipping_fee_platform_discount": "0",
+          "shipping_fee_seller_discount": "0",
+          "sub_total": "101000",
+          "tax": "0",
+          "total_amount": "113500"
+        },
+        "payment_method_name": "Bank transfer",
+        "recipient_address": {
+          "address_detail": "",
+          "address_line1": "",
+          "address_line2": "",
+          "address_line3": "",
+          "address_line4": "",
+          "delivery_preferences": {
+            "drop_off_location": ""
+          },
+          "first_name": "",
+          "full_address": "",
+          "last_name": "",
+          "name": "",
+          "phone_number": "",
+          "postal_code": "",
+          "region_code": ""
+        },
+        "shipping_type": "TIKTOK",
+        "status": "UNPAID",
+        "update_time": 1781542034,
+        "user_id": "7495929261885065670",
+        "warehouse_id": "7479034098457380615"
+      }
+    ]
+  },
+  "message": "Success",
+  "request_id": "20260616004834C26551115FC8D31273AD"
+}

@@ -1577,6 +1577,21 @@ class TransactionControllerV2 extends ResourceController
                     $comm = $this->db->table('teknisi_komisi')->where('sales_product_id', $item['id'])->get()->getRowArray();
                     if ($comm) {
                         $serviceCommissionReversal += (float)$comm['komisi_nominal'];
+
+                        // Insert negative entry so SUM(komisi_nominal) stays correct
+                        $this->db->table('teknisi_komisi')->insert([
+                            'tenant_id'       => $comm['tenant_id'],
+                            'id_toko'         => $comm['id_toko'],
+                            'transaction_id'  => $comm['transaction_id'],
+                            'sales_product_id' => $comm['sales_product_id'],
+                            'jasa_service_id' => $comm['jasa_service_id'],
+                            'teknisi_id'      => $comm['teknisi_id'],
+                            'komisi_persen'   => $comm['komisi_persen'],
+                            'harga_jasa'      => -((float)$comm['harga_jasa']),
+                            'komisi_nominal'  => -((float)$comm['komisi_nominal']),
+                            'created_at'      => date('Y-m-d H:i:s'),
+                            'updated_at'      => date('Y-m-d H:i:s')
+                        ]);
                     }
                 } else {
                     log_message('debug', '[CancelTransaction] Restoring ' . $item['jumlah'] . ' of product ' . $item['kode_barang']);
