@@ -52,16 +52,7 @@ class JasaServiceController extends ResourceController
             $builder->where('jasa_service.kategori', $kategori);
         }
 
-        if ($idToko !== null && $idToko !== '') {
-            if ($this->request->getGet('strict_toko') === 'true') {
-                $builder->where('jasa_service.id_toko', (int) $idToko);
-            } else {
-                $builder->groupStart()
-                    ->where('jasa_service.id_toko', (int) $idToko)
-                    ->orWhere('jasa_service.id_toko', null)
-                    ->groupEnd();
-            }
-        }
+        // id_toko filtering removed so services are shared across the tenant
 
         $total_data = $builder->countAllResults(false);
         $total_page = ceil($total_data / $limit);
@@ -111,16 +102,7 @@ class JasaServiceController extends ResourceController
             $builder->where('jasa_service.kategori', $kategori);
         }
 
-        if ($idToko !== null && $idToko !== '') {
-            if ($this->request->getGet('strict_toko') === 'true') {
-                $builder->where('jasa_service.id_toko', (int) $idToko);
-            } else {
-                $builder->groupStart()
-                    ->where('jasa_service.id_toko', (int) $idToko)
-                    ->orWhere('jasa_service.id_toko', null)
-                    ->groupEnd();
-            }
-        }
+        // id_toko filtering removed so services are shared across the tenant
 
         // Apply Exclusions
         if (isset($input->kode_exclude) && is_array($input->kode_exclude)) {
@@ -152,12 +134,7 @@ class JasaServiceController extends ResourceController
         $idToko = $this->request->getGet('id_toko');
         $builder = $this->jasaServiceModel->where('deleted_at', null);
 
-        if ($idToko !== null && $idToko !== '') {
-            $builder->groupStart()
-                ->where('id_toko', (int) $idToko)
-                ->orWhere('id_toko', null)
-                ->groupEnd();
-        }
+        // id_toko filtering removed so services are shared across the tenant
 
         $result = $builder->orderBy('nama_jasa', 'asc')->get()->getResult();
 
