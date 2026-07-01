@@ -14,6 +14,9 @@ class SubscriptionPackageModel extends Model
     protected $allowedFields = [
         'code',
         'name',
+        'type',
+        'wording',
+        'description',
         'price',
         'currency',
         'duration_months',

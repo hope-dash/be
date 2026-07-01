@@ -21,12 +21,15 @@ class UserController extends ResourceController
     protected $jsonResponse;
     protected $JWToken;
     protected $tokoController;
+    protected $db;
+
     public function __construct()
     {
         $this->model = new UserModel();
         $this->tokoController = new TokoController();
         $this->jsonResponse = new JsonResponse();
         $this->JWToken = new Jwtoken();
+        $this->db = \Config\Database::connect();
     }
     public function create()
     {
@@ -118,16 +121,39 @@ class UserController extends ResourceController
                 return $this->jsonResponse->error("Username/Email dan Password wajib diisi", 400);
             }
 
-            // Join with tenants to get code for response
-            $query = $this->model
-                ->select($this->model->table . '.*, tenants.code as tenant_code')
+            // Resolve tenant from X-Tenant header
+            $tenantCode = trim((string) $this->request->getHeaderLine('X-Tenant'));
+            if ($tenantCode === '') {
+                $tenantCode = (string) $this->request->getGet('tenant');
+            }
+
+            $tenantId = null;
+            if ($tenantCode !== '') {
+                $tenant = $this->db->table('tenants')
+                    ->where('code', $tenantCode)
+                    ->where('status', 'active')
+                    ->get()
+                    ->getRowArray();
+                if (!$tenant) {
+                    return $this->jsonResponse->error('Tenant tidak ditemukan atau tidak aktif', 404);
+                }
+                $tenantId = (int) $tenant['id'];
+            }
+
+            $builder = $this->model
+                ->select($this->model->table . '.*, tenants.code as tenant_code, tenants.name as tenant_name')
                 ->join('tenants', 'tenants.id = ' . $this->model->table . '.tenant_id')
                 ->groupStart()
                 ->where($this->model->table . ".username", $data->umail)
                 ->orWhere($this->model->table . ".email", $data->umail)
                 ->groupEnd()
-                ->where($this->model->table . '.deleted_at', NULL)
-                ->first();
+                ->where($this->model->table . '.deleted_at', NULL);
+
+            if ($tenantId) {
+                $builder->where($this->model->table . '.tenant_id', $tenantId);
+            }
+
+            $query = $builder->first();
 
             if ($query && password_verify($data->password, $query['password'])) {
                 $userData = [
@@ -140,6 +166,7 @@ class UserController extends ResourceController
                     return $this->jsonResponse->oneResp("Login Berhasil", [
                         "token" => $token,
                         "tenant_code" => $query['tenant_code'],
+                        "tenant_name" => $query['tenant_name'],
                     ]);
                 }
             }

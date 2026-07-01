@@ -340,7 +340,40 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     });
 });
 
-// --- 5. CUSTOMER PROTECTED ROUTES (X-Tenant + customerJwtAuth Required) ---
+// --- 5. CMS ROUTES (Dummy Auth via Session) ---
+$routes->group('cms', function ($routes) {
+    $routes->get('login', 'CmsController::login');
+    $routes->post('login', 'CmsController::doLogin');
+    $routes->get('logout', 'CmsController::logout');
+
+    $routes->get('dashboard', 'CmsController::dashboard');
+
+    $routes->get('tenants', 'CmsController::tenants');
+    $routes->get('tenants/create', 'CmsController::tenantForm');
+    $routes->post('tenants/create', 'CmsController::tenantCreate');
+    $routes->get('tenants/(:num)/edit', 'CmsController::tenantForm/$1');
+    $routes->post('tenants/(:num)/edit', 'CmsController::tenantUpdate/$1');
+    $routes->get('tenants/(:num)', 'CmsController::tenantDetail/$1');
+    $routes->post('tenants/(:num)/toggle-status', 'CmsController::tenantToggleStatus/$1');
+    $routes->post('tenants/(:num)/users/create', 'CmsController::tenantUserCreate/$1');
+    $routes->post('tenants/(:num)/users/(:num)/reset-password', 'CmsController::tenantUserResetPassword/$1/$2');
+    $routes->post('tenants/(:num)/tokos/create', 'CmsController::tenantTokoCreate/$1');
+
+    $routes->get('packages', 'CmsController::packages');
+    $routes->get('packages/create', 'CmsController::packageForm');
+    $routes->post('packages/create', 'CmsController::packageCreate');
+    $routes->get('packages/(:num)/edit', 'CmsController::packageForm/$1');
+    $routes->post('packages/(:num)/edit', 'CmsController::packageUpdate/$1');
+    $routes->post('packages/(:num)/toggle', 'CmsController::packageToggle/$1');
+
+    $routes->get('subscriptions', 'CmsController::subscriptions');
+
+    $routes->get('orders', 'CmsController::orders');
+    $routes->post('orders/(:num)/approve', 'CmsController::orderApprove/$1');
+    $routes->post('orders/(:num)/cancel', 'CmsController::orderCancel/$1');
+});
+
+// --- 6. CUSTOMER PROTECTED ROUTES (X-Tenant + customerJwtAuth Required) ---
 $routes->group('api/v2/customer', ['filter' => ['tenant', 'customerJwtAuth']], function ($routes) {
     $routes->get('profile', 'CustomerControllerV2::getProfile');
     $routes->put('profile', 'CustomerControllerV2::updateProfile');
