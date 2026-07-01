@@ -22,6 +22,7 @@
                     <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Qty Produk</th>
                     <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Qty Transaksi</th>
                     <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                    <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Integrasi</th>
                     <th class="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>
                 </tr>
             </thead>
@@ -36,6 +37,14 @@
                     <td class="px-5 py-4"><?= $p['product_quota'] === null ? '<span class="text-gray-400">∞</span>' : (int)$p['product_quota'] ?></td>
                     <td class="px-5 py-4"><?= $p['transaction_monthly_quota'] === null ? '<span class="text-gray-400">∞</span>' : (int)$p['transaction_monthly_quota'] ?></td>
                     <td class="px-5 py-4"><span class="inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-semibold tracking-wide <?= $p['is_active'] ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700' ?>"><?= $p['is_active'] ? 'Aktif' : 'Nonaktif' ?></span></td>
+                    <td class="px-5 py-4">
+                        <div class="flex gap-1.5 flex-wrap">
+                            <?php $intLabels = ['integration_tiktok' => 'TT', 'integration_shopee' => 'SP', 'integration_email' => 'EM', 'integration_moota' => 'MT', 'integration_whatsapp' => 'WA']; ?>
+                            <?php foreach ($intLabels as $k => $l): ?>
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold <?= ($p[$k] ?? 0) ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400' ?>"><?= $l ?></span>
+                            <?php endforeach; ?>
+                        </div>
+                    </td>
                     <td class="px-5 py-4 text-right">
                         <div class="inline-flex gap-1.5">
                             <a href="/cms/packages/<?= $p['id'] ?>/edit" class="inline-flex items-center justify-center px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 border-2 border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-800 hover:bg-gray-50">Edit</a>
@@ -48,7 +57,7 @@
                     </td>
                 </tr>
                 <?php endforeach; else: ?>
-                <tr><td colspan="9" class="px-5 py-12 text-center text-gray-400">Belum ada package.</td></tr>
+                <tr><td colspan="10" class="px-5 py-12 text-center text-gray-400">Belum ada package.</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>

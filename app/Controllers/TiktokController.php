@@ -23,7 +23,6 @@ class TiktokController extends ResourceController
      */
     public function getAuthUrl($idToko = null)
     {
-        //$idToko = $this->request->getGet('id_toko');
         if (!$idToko) {
             return $this->jsonResponse->error('id_toko wajib diisi', 400);
         }
@@ -32,12 +31,13 @@ class TiktokController extends ResourceController
         $appSecret = env('TIKTOK_APP_SECRET');
         $baseUrl = env('app.baseURL');
 
-        // Target redirect URI specified by user
-        $redirectUri = "{$baseUrl}/tiktok_verif/{$idToko}";
+        // Gunakan redirect URI yang statis (harus match dengan yang ada di TikTok Developer Console)
+        $redirectUri = "{$baseUrl}/tiktok_verif";
 
         $params = [
             'app_key' => $appKey,
             'redirect_uri' => $redirectUri,
+            'state' => $idToko, // Gunakan state untuk passing ID Toko
             'timestamp' => time(),
         ];
 
@@ -55,16 +55,24 @@ class TiktokController extends ResourceController
 
     /**
      * TikTok Callback Endpoint
-     * GET /tiktok_verif/(:num)
+     * GET /tiktok_verif
      */
-    public function callback($idToko = null)
+    public function callback()
     {
         $code = $this->request->getGet('code');
+        $idToko = $this->request->getGet('state'); // Baca ID Toko dari state
 
         if (!$code) {
             return view('tiktok/verif', [
                 'status' => 'error',
                 'message' => 'Integrasi Gagal: Authorization code tidak ditemukan. Silakan coba lagi.',
+            ]);
+        }
+
+        if (!$idToko) {
+            return view('tiktok/verif', [
+                'status' => 'error',
+                'message' => 'Integrasi Gagal: ID Toko (state) tidak ditemukan. URL Callback tidak valid.',
             ]);
         }
 

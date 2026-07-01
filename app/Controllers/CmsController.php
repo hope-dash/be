@@ -578,7 +578,7 @@ class CmsController extends BaseController
 
         $description = $this->_parseDescription($data);
 
-        $this->packageModel->insert([
+        $this->packageModel->insert(array_merge([
             'code' => $data['code'],
             'name' => $data['name'],
             'type' => $data['type'] ?? null,
@@ -590,7 +590,7 @@ class CmsController extends BaseController
             'product_quota' => ($data['product_quota'] ?? '') !== '' ? (int) $data['product_quota'] : null,
             'transaction_monthly_quota' => ($data['transaction_monthly_quota'] ?? '') !== '' ? (int) $data['transaction_monthly_quota'] : null,
             'is_active' => !empty($data['is_active']) ? 1 : 0,
-        ]);
+        ], $this->_integrationFields($data)));
 
         session()->setFlashdata('success', 'Package berhasil dibuat.');
         return redirect()->to('/cms/packages');
@@ -623,7 +623,7 @@ class CmsController extends BaseController
 
         $description = $this->_parseDescription($data);
 
-        $this->packageModel->update($id, [
+        $this->packageModel->update($id, array_merge([
             'code' => $data['code'],
             'name' => $data['name'],
             'type' => $data['type'] ?? null,
@@ -635,7 +635,7 @@ class CmsController extends BaseController
             'product_quota' => ($data['product_quota'] ?? '') !== '' ? (int) $data['product_quota'] : null,
             'transaction_monthly_quota' => ($data['transaction_monthly_quota'] ?? '') !== '' ? (int) $data['transaction_monthly_quota'] : null,
             'is_active' => !empty($data['is_active']) ? 1 : 0,
-        ]);
+        ], $this->_integrationFields($data)));
 
         session()->setFlashdata('success', 'Package berhasil diperbarui.');
         return redirect()->to('/cms/packages');
@@ -811,5 +811,14 @@ class CmsController extends BaseController
             return array_values(array_filter($lines, fn($v) => $v !== ''));
         }
         return [];
+    }
+
+    private function _integrationFields(array $data): array
+    {
+        $fields = [];
+        foreach (['integration_tiktok', 'integration_shopee', 'integration_email', 'integration_moota', 'integration_whatsapp'] as $col) {
+            $fields[$col] = !empty($data[$col]) ? 1 : 0;
+        }
+        return $fields;
     }
 }

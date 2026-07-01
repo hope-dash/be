@@ -59,6 +59,26 @@
         </div>
 
         <div class="bg-white rounded-2xl border border-gray-100 p-6">
+            <h3 class="font-bold text-gray-900 mb-4">Integrasi</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <?php $integrations = [
+                    'integration_tiktok' => 'TikTok Shop',
+                    'integration_shopee' => 'Shopee',
+                    'integration_email' => 'Email',
+                    'integration_moota' => 'Moota (Bank)',
+                    'integration_whatsapp' => 'WhatsApp',
+                ]; ?>
+                <?php foreach ($integrations as $key => $label): ?>
+                <label class="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 cursor-pointer hover:border-indigo-300 transition-all">
+                    <input type="hidden" name="<?= $key ?>" value="0">
+                    <input type="checkbox" name="<?= $key ?>" value="1" <?= ($package[$key] ?? 0) ? 'checked' : '' ?> class="w-4.5 h-4.5 rounded border-2 border-gray-300 text-indigo-600 focus:ring-indigo-500 transition-all">
+                    <span class="text-sm font-semibold text-gray-700 select-none"><?= $label ?></span>
+                </label>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-100 p-6">
             <h3 class="font-bold text-gray-900 mb-4">Deskripsi Fitur</h3>
             <div>
                 <label class="block text-sm font-semibold text-gray-700 mb-1.5">Fitur (satu per baris)</label>

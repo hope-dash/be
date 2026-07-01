@@ -63,6 +63,20 @@
                         <p class="text-xs text-gray-400 font-semibold uppercase">Berakhir</p>
                         <p class="text-sm font-semibold text-gray-900 mt-1"><?= $activeSub['end_at'] ?? '-' ?></p>
                     </div>
+                    <?php if ($activeSub): ?>
+                    <div class="mt-3 pt-3 border-t border-gray-100">
+                        <p class="text-xs text-gray-400 font-semibold uppercase mb-2">Integrasi Aktif</p>
+                        <div class="flex gap-2 flex-wrap">
+                            <?php $intMap = ['integration_tiktok' => 'TikTok', 'integration_shopee' => 'Shopee', 'integration_email' => 'Email', 'integration_moota' => 'Moota', 'integration_whatsapp' => 'WA']; ?>
+                            <?php foreach ($intMap as $k => $l): ?>
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold <?= ($activeSub[$k] ?? 0) ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-400' ?>">
+                                <?= ($activeSub[$k] ?? 0) ? '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4.5 12.75l6 6 9-13.5"/></svg>' : '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>' ?>
+                                <?= $l ?>
+                            </span>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
             <?php else: ?>

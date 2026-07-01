@@ -20,7 +20,7 @@ class SubscriptionService
         $now = date('Y-m-d H:i:s');
 
         $row = $this->db->table('tenant_subscriptions ts')
-            ->select('ts.*, sp.code as package_code, sp.name as package_name, sp.duration_months, sp.product_quota, sp.transaction_monthly_quota')
+            ->select('ts.*, sp.code as package_code, sp.name as package_name, sp.duration_months, sp.product_quota, sp.transaction_monthly_quota, sp.integration_tiktok, sp.integration_shopee, sp.integration_email, sp.integration_moota, sp.integration_whatsapp')
             ->join('subscription_packages sp', 'sp.id = ts.package_id', 'inner')
             ->where('ts.tenant_id', $tenantId)
             ->where('ts.status', 'active')
@@ -60,10 +60,18 @@ class SubscriptionService
             $trxQuota = $sub['transaction_monthly_quota'];
         }
 
-        return $this->syncCurrentTenantQuotaWithLimits($tenantId, $productQuota, $trxQuota);
+        $integrations = [
+            'integration_tiktok'   => (int) ($sub['integration_tiktok'] ?? 0),
+            'integration_shopee'   => (int) ($sub['integration_shopee'] ?? 0),
+            'integration_email'    => (int) ($sub['integration_email'] ?? 0),
+            'integration_moota'    => (int) ($sub['integration_moota'] ?? 0),
+            'integration_whatsapp' => (int) ($sub['integration_whatsapp'] ?? 0),
+        ];
+
+        return $this->syncCurrentTenantQuotaWithLimits($tenantId, $productQuota, $trxQuota, $integrations);
     }
 
-    public function syncCurrentTenantQuotaWithLimits(int $tenantId, $productQuota, $transactionMonthlyQuota): ?array
+    public function syncCurrentTenantQuotaWithLimits(int $tenantId, $productQuota, $transactionMonthlyQuota, array $integrations = []): ?array
     {
         if (!$this->db->tableExists('tenant_quota')) {
             return null;
@@ -119,6 +127,9 @@ class SubscriptionService
             $payload['product_quota'] = $productQuota;
             $payload['transaction_monthly_quota'] = $transactionMonthlyQuota;
             $payload['created_at'] = $now;
+            foreach (['integration_tiktok', 'integration_shopee', 'integration_email', 'integration_moota', 'integration_whatsapp'] as $col) {
+                $payload[$col] = $integrations[$col] ?? 0;
+            }
             $this->db->table('tenant_quota')->insert($payload);
         }
 

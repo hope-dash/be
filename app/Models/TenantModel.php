@@ -19,6 +19,11 @@ class TenantModel extends Model
         'email',
         'status',
         'moota_token',
+        'integration_tiktok_active',
+        'integration_shopee_active',
+        'integration_email_active',
+        'integration_moota_active',
+        'integration_whatsapp_active',
         'created_at',
         'updated_at',
     ];
