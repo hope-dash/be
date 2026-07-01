@@ -16,6 +16,7 @@ $routes->post('api/login', 'UserController::login');
 $routes->get('api/temp/setup-token', 'MootaController::setupToken');
 $routes->post('api/v2/upload/image', 'UploadController::uploadImage');
 $routes->post('api/v2/upload/file', 'UploadController::uploadImage');
+$routes->get('api/sse-test', 'SSEController::test');
 
 // Tenant & Subscription Public
 $routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
