@@ -584,8 +584,15 @@ class TransactionController extends BaseController
                     $builder->where('t.status', $status);
                 }
             }
-            if ($delivery_status)
-                $builder->like('t.delivery_status', $delivery_status, 'both');
+            if ($delivery_status) {
+                if ($delivery_status === 'NOT_READY') {
+                    $builder->whereIn('t.delivery_status', ['PENDING', 'NOT_READY']);
+                } else if (strpos($delivery_status, ',') !== false) {
+                    $builder->whereIn('t.delivery_status', explode(',', $delivery_status));
+                } else {
+                    $builder->like('t.delivery_status', $delivery_status, 'both');
+                }
+            }
             if ($source) {
                 $sourceEscaped = $db->escape('%' . $source . '%');
                 $builder->where("EXISTS (SELECT 1 FROM transaction_meta tm_source_f WHERE tm_source_f.transaction_id = t.id AND tm_source_f.key = 'source' AND tm_source_f.value LIKE $sourceEscaped)");
@@ -776,8 +783,15 @@ class TransactionController extends BaseController
                     $builder->where('t.status', $status);
                 }
             }
-            if ($delivery_status)
-                $builder->like('t.delivery_status', $delivery_status, 'both');
+            if ($delivery_status) {
+                if ($delivery_status === 'NOT_READY') {
+                    $builder->whereIn('t.delivery_status', ['PENDING', 'NOT_READY']);
+                } else if (strpos($delivery_status, ',') !== false) {
+                    $builder->whereIn('t.delivery_status', explode(',', $delivery_status));
+                } else {
+                    $builder->like('t.delivery_status', $delivery_status, 'both');
+                }
+            }
             if ($source)
                 $builder->like('tm_source.value', $source, 'both');
 
