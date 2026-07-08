@@ -15,11 +15,14 @@ class TenantControllerV2 extends ResourceController
     protected JsonResponse $jsonResponse;
     protected TenantModel $tenantModel;
 
+    protected $db;
+
     public function __construct()
     {
         helper(['email_helper']);
         $this->jsonResponse = new JsonResponse();
         $this->tenantModel = new TenantModel();
+        $this->db = \Config\Database::connect();
     }
 
     // GET /api/v2/tenant/{code}
@@ -70,6 +73,56 @@ class TenantControllerV2 extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
+
+    // GET /api/v2/tenant/profile (uses X-Tenant)
+    public function profile()
+    {
+        try {
+            $tenantId = TenantContext::id();
+            $tenantCode = TenantContext::code();
+
+            $tenant = $this->tenantModel
+                ->select('id, code, name, logo_url, status, url, email')
+                ->where('id', $tenantId)
+                ->first();
+
+            if (!$tenant) {
+                return $this->jsonResponse->error('Tenant tidak ditemukan', 404);
+            }
+
+            $toko = $this->db->table('toko')
+                ->select('id, toko_name, alamat, phone_number, email_toko, image_logo')
+                ->where('tenant_id', $tenantId)
+                ->where('deleted_at', null)
+                ->orderBy('id', 'ASC')
+                ->limit(1)
+                ->get()
+                ->getRowArray();
+
+            return $this->jsonResponse->oneResp('Sukses', [
+                'tenant' => [
+                    'id' => (int) $tenant['id'],
+                    'code' => $tenant['code'],
+                    'name' => $tenant['name'],
+                    'logo_url' => $tenant['logo_url'],
+                    'url' => $tenant['url'] ?? '',
+                    'email' => $tenant['email'] ?? '',
+                    'status' => $tenant['status'],
+                ],
+                'toko' => $toko ? [
+                    'id' => (int) $toko['id'],
+                    'name' => $toko['toko_name'],
+                    'alamat' => $toko['alamat'] ?? '',
+                    'phone' => $toko['phone_number'] ?? '',
+                    'email' => $toko['email_toko'] ?? '',
+                    'logo_url' => $toko['image_logo'] ?? '',
+                ] : null,
+            ], 200);
+        } catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
     // POST /api/v2/tenant
     public function create()
     {
