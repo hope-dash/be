@@ -220,30 +220,39 @@ class CmsController extends BaseController
                 throw new \Exception('Gagal membuat user');
             }
 
-            // Auto-create 2 default domains (shop & admin use same domain)
+            // Auto-create 2 default domains + register to Vercel
             $shopDomain = strtolower($code) . '.satualur.my.id';
             $adminDomain = 'admin.' . strtolower($code) . '.satualur.my.id';
 
-            $this->db->table('tenant_domains')->insertBatch([
-                [
+            $vercel = new \App\Libraries\VercelDeploy();
+            $domainRecords = [];
+
+            foreach ([
+                ['domain' => $shopDomain, 'type' => 'shop'],
+                ['domain' => $adminDomain, 'type' => 'admin'],
+            ] as $d) {
+                $vercelId = null;
+                $verified = 0;
+                if ($vercel->isConfigured()) {
+                    $result = $vercel->addDomain($d['domain'], $d['type']);
+                    if ($result['success']) {
+                        $vercelId = $result['data']['uid'] ?? $result['data']['name'] ?? null;
+                        $verified = !empty($result['data']['verified']) ? 1 : 0;
+                    }
+                }
+                $domainRecords[] = [
                     'tenant_id' => $tenantId,
                     'tenant_code' => $code,
-                    'domain' => $shopDomain,
-                    'type' => 'shop',
-                    'is_verified' => 1,
+                    'domain' => $d['domain'],
+                    'type' => $d['type'],
+                    'is_verified' => $verified,
+                    'vercel_domain_id' => $vercelId,
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s'),
-                ],
-                [
-                    'tenant_id' => $tenantId,
-                    'tenant_code' => $code,
-                    'domain' => $adminDomain,
-                    'type' => 'admin',
-                    'is_verified' => 1,
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ],
-            ]);
+                ];
+            }
+
+            $this->db->table('tenant_domains')->insertBatch($domainRecords);
 
             $this->db->transCommit();
 
@@ -550,17 +559,34 @@ class CmsController extends BaseController
             return $this->response->setJSON(['status' => false, 'message' => 'Domain sudah terdaftar']);
         }
 
+        // Call Vercel API
+        $vercel = new \App\Libraries\VercelDeploy();
+        if ($vercel->isConfigured()) {
+            $result = $vercel->addDomain($domain, $type);
+            if (!$result['success']) {
+                $errMsg = $result['data']['error']['message'] ?? 'Gagal menambahkan domain ke Vercel';
+                return $this->response->setJSON(['status' => false, 'message' => $errMsg]);
+            }
+            $vercelDomainId = $result['data']['uid'] ?? $result['data']['name'] ?? null;
+            $isVerified = !empty($result['data']['verified']) ? 1 : 0;
+        } else {
+            $vercelDomainId = null;
+            $isVerified = 0;
+        }
+
         $this->db->table('tenant_domains')->insert([
             'tenant_id' => $tenantId,
             'tenant_code' => $tenant['code'],
             'domain' => $domain,
             'type' => $type,
-            'is_verified' => 0,
+            'is_verified' => $isVerified,
+            'vercel_domain_id' => $vercelDomainId,
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
-        return $this->response->setJSON(['status' => true, 'message' => 'Domain berhasil ditambahkan']);
+        $msg = $vercel->isConfigured() ? 'Domain berhasil ditambahkan ke Vercel' : 'Domain disimpan (Vercel tidak dikonfigurasi)';
+        return $this->response->setJSON(['status' => true, 'message' => $msg]);
     }
 
     public function tenantDomainDelete($tenantId, $domainId)
@@ -572,9 +598,14 @@ class CmsController extends BaseController
             ->where('tenant_id', $tenantId)
             ->get()
             ->getRowArray();
-
         if (!$domain) {
-            return $this->response->setJSON(['status' => false, 'message' => 'Domain tidak ditemukan']);
+            return $this->response->setJSON(['status' => false, 'message' => 'Domain tidak ditemukan'], 404);
+        }
+
+        // Remove from Vercel API if it was added there
+        $vercel = new \App\Libraries\VercelDeploy();
+        if ($vercel->isConfigured() && !empty($domain['vercel_domain_id'])) {
+            $vercel->removeDomain($domain['domain'], $domain['type']);
         }
 
         $this->db->table('tenant_domains')->where('id', $domainId)->delete();
@@ -610,10 +641,20 @@ class CmsController extends BaseController
 
         $integrationFields = $this->_integrationFields();
         $selectedFeatures = [];
+        $detailItems = [];
+        $multiTokoValue = 1;
         if ($package && !empty($package['description'])) {
             $decoded = json_decode($package['description'], true);
             if (is_array($decoded)) {
-                $selectedFeatures = $decoded;
+                // New format: { features: [...], details: [...] }
+                if (isset($decoded['features'])) {
+                    $selectedFeatures = $decoded['features'];
+                    $detailItems = $decoded['details'] ?? [];
+                    $multiTokoValue = (int) ($decoded['multi_toko'] ?? 1);
+                } else {
+                    // Old format: flat array of feature keys
+                    $selectedFeatures = $decoded;
+                }
             }
         }
 
@@ -621,6 +662,8 @@ class CmsController extends BaseController
             'package' => $package,
             'integrationFields' => $integrationFields,
             'selectedFeatures' => $selectedFeatures,
+            'detailItems' => $detailItems,
+            'multiTokoValue' => $multiTokoValue,
         ]);
     }
 
@@ -640,7 +683,13 @@ class CmsController extends BaseController
         }
 
         $features = $input['features'] ?? [];
-        $description = !empty($features) ? json_encode($features) : '';
+        $details = array_values(array_filter($input['detail_items'] ?? [], fn($v) => trim($v) !== ''));
+        $multiToko = max(1, (int) ($input['multi_toko'] ?? 1));
+        $description = json_encode([
+            'features' => $features,
+            'details' => $details,
+            'multi_toko' => $multiToko,
+        ]);
 
         $code = strtoupper(str_replace(' ', '_', $name)) . '_' . rand(100, 999);
 
@@ -672,7 +721,13 @@ class CmsController extends BaseController
 
         $input = $this->request->getPost();
         $features = $input['features'] ?? [];
-        $description = !empty($features) ? json_encode($features) : '';
+        $details = array_values(array_filter($input['detail_items'] ?? [], fn($v) => trim($v) !== ''));
+        $multiToko = max(1, (int) ($input['multi_toko'] ?? 1));
+        $description = json_encode([
+            'features' => $features,
+            'details' => $details,
+            'multi_toko' => $multiToko,
+        ]);
 
         $this->db->table('subscription_packages')->where('id', $id)->update([
             'name' => $input['name'] ?? $package['name'],
@@ -864,13 +919,11 @@ class CmsController extends BaseController
         return [
             'whatsapp' => 'WhatsApp API',
             'email' => 'Email Notifikasi',
-            'tokopedia' => 'Tokopedia',
             'shopee' => 'Shopee',
             'tiktok' => 'TikTok Shop',
             'moota' => 'Moota (Auto Detect Bank)',
-            'multi_toko' => 'Multi Toko',
             'laporan' => 'Laporan Keuangan',
-            'customer_app' => 'Aplikasi Pelanggan',
+            'service_on' => 'Service',
         ];
     }
 

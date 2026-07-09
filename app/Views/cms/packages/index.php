@@ -26,30 +26,47 @@
                 </ul>
 
                 <?php
-                $features = [];
+                $pFeatures = [];
+                $pDetails = [];
                 if (!empty($p['description'])) {
                     $decoded = json_decode($p['description'], true);
                     if (is_array($decoded)) {
-                        $features = $decoded;
+                        if (isset($decoded['features'])) {
+                            $pFeatures = $decoded['features'];
+                            $pDetails = $decoded['details'] ?? [];
+                        } else {
+                            $pFeatures = $decoded;
+                        }
                     }
                 }
                 ?>
-                <?php if (!empty($features)): ?>
+                <?php if (!empty($pFeatures)): ?>
                 <div class="mt-4 pt-4 border-t">
                     <p class="text-xs font-semibold text-gray-500 mb-2">INTEGRASI</p>
                     <div class="flex flex-wrap gap-1">
                         <?php $fieldLabels = [
-                            'whatsapp' => 'WhatsApp', 'email' => 'Email', 'tokopedia' => 'Tokopedia',
+                            'whatsapp' => 'WhatsApp', 'email' => 'Email',
                             'shopee' => 'Shopee', 'tiktok' => 'TikTok', 'moota' => 'Moota',
-                            'multi_toko' => 'Multi Toko', 'laporan' => 'Laporan', 'customer_app' => 'Customer App',
+                            'multi_toko' => 'Multi Toko', 'laporan' => 'Laporan',
+                            'service_on' => 'Service',
                         ]; ?>
-                        <?php foreach ($features as $key): ?>
+                        <?php foreach ($pFeatures as $key): ?>
                             <span class="px-2 py-0.5 text-xs rounded bg-indigo-100 text-indigo-700">
                                 <?= $fieldLabels[$key] ?? $key ?>
                             </span>
                         <?php endforeach; ?>
                     </div>
                 </div>
+                <?php if (!empty($pDetails)): ?>
+                <div class="mt-3">
+                    <p class="text-xs font-semibold text-gray-500 mb-1">DETAIL</p>
+                    <ul class="list-disc list-inside text-xs text-gray-600 space-y-0.5">
+                        <?php foreach ($pDetails as $d): ?>
+                        <li><?= esc($d) ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+                <?php endif; ?>
                 <?php endif; ?>
             </div>
             <div class="px-6 py-3 bg-gray-50 border-t flex justify-between">

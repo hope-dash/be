@@ -313,6 +313,9 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('subscription/orders/(:num)/cancel', 'SubscriptionControllerV2::cancelOrder/$1');
         $routes->post('subscription/orders/upload-proof', 'SubscriptionControllerV2::uploadProof');
         $routes->post('subscription/orders/(:num)/pay', 'SubscriptionControllerV2::payOrder/$1');
+        $routes->get('subscription/integrations', 'SubscriptionControllerV2::integrations');
+        $routes->put('subscription/integrations', 'SubscriptionControllerV2::saveIntegrations');
+        $routes->post('subscription/integrations', 'SubscriptionControllerV2::saveIntegrations');
 
         // Voucher (Admin)
         $routes->post('voucher', 'VoucherController::create');

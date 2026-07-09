@@ -20,7 +20,7 @@ class SubscriptionService
         $now = date('Y-m-d H:i:s');
 
         $row = $this->db->table('tenant_subscriptions ts')
-            ->select('ts.*, sp.code as package_code, sp.name as package_name, sp.duration_months, sp.product_quota, sp.transaction_monthly_quota')
+            ->select('ts.*, sp.code as package_code, sp.name as package_name, sp.duration_months, sp.product_quota, sp.transaction_monthly_quota, sp.description')
             ->join('subscription_packages sp', 'sp.id = ts.package_id', 'inner')
             ->where('ts.tenant_id', $tenantId)
             ->where('ts.status', 'active')

@@ -39,7 +39,44 @@
                 </label>
                 <?php endforeach; ?>
             </div>
+            <div class="mt-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">Multi Toko (maksimal jumlah toko)</label>
+                <input type="number" name="multi_toko" value="<?= esc($multiTokoValue ?? 1) ?>" min="1" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-32">
+            </div>
         </div>
+
+        <!-- Detail Section -->
+        <div class="mt-6 pt-6 border-t">
+            <h3 class="text-lg font-bold mb-4">Detail</h3>
+            <div id="detailContainer">
+                <?php if (!empty($detailItems)): ?>
+                    <?php foreach ($detailItems as $item): ?>
+                    <div class="flex gap-2 mb-2">
+                        <input type="text" name="detail_items[]" value="<?= esc($item) ?>" class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Tulis detail...">
+                        <button type="button" onclick="this.parentElement.remove()" class="px-3 py-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg"><i class="fas fa-times"></i></button>
+                    </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="flex gap-2 mb-2">
+                        <input type="text" name="detail_items[]" class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Tulis detail...">
+                        <button type="button" onclick="this.parentElement.remove()" class="px-3 py-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg"><i class="fas fa-times"></i></button>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <button type="button" onclick="addDetailInput()" class="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                <i class="fas fa-plus"></i> Tambah Baris
+            </button>
+        </div>
+
+        <script>
+        function addDetailInput(value = '') {
+            const container = document.getElementById('detailContainer');
+            const div = document.createElement('div');
+            div.className = 'flex gap-2 mb-2';
+            div.innerHTML = '<input type="text" name="detail_items[]" value="' + value.replace(/"/g, '&quot;') + '" class="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Tulis detail..."> <button type="button" onclick="this.parentElement.remove()" class="px-3 py-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg"><i class="fas fa-times"></i></button>';
+            container.appendChild(div);
+        }
+        </script>
 
         <div class="mt-6 flex gap-3">
             <button type="submit" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">

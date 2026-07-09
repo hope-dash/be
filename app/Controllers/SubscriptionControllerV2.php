@@ -87,6 +87,64 @@ class SubscriptionControllerV2 extends ResourceController
             $start = $quotaRow['month_start'] . ' 00:00:00';
             $end = date('Y-m-t 23:59:59', strtotime($start));
 
+            // Parse package description for features & details
+            $pkgDesc = [];
+            $pkgDetails = [];
+            $decoded = [];
+            // Fetch package description directly (most reliable)
+            $pkgRow = $this->db->table('subscription_packages')
+                ->where('id', $sub['package_id'] ?? 0)
+                ->get()
+                ->getRowArray();
+            $rawDesc = $pkgRow['description'] ?? '';
+            if (!empty($rawDesc)) {
+                $decoded = json_decode($rawDesc, true);
+                if (is_array($decoded)) {
+                    if (isset($decoded['features'])) {
+                        $pkgDesc = $decoded['features'];
+                        $pkgDetails = $decoded['details'] ?? [];
+                    } elseif (isset($decoded['fitur_layanan'])) {
+                        $pkgDesc = $decoded['fitur_layanan'];
+                    } elseif (array_is_list($decoded)) {
+                        $pkgDesc = $decoded;
+                    } else {
+                        $pkgDesc = [];
+                    }
+                }
+            }
+
+            // Get tenant activation status
+            $tenant = $this->db->table('tenants')
+                ->select('integration_tiktok_active, integration_shopee_active, integration_email_active, integration_moota_active, integration_whatsapp_active, name as tenant_name, logo_url')
+                ->where('id', $tenantId)
+                ->get()
+                ->getRowArray();
+
+            $integrationsActive = [
+                'integration_tiktok' => (bool)($tenant['integration_tiktok_active'] ?? 0),
+                'integration_shopee' => (bool)($tenant['integration_shopee_active'] ?? 0),
+                'integration_email' => (bool)($tenant['integration_email_active'] ?? 0),
+                'integration_moota' => (bool)($tenant['integration_moota_active'] ?? 0),
+                'integration_whatsapp' => (bool)($tenant['integration_whatsapp_active'] ?? 0),
+            ];
+
+            // Map package features to integrations object (for FE compatibility)
+            $tokoCount = (int) $this->db->table('toko')
+                ->where('tenant_id', $tenantId)
+                ->where('deleted_at', null)
+                ->countAllResults();
+
+            $integrations = [
+                'integration_tiktok' => in_array('tiktok', $pkgDesc),
+                'integration_shopee' => in_array('shopee', $pkgDesc),
+                'integration_email' => in_array('email', $pkgDesc),
+                'integration_moota' => in_array('moota', $pkgDesc),
+                'integration_whatsapp' => in_array('whatsapp', $pkgDesc),
+                'multi_toko' => max(1, (int)($decoded['multi_toko'] ?? $tokoCount)),
+                'laporan' => in_array('laporan', $pkgDesc),
+                'service_on' => in_array('service_on', $pkgDesc),
+            ];
+
             return $this->jsonResponse->oneResp('Sukses', [
                 'subscription' => [
                     'start_at' => $sub['start_at'] ?? null,
@@ -101,6 +159,8 @@ class SubscriptionControllerV2 extends ResourceController
                     'code' => $sub['package_code'],
                     'name' => $sub['package_name'],
                     'duration_months' => (int)$sub['duration_months'],
+                    'features' => $pkgDesc,
+                    'details' => $pkgDetails,
                 ],
                 'usage' => [
                     'products' => [
@@ -114,9 +174,74 @@ class SubscriptionControllerV2 extends ResourceController
                         'remaining' => $trxLimit === null ? null : max(0, $trxLimit - $trxUsed),
                     ],
                 ],
+                'integrations' => $integrations,
+                'integrations_active' => $integrationsActive,
             ], 200);
         }
         catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // GET /api/v2/subscription/integrations
+    public function integrations()
+    {
+        try {
+            $tenantId = TenantContext::id();
+            $tenant = $this->db->table('tenants')
+                ->select('integration_tiktok_active, integration_shopee_active, integration_email_active, integration_moota_active, integration_whatsapp_active')
+                ->where('id', $tenantId)
+                ->get()
+                ->getRowArray();
+
+            if (!$tenant) {
+                return $this->jsonResponse->error('Tenant tidak ditemukan', 404);
+            }
+
+            return $this->jsonResponse->oneResp('Sukses', [
+                'integration_tiktok' => (bool)($tenant['integration_tiktok_active'] ?? 0),
+                'integration_shopee' => (bool)($tenant['integration_shopee_active'] ?? 0),
+                'integration_email' => (bool)($tenant['integration_email_active'] ?? 0),
+                'integration_moota' => (bool)($tenant['integration_moota_active'] ?? 0),
+                'integration_whatsapp' => (bool)($tenant['integration_whatsapp_active'] ?? 0),
+            ], 200);
+        } catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // PUT /api/v2/subscription/integrations
+    public function saveIntegrations()
+    {
+        try {
+            $tenantId = TenantContext::id();
+            $body = $this->request->getJSON(true);
+
+            $allowedKeys = [
+                'integration_tiktok', 'integration_shopee', 'integration_email',
+                'integration_moota', 'integration_whatsapp',
+            ];
+
+            $update = [];
+            foreach ($allowedKeys as $key) {
+                if (array_key_exists($key, $body)) {
+                    $update[$key . '_active'] = $body[$key] ? 1 : 0;
+                }
+            }
+
+            if (empty($update)) {
+                return $this->jsonResponse->error('Tidak ada data integrasi yang dikirim', 400);
+            }
+
+            $this->db->table('tenants')->where('id', $tenantId)->update($update);
+
+            $result = [];
+            foreach ($allowedKeys as $key) {
+                $result[$key] = (bool)($update[$key . '_active'] ?? false);
+            }
+
+            return $this->jsonResponse->oneResp('Status integrasi berhasil diperbarui', $result, 200);
+        } catch (\Throwable $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
