@@ -343,6 +343,9 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('toko/tiktok/products/inventory-update/(:num)/(:any)', 'TiktokController::updateProductInventory/$1/$2');
         $routes->put('toko/tiktok/products/edit/(:num)/(:any)', 'TiktokController::editProduct/$1/$2');
         $routes->get('toko/tiktok/orders/get/(:num)/(:any)', 'TiktokController::getOrderDetails/$1/$2');
+        $routes->get('toko/tiktok/chats/(:num)', 'TiktokController::getChats/$1');
+        $routes->get('toko/tiktok/chats/(:num)/messages/(:any)', 'TiktokController::getChatMessages/$1/$2');
+        $routes->post('toko/tiktok/chats/send/(:num)', 'TiktokController::sendChatMessage/$1');
     });
 });
 

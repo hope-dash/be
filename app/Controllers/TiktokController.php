@@ -1534,6 +1534,71 @@ class TiktokController extends ResourceController
         $type = isset($payload['type']) ? (int) $payload['type'] : null;
         $shopId = $payload['shop_id'] ?? null;
 
+        if ($type === 13 || $type === 14) {
+            $data = $payload['data'] ?? [];
+            if ($shopId) {
+                $idToko = $this->getTokoIdByShopId($shopId);
+                if ($idToko) {
+                    $tiktokChatModel = new \App\Models\TiktokChatModel();
+                    $tiktokMessageModel = new \App\Models\TiktokMessageModel();
+                    
+                    if ($type === 13) {
+                        // New Conversation
+                        $conversationId = $data['conversation_id'] ?? null;
+                        if ($conversationId) {
+                            $existingChat = $tiktokChatModel->where('conversation_id', $conversationId)->first();
+                            if (!$existingChat) {
+                                $tiktokChatModel->insert([
+                                    'id_toko' => $idToko,
+                                    'shop_id' => $shopId,
+                                    'conversation_id' => $conversationId,
+                                ]);
+                            }
+                        }
+                    } else if ($type === 14) {
+                        // New Message
+                        $conversationId = $data['conversation_id'] ?? null;
+                        $messageId = $data['message_id'] ?? null;
+                        if ($conversationId && $messageId) {
+                            $chat = $tiktokChatModel->where('conversation_id', $conversationId)->first();
+                            if (!$chat) {
+                                $chatId = $tiktokChatModel->insert([
+                                    'id_toko' => $idToko,
+                                    'shop_id' => $shopId,
+                                    'conversation_id' => $conversationId,
+                                    'participant_id' => $data['sender']['im_user_id'] ?? null,
+                                ]);
+                                $chat = $tiktokChatModel->find($chatId);
+                            }
+                            
+                            $existingMessage = $tiktokMessageModel->where('message_id', $messageId)->first();
+                            if (!$existingMessage) {
+                                $tiktokMessageModel->insert([
+                                    'tiktok_chat_id' => $chat['id'],
+                                    'message_id' => $messageId,
+                                    'sender_role' => $data['sender']['role'] ?? null,
+                                    'type' => $data['type'] ?? null,
+                                    'content' => $data['content'] ?? null,
+                                    'create_time' => date('Y-m-d H:i:s', $data['create_time'] ?? time()),
+                                ]);
+                                
+                                $unreadCount = $chat['unread_count'];
+                                if (($data['sender']['role'] ?? '') === 'BUYER') {
+                                    $unreadCount++;
+                                }
+                                
+                                $tiktokChatModel->update($chat['id'], [
+                                    'last_message' => $data['content'] ?? null,
+                                    'last_message_time' => date('Y-m-d H:i:s', $data['create_time'] ?? time()),
+                                    'unread_count' => $unreadCount,
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if ($type === 5 || $type === 15) {
             $data = $payload['data'] ?? [];
             $productId = $data['product_id'] ?? null;
@@ -2037,6 +2102,119 @@ class TiktokController extends ResourceController
                 return $this->jsonResponse->oneResp('Sukses mengambil detail pesanan dari TikTok Shop', $response["data"]["orders"][0], 200);
             } else {
                 return $this->jsonResponse->error($response['message'] ?? 'Gagal mengambil detail pesanan', 400, $response);
+            }
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Get list of chats for a Toko
+     * GET /api/v2/toko/tiktok/chats/(:num)
+     */
+    public function getChats($idToko = null)
+    {
+        if (!$idToko) {
+            return $this->jsonResponse->error('id_toko wajib diisi', 400);
+        }
+
+        $tiktokChatModel = new \App\Models\TiktokChatModel();
+        $chats = $tiktokChatModel->where('id_toko', $idToko)
+            ->orderBy('last_message_time', 'DESC')
+            ->findAll();
+
+        return $this->jsonResponse->oneResp('Sukses mengambil daftar chat', $chats, 200);
+    }
+
+    /**
+     * Get messages for a specific conversation
+     * GET /api/v2/toko/tiktok/chats/(:num)/messages/(:any)
+     */
+    public function getChatMessages($idToko = null, $conversationId = null)
+    {
+        if (!$idToko || !$conversationId) {
+            return $this->jsonResponse->error('id_toko dan conversation_id wajib diisi', 400);
+        }
+
+        $tiktokChatModel = new \App\Models\TiktokChatModel();
+        $chat = $tiktokChatModel->where('id_toko', $idToko)
+            ->where('conversation_id', $conversationId)
+            ->first();
+
+        if (!$chat) {
+            return $this->jsonResponse->error('Chat tidak ditemukan', 404);
+        }
+
+        // Mark as read
+        if ($chat['unread_count'] > 0) {
+            $tiktokChatModel->update($chat['id'], ['unread_count' => 0]);
+        }
+
+        $tiktokMessageModel = new \App\Models\TiktokMessageModel();
+        $messages = $tiktokMessageModel->where('tiktok_chat_id', $chat['id'])
+            ->orderBy('create_time', 'ASC')
+            ->findAll();
+
+        return $this->jsonResponse->oneResp('Sukses mengambil pesan', $messages, 200);
+    }
+
+    /**
+     * Send a message to a conversation
+     * POST /api/v2/toko/tiktok/chats/send/(:num)
+     */
+    public function sendChatMessage($idToko = null)
+    {
+        try {
+            if (!$idToko) {
+                return $this->jsonResponse->error('id_toko wajib diisi', 400);
+            }
+
+            $data = $this->request->getJSON(true) ?: [];
+            $conversationId = $data['conversation_id'] ?? null;
+            $content = $data['content'] ?? null;
+
+            if (!$conversationId || !$content) {
+                return $this->jsonResponse->error('conversation_id dan content wajib diisi', 400);
+            }
+
+            // Path for TikTok Customer Service API
+            $path = "/customer_service/202312/conversations/{$conversationId}/messages";
+            $params = [];
+            $body = [
+                'type' => 'TEXT',
+                'content' => json_encode(['content' => $content]),
+            ];
+
+            // Note: Make sure the shop has authorized 'seller.customer_service' scope
+            $response = $this->makeTiktokRequest($idToko, 'POST', $path, $params, $body);
+
+            if (($response['code'] ?? -1) === 0) {
+                // Optionally wait for webhook, or insert directly to local DB
+                $tiktokChatModel = new \App\Models\TiktokChatModel();
+                $chat = $tiktokChatModel->where('conversation_id', $conversationId)->first();
+                
+                if ($chat) {
+                    $tiktokMessageModel = new \App\Models\TiktokMessageModel();
+                    $messageId = $response['data']['message_id'] ?? uniqid('msg_');
+                    
+                    $tiktokMessageModel->insert([
+                        'tiktok_chat_id' => $chat['id'],
+                        'message_id' => $messageId,
+                        'sender_role' => 'SELLER',
+                        'type' => 'TEXT',
+                        'content' => json_encode(['content' => $content]),
+                        'create_time' => date('Y-m-d H:i:s'),
+                    ]);
+                    
+                    $tiktokChatModel->update($chat['id'], [
+                        'last_message' => json_encode(['content' => $content]),
+                        'last_message_time' => date('Y-m-d H:i:s')
+                    ]);
+                }
+
+                return $this->jsonResponse->oneResp('Pesan berhasil dikirim', $response['data'] ?? [], 200);
+            } else {
+                return $this->jsonResponse->error($response['message'] ?? 'Gagal mengirim pesan', 400, $response);
             }
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
