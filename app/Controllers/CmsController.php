@@ -347,6 +347,12 @@ class CmsController extends BaseController
             ->get()
             ->getResultArray();
 
+        $domains = $this->db->table('tenant_domains')
+            ->where('tenant_id', $id)
+            ->orderBy('created_at', 'DESC')
+            ->get()
+            ->getResultArray();
+
         return $this->_render('cms/tenants/detail', [
             'title' => 'Tenant: ' . $tenant['name'],
             'tenant' => $tenant,
@@ -356,6 +362,7 @@ class CmsController extends BaseController
             'quotaRows' => $quotaRows,
             'users' => $users,
             'tokos' => $tokos,
+            'domains' => $domains,
         ]);
     }
 
@@ -511,6 +518,119 @@ class CmsController extends BaseController
 
         session()->setFlashdata('success', 'Toko berhasil ditambahkan.');
         return redirect()->to('/cms/tenants/' . $tenantId);
+    }
+
+    // ---------------------------------------------------------------
+    // DOMAINS
+    // ---------------------------------------------------------------
+
+    public function tenantDomains($tenantId)
+    {
+        $this->_auth();
+
+        $domains = $this->db->table('tenant_domains')
+            ->where('tenant_id', $tenantId)
+            ->orderBy('created_at', 'DESC')
+            ->get()
+            ->getResultArray();
+
+        return $this->response->setJSON(['status' => true, 'data' => $domains]);
+    }
+
+    public function tenantDomainCreate($tenantId)
+    {
+        $this->_auth();
+
+        $tenant = $this->db->table('tenants')->where('id', $tenantId)->get()->getRowArray();
+        if (!$tenant) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Tenant tidak ditemukan']);
+        }
+
+        $input = $this->request->getPost();
+        $domain = trim($input['domain'] ?? '');
+        $type = trim($input['type'] ?? '');
+
+        if (!$domain || !in_array($type, ['admin', 'shop', 'main'])) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Domain dan type wajib diisi']);
+        }
+
+        $existing = $this->db->table('tenant_domains')->where('domain', $domain)->get()->getRowArray();
+        if ($existing) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Domain sudah terdaftar']);
+        }
+
+        $vercel = new \App\Libraries\VercelDeploy();
+        $vercelId = null;
+        $isVerified = 0;
+        if ($vercel->isConfigured()) {
+            $result = $vercel->addDomain($domain, $type);
+            if ($result['success']) {
+                $vercelId = $result['data']['uid'] ?? $result['data']['name'] ?? null;
+                $isVerified = !empty($result['data']['verified']) ? 1 : 0;
+            }
+        }
+
+        $this->db->table('tenant_domains')->insert([
+            'tenant_id' => $tenantId,
+            'tenant_code' => $tenant['code'],
+            'domain' => $domain,
+            'type' => $type,
+            'is_verified' => $isVerified,
+            'vercel_domain_id' => $vercelId,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $msg = $vercel->isConfigured() ? 'Domain berhasil ditambahkan ke Vercel' : 'Domain disimpan (Vercel API belum dikonfigurasi)';
+        return $this->response->setJSON(['status' => true, 'message' => $msg]);
+    }
+
+    public function tenantDomainDelete($tenantId, $domainId)
+    {
+        $this->_auth();
+
+        $domain = $this->db->table('tenant_domains')
+            ->where('id', $domainId)->where('tenant_id', $tenantId)
+            ->get()->getRowArray();
+        if (!$domain) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Domain tidak ditemukan']);
+        }
+
+        $vercel = new \App\Libraries\VercelDeploy();
+        if ($vercel->isConfigured()) {
+            $vercel->removeDomain($domain['domain'], $domain['type']);
+        }
+
+        $this->db->table('tenant_domains')->where('id', $domainId)->delete();
+
+        return $this->response->setJSON(['status' => true, 'message' => 'Domain dihapus']);
+    }
+
+    public function tenantDelete($id)
+    {
+        $this->_auth();
+
+        $tenant = $this->db->table('tenants')->where('id', $id)->get()->getRowArray();
+        if (!$tenant) {
+            session()->setFlashdata('error', 'Tenant tidak ditemukan');
+            return redirect()->to('/cms/tenants');
+        }
+
+        $domains = $this->db->table('tenant_domains')->where('tenant_id', $id)->get()->getResultArray();
+        $vercel = new \App\Libraries\VercelDeploy();
+        foreach ($domains as $d) {
+            if ($vercel->isConfigured()) {
+                $vercel->removeDomain($d['domain'], $d['type']);
+            }
+        }
+
+        $this->db->table('tenant_domains')->where('tenant_id', $id)->delete();
+        $this->db->table('tenants')->where('id', $id)->update([
+            'status' => 'inactive', 'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        session()->setFlashdata('success', 'Tenant dinonaktifkan & domain dihapus');
+        return redirect()->to('/cms/tenants');
     }
 
     // ---------------------------------------------------------------
@@ -813,12 +933,16 @@ class CmsController extends BaseController
         return [];
     }
 
-    private function _integrationFields(array $data): array
+    private function _integrationFields(): array
     {
-        $fields = [];
-        foreach (['integration_tiktok', 'integration_shopee', 'integration_email', 'integration_moota', 'integration_whatsapp'] as $col) {
-            $fields[$col] = !empty($data[$col]) ? 1 : 0;
-        }
-        return $fields;
+        return [
+            'whatsapp' => 'WhatsApp API',
+            'email' => 'Email Notifikasi',
+            'shopee' => 'Shopee',
+            'tiktok' => 'TikTok Shop',
+            'moota' => 'Moota (Auto Detect Bank)',
+            'laporan' => 'Laporan Keuangan',
+            'service_on' => 'Service',
+        ];
     }
 }

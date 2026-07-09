@@ -21,6 +21,7 @@ $routes->get('api/sse-test', 'SSEController::test');
 // Tenant & Subscription Public
 $routes->get('api/v2/tenant/(:segment)', 'TenantControllerV2::show/$1');
 $routes->post('api/v2/tenant', 'TenantControllerV2::create');
+$routes->get('api/v2/resolve-domain', 'DomainController::resolve');
 $routes->get('api/v2/subscription/packages', 'SubscriptionControllerV2::packages');
 $routes->match(['GET', 'POST'], 'api/v2/subscription/orders/(:num)/pay', 'SubscriptionControllerV2::publicPayOrder/$1');
 
@@ -302,8 +303,10 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('product/(:num)/sync-tiktok', 'ProductController::syncTiktokAllShops/$1');
         $routes->post('product/tiktok-connect', 'ProductController::connectTiktok');
 
+        $routes->get('tenant-profile', 'TenantControllerV2::profile');
+
         // Subscription
-        $routes->get('subscription', 'SubscriptionControllerV2::detail');
+        $routes->get('subscription/detail', 'SubscriptionControllerV2::detail');
         $routes->get('subscription/usage', 'SubscriptionControllerV2::usage');
         $routes->get('subscription/packages', 'SubscriptionControllerV2::packages');
         $routes->post('subscription/orders', 'SubscriptionControllerV2::createOrder');
@@ -361,6 +364,10 @@ $routes->group('cms', function ($routes) {
     $routes->post('tenants/(:num)/users/create', 'CmsController::tenantUserCreate/$1');
     $routes->post('tenants/(:num)/users/(:num)/reset-password', 'CmsController::tenantUserResetPassword/$1/$2');
     $routes->post('tenants/(:num)/tokos/create', 'CmsController::tenantTokoCreate/$1');
+    $routes->post('tenants/(:num)/delete', 'CmsController::tenantDelete/$1');
+    $routes->get('tenants/(:num)/domains', 'CmsController::tenantDomains/$1');
+    $routes->post('tenants/(:num)/domains/create', 'CmsController::tenantDomainCreate/$1');
+    $routes->post('tenants/(:num)/domains/(:num)/delete', 'CmsController::tenantDomainDelete/$1/$2');
 
     $routes->get('packages', 'CmsController::packages');
     $routes->get('packages/create', 'CmsController::packageForm');
