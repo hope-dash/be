@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 <div class="mb-8">
     <h1 class="text-2xl font-extrabold text-gray-900 tracking-tight">Dashboard</h1>
     <p class="text-gray-500 mt-1">Ringkasan sistem multi-tenant</p>
@@ -91,85 +90,10 @@
         <div class="px-6 pb-5">
             <div class="flex items-center justify-between p-3 bg-amber-50 rounded-xl">
                 <span class="text-sm font-semibold text-amber-800">Pending Orders</span>
-                <span class="text-xl font-extrabold text-amber-800"><?= $pendingOrders ?></span>
-=======
-<h1 class="text-2xl font-bold mb-6">Dashboard</h1>
-
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm">Total Tenants</p>
-                <p class="text-3xl font-bold text-indigo-600"><?= $totalTenants ?></p>
-            </div>
-            <div class="bg-indigo-100 p-3 rounded-full">
-                <i class="fas fa-building text-indigo-600 text-xl"></i>
-            </div>
-        </div>
-    </div>
-
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm">Tenants Aktif</p>
-                <p class="text-3xl font-bold text-green-600"><?= $activeTenants ?></p>
-            </div>
-            <div class="bg-green-100 p-3 rounded-full">
-                <i class="fas fa-check-circle text-green-600 text-xl"></i>
-            </div>
-        </div>
-    </div>
-
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm">Total Paket</p>
-                <p class="text-3xl font-bold text-blue-600"><?= $totalPackages ?></p>
-            </div>
-            <div class="bg-blue-100 p-3 rounded-full">
-                <i class="fas fa-box text-blue-600 text-xl"></i>
-            </div>
-        </div>
-    </div>
-
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm">Total Orders</p>
-                <p class="text-3xl font-bold text-purple-600"><?= $totalOrders ?></p>
-            </div>
-            <div class="bg-purple-100 p-3 rounded-full">
-                <i class="fas fa-shopping-cart text-purple-600 text-xl"></i>
-            </div>
-        </div>
-    </div>
-
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm">Orders Pending</p>
-                <p class="text-3xl font-bold text-yellow-600"><?= $pendingOrders ?></p>
-            </div>
-            <div class="bg-yellow-100 p-3 rounded-full">
-                <i class="fas fa-clock text-yellow-600 text-xl"></i>
-            </div>
-        </div>
-    </div>
-
-    <div class="bg-white rounded-lg shadow p-6">
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-sm">Subscriptions Aktif</p>
-                <p class="text-3xl font-bold text-teal-600"><?= $activeSubscriptions ?></p>
-            </div>
-            <div class="bg-teal-100 p-3 rounded-full">
-                <i class="fas fa-file-invoice text-teal-600 text-xl"></i>
->>>>>>> main
-            </div>
+                <span class="text-xl font-extrabold text-amber-800"><?= $pendingOrders ?></span>            </div>
         </div>
     </div>
 </div>
-<<<<<<< HEAD
 
 <div class="bg-white rounded-2xl border border-gray-100 overflow-hidden">
     <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
