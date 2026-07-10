@@ -304,6 +304,9 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('product/tiktok-connect', 'ProductController::connectTiktok');
 
         $routes->get('tenant-profile', 'TenantControllerV2::profile');
+        $routes->get('tenant-smtp-config', 'TenantControllerV2::smtpConfig');
+        $routes->put('tenant-smtp-config', 'TenantControllerV2::saveSmtpConfig');
+        $routes->post('tenant-smtp-config', 'TenantControllerV2::saveSmtpConfig');
 
         // Subscription
         $routes->get('subscription/detail', 'SubscriptionControllerV2::detail');

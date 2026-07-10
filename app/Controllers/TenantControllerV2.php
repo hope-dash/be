@@ -123,6 +123,72 @@ class TenantControllerV2 extends ResourceController
         }
     }
 
+    // GET /api/v2/tenant-smtp-config
+    public function smtpConfig()
+    {
+        try {
+            $tenantId = TenantContext::id();
+            $toko = $this->db->table('toko')
+                ->where('tenant_id', $tenantId)
+                ->where('deleted_at', null)
+                ->orderBy('id', 'ASC')
+                ->limit(1)
+                ->get()
+                ->getRowArray();
+
+            if (!$toko) {
+                return $this->jsonResponse->error('Toko tidak ditemukan', 404);
+            }
+
+            $metaModel = new \App\Models\TokoMetaModel();
+            $keys = ['smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_encryption', 'smtp_from_email', 'smtp_from_name'];
+            $config = [];
+            foreach ($keys as $k) {
+                $config[str_replace('smtp_', '', $k)] = $metaModel->getMeta((int)$toko['id'], $k, '');
+            }
+
+            $config['is_configured'] = !empty($config['host']) && !empty($config['username']);
+
+            return $this->jsonResponse->oneResp('Sukses', $config, 200);
+        } catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // PUT/POST /api/v2/tenant-smtp-config
+    public function saveSmtpConfig()
+    {
+        try {
+            $tenantId = TenantContext::id();
+            $toko = $this->db->table('toko')
+                ->where('tenant_id', $tenantId)
+                ->where('deleted_at', null)
+                ->orderBy('id', 'ASC')
+                ->limit(1)
+                ->get()
+                ->getRowArray();
+
+            if (!$toko) {
+                return $this->jsonResponse->error('Toko tidak ditemukan', 404);
+            }
+
+            $body = $this->request->getJSON(true);
+            $metaModel = new \App\Models\TokoMetaModel();
+            $tokoId = (int)$toko['id'];
+
+            $fields = ['host', 'port', 'username', 'password', 'encryption', 'from_email', 'from_name'];
+            foreach ($fields as $f) {
+                if (isset($body[$f])) {
+                    $metaModel->setMeta($tokoId, 'smtp_' . $f, $body[$f]);
+                }
+            }
+
+            return $this->jsonResponse->oneResp('SMTP config tersimpan', [], 200);
+        } catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
     // POST /api/v2/tenant
     public function create()
     {

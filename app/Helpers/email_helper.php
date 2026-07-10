@@ -1,5 +1,75 @@
 <?php
 
+if (!function_exists('get_tenant_smtp_config')) {
+    /**
+     * Get per-tenant SMTP config from toko_meta if available
+     * Returns null if not configured (use .env defaults)
+     */
+    function get_tenant_smtp_config(): ?array
+    {
+        try {
+            $tenantId = \App\Libraries\TenantContext::id();
+            if ($tenantId <= 0) return null;
+
+            $db = \Config\Database::connect();
+            $toko = $db->table('toko')
+                ->where('tenant_id', $tenantId)
+                ->where('deleted_at', null)
+                ->orderBy('id', 'ASC')
+                ->limit(1)
+                ->get()
+                ->getRowArray();
+
+            if (!$toko) return null;
+
+            $metaModel = new \App\Models\TokoMetaModel();
+            $host = $metaModel->getMeta((int)$toko['id'], 'smtp_host', '');
+            $port = $metaModel->getMeta((int)$toko['id'], 'smtp_port', '');
+
+            if (empty($host)) return null;
+
+            return [
+                'SMTPHost'   => $host,
+                'SMTPPort'   => (int)($port ?: 587),
+                'SMTPUser'   => $metaModel->getMeta((int)$toko['id'], 'smtp_username', ''),
+                'SMTPPass'   => $metaModel->getMeta((int)$toko['id'], 'smtp_password', ''),
+                'SMTPCrypto' => $metaModel->getMeta((int)$toko['id'], 'smtp_encryption', 'tls'),
+                'fromEmail'  => $metaModel->getMeta((int)$toko['id'], 'smtp_from_email', ''),
+                'fromName'   => $metaModel->getMeta((int)$toko['id'], 'smtp_from_name', \App\Libraries\TenantContext::name()),
+            ];
+        } catch (\Throwable $e) {
+            log_message('error', 'get_tenant_smtp_config error: ' . $e->getMessage());
+            return null;
+        }
+    }
+}
+
+if (!function_exists('apply_tenant_smtp')) {
+    /**
+     * Apply per-tenant SMTP config to email service if available
+     * Returns the effective fromEmail and fromName
+     */
+    function apply_tenant_smtp($emailService): array
+    {
+        $tenantSmtp = get_tenant_smtp_config();
+        if ($tenantSmtp) {
+            $emailService->initialize([
+                'SMTPHost'   => $tenantSmtp['SMTPHost'],
+                'SMTPPort'   => $tenantSmtp['SMTPPort'],
+                'SMTPUser'   => $tenantSmtp['SMTPUser'],
+                'SMTPPass'   => $tenantSmtp['SMTPPass'],
+                'SMTPCrypto' => $tenantSmtp['SMTPCrypto'],
+                'protocol'   => 'smtp',
+            ]);
+            return [
+                'fromEmail' => $tenantSmtp['fromEmail'] ?: $tenantSmtp['SMTPUser'],
+                'fromName'  => $tenantSmtp['fromName'],
+            ];
+        }
+        return ['fromEmail' => null, 'fromName' => null];
+    }
+}
+
 if (!function_exists('send_email')) {
     /**
      * Send email using CodeIgniter Email library
@@ -14,8 +84,10 @@ if (!function_exists('send_email')) {
         $email = \Config\Services::email();
         $emailConfig = config('Email');
 
-        $senderEmail = $emailConfig->SMTPUser;
-        $senderName = \App\Libraries\TenantContext::name();
+        // Try per-tenant SMTP first
+        $override = apply_tenant_smtp($email);
+        $senderEmail = $override['fromEmail'] ?: $emailConfig->SMTPUser;
+        $senderName = $override['fromName'] ?: \App\Libraries\TenantContext::name();
 
         $email->setFrom($senderEmail, $senderName);
         $email->setReplyTo(\App\Libraries\TenantContext::email(), $senderName);
@@ -45,8 +117,11 @@ if (!function_exists('send_system_email')) {
         $email = \Config\Services::email();
         $emailConfig = config('Email');
 
-        $fromEmail = $emailConfig->SMTPUser;
-        $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
+        // Try per-tenant SMTP first
+        $override = apply_tenant_smtp($email);
+
+        $fromEmail = $override['fromEmail'] ?: ($fromEmail ?: $emailConfig->SMTPUser);
+        $fromName = $override['fromName'] ?: ($fromName ?? env('APP_NAME', 'UMKM HEBAT'));
 
         $email->setFrom($fromEmail, $fromName);
         $email->setReplyTo(env('email.replyTo', $fromEmail), $fromName);
@@ -79,8 +154,11 @@ if (!function_exists('send_email_with_attachments')) {
         $email = \Config\Services::email();
         $emailConfig = config('Email');
 
-        $senderName = \App\Libraries\TenantContext::name();
-        $email->setFrom($emailConfig->SMTPUser, $senderName);
+        $override = apply_tenant_smtp($email);
+        $senderEmail = $override['fromEmail'] ?: $emailConfig->SMTPUser;
+        $senderName = $override['fromName'] ?: \App\Libraries\TenantContext::name();
+
+        $email->setFrom($senderEmail, $senderName);
         $email->setReplyTo(\App\Libraries\TenantContext::email(), $senderName);
         $email->setTo($to);
         $email->setSubject($subject);
@@ -112,8 +190,10 @@ if (!function_exists('send_system_email_with_attachments')) {
         $email = \Config\Services::email();
         $emailConfig = config('Email');
 
-        $fromEmail = $emailConfig->SMTPUser;
-        $fromName = $fromName ?? env('APP_NAME', 'UMKM HEBAT');
+        $override = apply_tenant_smtp($email);
+
+        $fromEmail = $override['fromEmail'] ?: ($fromEmail ?: $emailConfig->SMTPUser);
+        $fromName = $override['fromName'] ?: ($fromName ?? env('APP_NAME', 'UMKM HEBAT'));
 
         $email->setFrom($fromEmail, $fromName);
         $email->setReplyTo(env('email.replyTo', $fromEmail), $fromName);

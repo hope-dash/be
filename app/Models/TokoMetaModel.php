@@ -23,7 +23,7 @@ class TokoMetaModel extends Model
     /**
      * Set a meta value for a shop
      * 
-     * @param int $toko_id
+     * @param int $id_toko
      * @param string $key
      * @param mixed $value
      * @return bool
@@ -51,7 +51,7 @@ class TokoMetaModel extends Model
     /**
      * Get a meta value for a shop
      * 
-     * @param int $toko_id
+     * @param int $id_toko
      * @param string $key
      * @param mixed $default
      * @return mixed
