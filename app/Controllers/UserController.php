@@ -40,8 +40,8 @@ class UserController extends ResourceController
             $validation = \Config\Services::validation();
             $validation->setRules([
                 "name" => 'required',
-                "username" => 'required|is_unique[users.username]',
-                "email" => 'required|valid_email|is_unique[users.email]',
+                "username" => 'required',
+                "email" => 'required|valid_email',
                 "password" => 'required',
                 "access" => 'required',
             ]);
@@ -49,6 +49,14 @@ class UserController extends ResourceController
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
             }
+
+            if ($this->model->where('username', $data->username)->countAllResults() > 0) {
+                return $this->jsonResponse->error("Username sudah terdaftar.", 400);
+            }
+            if ($this->model->where('email', $data->email)->countAllResults() > 0) {
+                return $this->jsonResponse->error("Email sudah terdaftar.", 400);
+            }
+
             $data = [
                 "name" => $data->name,
                 "username" => $data->username,
@@ -79,8 +87,8 @@ class UserController extends ResourceController
             $validation = \Config\Services::validation();
             $validation->setRules([
                 "name" => 'required',
-                "username" => 'required|is_unique[users.username]',
-                "email" => 'required|valid_email|is_unique[users.email]',
+                "username" => 'required',
+                "email" => 'required|valid_email',
                 "password" => 'required',
                 "access" => 'required',
             ]);
@@ -88,6 +96,14 @@ class UserController extends ResourceController
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
             }
+
+            if ($this->model->where('username', $data->username)->countAllResults() > 0) {
+                return $this->jsonResponse->error("Username sudah terdaftar.", 400);
+            }
+            if ($this->model->where('email', $data->email)->countAllResults() > 0) {
+                return $this->jsonResponse->error("Email sudah terdaftar.", 400);
+            }
+
             $data = [
                 "name" => $data->name,
                 "username" => $data->username,
@@ -193,8 +209,8 @@ class UserController extends ResourceController
             $validation = \Config\Services::validation();
             $rules = [
                 "name" => 'required',
-                "username" => 'required|is_unique[users.username,user_id,' . $id . ']',
-                "email" => 'required|valid_email|is_unique[users.email,user_id,' . $id . ']',
+                "username" => 'required',
+                "email" => 'required|valid_email',
                 "access" => 'required',
             ];
 
@@ -210,6 +226,13 @@ class UserController extends ResourceController
 
             if (!$this->validate($validation->getRules())) {
                 return $this->jsonResponse->error(implode(", ", $validation->getErrors()), 400);
+            }
+
+            if ($this->model->where('username', $dataArray['username'])->where('user_id !=', $id)->countAllResults() > 0) {
+                return $this->jsonResponse->error("Username sudah terdaftar.", 400);
+            }
+            if ($this->model->where('email', $dataArray['email'])->where('user_id !=', $id)->countAllResults() > 0) {
+                return $this->jsonResponse->error("Email sudah terdaftar.", 400);
             }
 
             // Siapkan data untuk diperbarui
