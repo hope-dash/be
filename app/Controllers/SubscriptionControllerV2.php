@@ -87,8 +87,13 @@ class SubscriptionControllerV2 extends ResourceController
             $trxUsed = (int)($quotaRow['transaction_monthly_used'] ?? 0);
             $productLimitRaw = $sub['product_quota_snapshot'] ?? ($sub['product_quota'] ?? null);
             $trxLimitRaw = $sub['transaction_monthly_quota_snapshot'] ?? ($sub['transaction_monthly_quota'] ?? null);
+            $storeLimitRaw = $sub['store_quota'] ?? null;
+            
             $productLimit = $productLimitRaw === null ? null : (int)$productLimitRaw;
             $trxLimit = $trxLimitRaw === null ? null : (int)$trxLimitRaw;
+            $storeLimit = $storeLimitRaw === null ? null : (int)$storeLimitRaw;
+            
+            $storeUsed = $this->db->table('toko')->where('tenant_id', $tenantId)->countAllResults();
 
             $start = $quotaRow['month_start'] . ' 00:00:00';
             $end = date('Y-m-t 23:59:59', strtotime($start));
@@ -99,6 +104,8 @@ class SubscriptionControllerV2 extends ResourceController
                 'integration_email' => (bool) ($quotaRow['integration_email'] ?? 0),
                 'integration_moota' => (bool) ($quotaRow['integration_moota'] ?? 0),
                 'integration_whatsapp' => (bool) ($quotaRow['integration_whatsapp'] ?? 0),
+                'laporan' => (bool) ($quotaRow['laporan'] ?? 0),
+                'service_on' => (bool) ($quotaRow['service_on'] ?? 0),
             ];
 
             return $this->jsonResponse->oneResp('Sukses', [
@@ -126,6 +133,11 @@ class SubscriptionControllerV2 extends ResourceController
                         'used' => $trxUsed,
                         'limit' => $trxLimit,
                         'remaining' => $trxLimit === null ? null : max(0, $trxLimit - $trxUsed),
+                    ],
+                    'stores' => [
+                        'used' => $storeUsed,
+                        'limit' => $storeLimit,
+                        'remaining' => $storeLimit === null ? null : max(0, $storeLimit - $storeUsed),
                     ],
                 ],
                 'integrations' => $integrations,

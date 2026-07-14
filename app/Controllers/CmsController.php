@@ -709,6 +709,7 @@ class CmsController extends BaseController
             'duration_months' => (int) ($data['duration_months'] ?? 1),
             'product_quota' => ($data['product_quota'] ?? '') !== '' ? (int) $data['product_quota'] : null,
             'transaction_monthly_quota' => ($data['transaction_monthly_quota'] ?? '') !== '' ? (int) $data['transaction_monthly_quota'] : null,
+            'store_quota' => ($data['store_quota'] ?? '') !== '' ? (int) $data['store_quota'] : null,
             'is_active' => !empty($data['is_active']) ? 1 : 0,
         ], $this->_integrationFields($data)));
 
@@ -754,6 +755,7 @@ class CmsController extends BaseController
             'duration_months' => (int) ($data['duration_months'] ?? 1),
             'product_quota' => ($data['product_quota'] ?? '') !== '' ? (int) $data['product_quota'] : null,
             'transaction_monthly_quota' => ($data['transaction_monthly_quota'] ?? '') !== '' ? (int) $data['transaction_monthly_quota'] : null,
+            'store_quota' => ($data['store_quota'] ?? '') !== '' ? (int) $data['store_quota'] : null,
             'is_active' => !empty($data['is_active']) ? 1 : 0,
         ], $this->_integrationFields($data)));
 
@@ -933,16 +935,22 @@ class CmsController extends BaseController
         return [];
     }
 
-    private function _integrationFields(): array
+    private function _integrationFields(array $data): array
     {
-        return [
-            'whatsapp' => 'WhatsApp API',
-            'email' => 'Email Notifikasi',
-            'shopee' => 'Shopee',
-            'tiktok' => 'TikTok Shop',
-            'moota' => 'Moota (Auto Detect Bank)',
-            'laporan' => 'Laporan Keuangan',
-            'service_on' => 'Service',
+        $keys = [
+            'integration_tiktok',
+            'integration_shopee',
+            'integration_email',
+            'integration_moota',
+            'integration_whatsapp',
+            'laporan',
+            'service_on',
         ];
+
+        $result = [];
+        foreach ($keys as $key) {
+            $result[$key] = !empty($data[$key]) ? 1 : 0;
+        }
+        return $result;
     }
 }
