@@ -249,6 +249,21 @@ class CustomerController extends BaseController
                     ->like('customer.nama_customer', $namaUser, 'both')
                     ->orLike('customer.no_hp_customer', $namaUser, 'both')
                     ->groupEnd();
+
+                // Phone number prefix normalization: handle all formats
+                // e.g. "628115199952" → also match "08115199952"
+                // e.g. "08115199952" → also match "628115199952"  
+                // e.g. "+62 812-1199-9229" → strip non-numeric → "6281211999229"
+                $phoneClean = preg_replace('/[^0-9]/', '', $namaUser);
+                if (strlen($phoneClean) >= 10) {
+                    if (strpos($phoneClean, '62') === 0) {
+                        $altPhone = '0' . substr($phoneClean, 2);
+                        $builder->orLike('customer.no_hp_customer', $altPhone, 'both');
+                    } elseif (strpos($phoneClean, '0') === 0) {
+                        $altPhone = '62' . substr($phoneClean, 1);
+                        $builder->orLike('customer.no_hp_customer', $altPhone, 'both');
+                    }
+                }
             }
 
             // Count total data before applying limit

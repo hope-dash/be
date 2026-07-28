@@ -636,14 +636,35 @@ class TransactionController extends BaseController
                 $builder->like('t.invoice', $search);
 
                 // 2. Search by Customer Name/Phone (Linked via Meta -> Customer table)
-                // exists (select 1 from transaction_meta tm join customer c on tm.value = c.id where tm.transaction_id = t.id and tm.key = 'customer_id' and (c.nama_customer like ... or c.no_hp_customer like ...))
-                $builder->orWhere("EXISTS (
-                    SELECT 1 FROM transaction_meta tm 
-                    JOIN customer c ON tm.value = c.id 
-                    WHERE tm.transaction_id = t.id 
-                    AND tm.key = 'customer_id' 
-                    AND (c.nama_customer LIKE '%{$db->escapeLikeString($search)}%' OR c.no_hp_customer LIKE '%{$db->escapeLikeString($search)}%')
-                )");
+                $phoneClean = preg_replace('/[^0-9]/', '', $search);
+                $phoneSearchAlt = null;
+                if (strlen($phoneClean) >= 10) {
+                    if (strpos($phoneClean, '62') === 0) {
+                        $phoneSearchAlt = '0' . substr($phoneClean, 2);
+                    } elseif (strpos($phoneClean, '0') === 0) {
+                        $phoneSearchAlt = '62' . substr($phoneClean, 1);
+                    }
+                }
+
+                if ($phoneSearchAlt) {
+                    $phoneSearchAltEscaped = $db->escapeLikeString($phoneSearchAlt);
+                    $searchEscaped = $db->escapeLikeString($search);
+                    $builder->orWhere("EXISTS (
+                        SELECT 1 FROM transaction_meta tm 
+                        JOIN customer c ON tm.value = c.id 
+                        WHERE tm.transaction_id = t.id 
+                        AND tm.key = 'customer_id' 
+                        AND (c.nama_customer LIKE '%{$searchEscaped}%' OR c.no_hp_customer LIKE '%{$searchEscaped}%' OR c.no_hp_customer LIKE '%{$phoneSearchAltEscaped}%')
+                    )");
+                } else {
+                    $builder->orWhere("EXISTS (
+                        SELECT 1 FROM transaction_meta tm 
+                        JOIN customer c ON tm.value = c.id 
+                        WHERE tm.transaction_id = t.id 
+                        AND tm.key = 'customer_id' 
+                        AND (c.nama_customer LIKE '%{$db->escapeLikeString($search)}%' OR c.no_hp_customer LIKE '%{$db->escapeLikeString($search)}%')
+                    )");
+                }
 
                 // 4. Search by Source (Meta)
                 $builder->orWhere("EXISTS (
@@ -834,6 +855,19 @@ class TransactionController extends BaseController
                     ->orLike('tm_source.value', $search)
                     ->orLike('t.invoice', $search)
                     ->groupEnd();
+
+                // Handle phone number prefix normalization
+                // Strip non-numeric chars to handle formats like "+62 812-1199-9229"
+                $phoneClean = preg_replace('/[^0-9]/', '', $search);
+                if (strlen($phoneClean) >= 10) {
+                    if (strpos($phoneClean, '62') === 0) {
+                        $altPhone = '0' . substr($phoneClean, 2);
+                        $builder->orLike('c.no_hp_customer', $altPhone);
+                    } elseif (strpos($phoneClean, '0') === 0) {
+                        $altPhone = '62' . substr($phoneClean, 1);
+                        $builder->orLike('c.no_hp_customer', $altPhone);
+                    }
+                }
             }
 
             // Clone for count BEFORE limit
