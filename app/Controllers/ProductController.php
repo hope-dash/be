@@ -2078,6 +2078,7 @@ class ProductController extends ResourceController
             $sortMethod = in_array(strtolower($sortMethodRaw), ['asc', 'desc']) ? strtolower($sortMethodRaw) : 'desc';
 
             $namaProduct = trim($this->request->getGet('namaProduct') ?? '');
+            $idToko = $this->request->getGet('id_toko');
             $limit = max((int) ($this->request->getGet('limit') ?: 25), 1);
             $page = max((int) ($this->request->getGet('page') ?: 1), 1);
             $offset = ($page - 1) * $limit;
@@ -2128,11 +2129,15 @@ class ProductController extends ResourceController
             // === Hitung stock dari table stock ===
             $stockData = [];
             if (!empty($productCodes)) {
-                $stocks = $this->stockModel
+                $stockQuery = $this->stockModel
                     ->select('id_barang, id_toko, stock as total_stock, barang_cacat as total_cacat')
-                    ->whereIn('id_barang', $productCodes)
-                    ->get()
-                    ->getResultArray();
+                    ->whereIn('id_barang', $productCodes);
+                    
+                if ($idToko) {
+                    $stockQuery->where('id_toko', $idToko);
+                }
+                
+                $stocks = $stockQuery->get()->getResultArray();
 
                 foreach ($stocks as $stock) {
                     $kode = $stock['id_barang'];
@@ -2161,13 +2166,18 @@ class ProductController extends ResourceController
             // === Hitung stock gantung (waiting_payment) dari sales_product + transaction ===
             $pendingStockData = [];
             if (!empty($productCodes)) {
-                $pendingStocks = $this->db->table('sales_product sp')
+                $pendingQuery = $this->db->table('sales_product sp')
                     ->select('sp.kode_barang, t.id_toko, SUM(sp.jumlah) as total_pending')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $productCodes)
                     ->where('t.tenant_id', \App\Libraries\TenantContext::id())
-                    ->where('t.status', 'WAITING_PAYMENT')
-                    ->groupBy('sp.kode_barang, t.id_toko')
+                    ->where('t.status', 'WAITING_PAYMENT');
+                    
+                if ($idToko) {
+                    $pendingQuery->where('t.id_toko', $idToko);
+                }
+                
+                $pendingStocks = $pendingQuery->groupBy('sp.kode_barang, t.id_toko')
                     ->get()
                     ->getResultArray();
 
@@ -2270,10 +2280,15 @@ class ProductController extends ResourceController
             // Hitung stock global
             $globalStockData = [];
             if (!empty($allProductCodes)) {
-                $globalStocks = $this->stockModel
+                $globalStockQuery = $this->stockModel
                     ->select('id_barang, SUM(stock) as total_stock, SUM(barang_cacat) as total_cacat')
-                    ->whereIn('id_barang', $allProductCodes)
-                    ->groupBy('id_barang')
+                    ->whereIn('id_barang', $allProductCodes);
+                    
+                if ($idToko) {
+                    $globalStockQuery->where('id_toko', $idToko);
+                }
+                
+                $globalStocks = $globalStockQuery->groupBy('id_barang')
                     ->get()
                     ->getResultArray();
 
@@ -2288,13 +2303,18 @@ class ProductController extends ResourceController
             // Hitung stock gantung global
             $globalPendingStockData = [];
             if (!empty($allProductCodes)) {
-                $globalPendingStocks = $this->db->table('sales_product sp')
+                $globalPendingQuery = $this->db->table('sales_product sp')
                     ->select('sp.kode_barang, SUM(sp.jumlah) as total_pending')
                     ->join('transaction t', 't.id = sp.id_transaction')
                     ->whereIn('sp.kode_barang', $allProductCodes)
                     ->where('t.tenant_id', \App\Libraries\TenantContext::id())
-                    ->where('t.status', 'WAITING_PAYMENT')
-                    ->groupBy('sp.kode_barang')
+                    ->where('t.status', 'WAITING_PAYMENT');
+                    
+                if ($idToko) {
+                    $globalPendingQuery->where('t.id_toko', $idToko);
+                }
+                
+                $globalPendingStocks = $globalPendingQuery->groupBy('sp.kode_barang')
                     ->get()
                     ->getResultArray();
 

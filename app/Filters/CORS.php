@@ -12,12 +12,23 @@ class CORS implements FilterInterface
     {
         $origin = $request->getHeaderLine('Origin') ?: '*';
 
-        // Use PHP header() for maximum reliability across CI4 lifecycle
-        header("Access-Control-Allow-Origin: $origin");
+        if ($origin === '*') {
+            header("Access-Control-Allow-Origin: *");
+        } else {
+            header("Access-Control-Allow-Origin: $origin");
+            header("Access-Control-Allow-Credentials: true");
+        }
+
+        // Allow any requested headers dynamically, or fallback to a broad list
+        $reqHeaders = $request->getHeaderLine('Access-Control-Request-Headers');
+        if ($reqHeaders) {
+            header("Access-Control-Allow-Headers: $reqHeaders");
+        } else {
+            header("Access-Control-Allow-Headers: *");
+        }
+
         header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PATCH, PUT, DELETE");
-        header("Access-Control-Allow-Headers: X-API-KEY, X-Tenant, Origin, X-Requested-With, Content-Type, Accept, Authorization, Access-Control-Request-Method, Access-Control-Request-Headers");
-        header("Access-Control-Allow-Credentials: true");
-        header("Access-Control-Expose-Headers: Content-Disposition, Content-Length, X-Filename");
+        header("Access-Control-Expose-Headers: Content-Disposition, Content-Length, X-Filename, *");
 
         if (strcasecmp($request->getMethod(), 'options') === 0) {
             header("HTTP/1.1 200 OK");
