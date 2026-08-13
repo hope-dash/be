@@ -131,21 +131,44 @@ class TiktokService
      */
     public function getWarehouseId(int $idToko): string
     {
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $cachedWhId = $tokoMetaModel->getMeta($idToko, 'tiktok_warehouse_id');
+        if (!empty($cachedWhId)) {
+            return $cachedWhId;
+        }
+
         try {
             $this->initializeForToko($idToko);
             $response = $this->request('GET', '/logistics/202309/warehouses');
-            if (($response['code'] ?? -1) === 0 && !empty($response['data']['warehouses'])) {
-                foreach ($response['data']['warehouses'] as $wh) {
-                    if (($wh['is_default'] ?? false) === true) {
-                        return $wh['id'];
+            
+            $warehouses = $response['data']['warehouses'] ?? $response['data']['warehouse_list'] ?? [];
+            if (($response['code'] ?? -1) === 0 && !empty($warehouses)) {
+                $selectedId = null;
+                foreach ($warehouses as $wh) {
+                    $whId = $wh['id'] ?? $wh['warehouse_id'] ?? null;
+                    if (!$whId) continue;
+
+                    $isDefault = !empty($wh['is_default']) || ($wh['is_default'] ?? false) === true || ($wh['type'] ?? '') === 'SALES_WAREHOUSE';
+                    if ($isDefault) {
+                        $selectedId = $whId;
+                        break;
                     }
                 }
-                return $response['data']['warehouses'][0]['id'];
+
+                if (!$selectedId) {
+                    $selectedId = $warehouses[0]['id'] ?? $warehouses[0]['warehouse_id'] ?? null;
+                }
+
+                if ($selectedId) {
+                    $tokoMetaModel->setMeta($idToko, 'tiktok_warehouse_id', $selectedId);
+                    return $selectedId;
+                }
             }
         } catch (\Exception $e) {
             log_message('error', '[TiktokService getWarehouseId Error] ' . $e->getMessage());
         }
-        return 'default';
+
+        return (string) $tokoMetaModel->getMeta($idToko, 'tiktok_warehouse_id', 'default');
     }
 
     /**

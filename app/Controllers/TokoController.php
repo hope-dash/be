@@ -226,6 +226,7 @@ class TokoController extends BaseController
                 $toko['tiktok_access_token'] = $tokoMetaModel->getMeta($toko['id'], 'tiktok_access_token');
                 $toko['tiktok_refresh_token'] = $tokoMetaModel->getMeta($toko['id'], 'tiktok_refresh_token');
                 $toko['tiktok_upcharge'] = (float) ($tokoMetaModel->getMeta($toko['id'], 'tiktok_upcharge') ?? 0);
+                $toko['tiktok_warehouse_id'] = $tokoMetaModel->getMeta($toko['id'], 'tiktok_warehouse_id');
                 $toko['is_tiktok_integrated'] = !empty($toko['tiktok_access_token']);
 
                 return $this->jsonResponse->oneResp("", $toko, 200);
@@ -300,6 +301,7 @@ class TokoController extends BaseController
                 $tokoObj->tiktok_access_token = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_access_token');
                 $tokoObj->tiktok_refresh_token = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_refresh_token');
                 $tokoObj->tiktok_upcharge = (float) ($tokoMetaModel->getMeta($tokoObj->id, 'tiktok_upcharge') ?? 0);
+                $tokoObj->tiktok_warehouse_id = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_warehouse_id');
                 $tokoObj->is_tiktok_integrated = !empty($tokoObj->tiktok_access_token);
             }
 

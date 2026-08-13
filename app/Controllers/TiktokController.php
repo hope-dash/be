@@ -884,25 +884,58 @@ class TiktokController extends ResourceController
     }
 
     /**
-     * Fetch the first enabled Warehouse ID from TikTok Shop API
+     * Fetch the first enabled Warehouse ID from TikTok Shop API (with auto token refresh & meta fallback)
      */
     private function getTiktokWarehouseId($idToko)
     {
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+
+        // 1. Check if explicitly set / cached in toko_meta
+        $cachedWhId = $tokoMetaModel->getMeta((int) $idToko, 'tiktok_warehouse_id');
+        if (!empty($cachedWhId)) {
+            return $cachedWhId;
+        }
+
         try {
             $path = "/logistics/202309/warehouses";
             $response = $this->makeTiktokRequest($idToko, 'GET', $path, [], null);
-            if (($response['code'] ?? -1) === 0 && !empty($response['data']['warehouses'])) {
-                foreach ($response['data']['warehouses'] as $wh) {
-                    if (($wh['is_default'] ?? false) === true) {
-                        return $wh['id'];
+
+            // Auto-refresh token if expired
+            if (in_array(($response['code'] ?? 0), [105001, 105002, 105003])) {
+                $this->performTokenRefresh($idToko);
+                $response = $this->makeTiktokRequest($idToko, 'GET', $path, [], null);
+            }
+
+            log_message('info', "[getTiktokWarehouseId] Toko ID {$idToko} warehouses response: " . json_encode($response));
+
+            $warehouses = $response['data']['warehouses'] ?? $response['data']['warehouse_list'] ?? [];
+            if (($response['code'] ?? -1) === 0 && !empty($warehouses)) {
+                $selectedId = null;
+                foreach ($warehouses as $wh) {
+                    $whId = $wh['id'] ?? $wh['warehouse_id'] ?? null;
+                    if (!$whId) continue;
+
+                    $isDefault = !empty($wh['is_default']) || ($wh['is_default'] ?? false) === true || ($wh['type'] ?? '') === 'SALES_WAREHOUSE';
+                    if ($isDefault) {
+                        $selectedId = $whId;
+                        break;
                     }
                 }
-                return $response['data']['warehouses'][0]['id'];
+
+                if (!$selectedId) {
+                    $selectedId = $warehouses[0]['id'] ?? $warehouses[0]['warehouse_id'] ?? null;
+                }
+
+                if ($selectedId) {
+                    $tokoMetaModel->setMeta((int) $idToko, 'tiktok_warehouse_id', $selectedId);
+                    return $selectedId;
+                }
             }
         } catch (\Exception $e) {
             log_message('error', '[TikTok getTiktokWarehouseId Error] ' . $e->getMessage());
         }
-        return null;
+
+        return $tokoMetaModel->getMeta((int) $idToko, 'tiktok_warehouse_id', null);
     }
 
     /**
