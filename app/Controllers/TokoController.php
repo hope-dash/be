@@ -144,6 +144,7 @@ class TokoController extends BaseController
                 'kecamatan' => 'permit_empty',
                 'kelurahan' => 'permit_empty',
                 'kode_pos' => 'permit_empty',
+                'tiktok_upcharge' => 'permit_empty|numeric',
             ]);
 
             if (!$this->validate($validation->getRules())) {
@@ -184,6 +185,19 @@ class TokoController extends BaseController
 
             $this->db->transComplete();
 
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            if (isset($data->tiktok_upcharge)) {
+                $upchargeVal = (float) $data->tiktok_upcharge;
+                $tokoMetaModel->setMeta($id, 'tiktok_upcharge', $upchargeVal);
+
+                $accessToken = $tokoMetaModel->getMeta($id, 'tiktok_access_token');
+                $isIntegrated = !empty($accessToken);
+
+                if ($isIntegrated) {
+                    $this->triggerBackgroundSync((int) $id);
+                }
+            }
+
             return $this->jsonResponse->oneResp('Toko updated successfully', ['id' => $id], 201);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
@@ -207,6 +221,13 @@ class TokoController extends BaseController
                 ->getRowArray();
 
             if ($toko) {
+                $tokoMetaModel = new \App\Models\TokoMetaModel();
+                $toko['tiktok_shop_cipher'] = $tokoMetaModel->getMeta($toko['id'], 'tiktok_shop_cipher');
+                $toko['tiktok_access_token'] = $tokoMetaModel->getMeta($toko['id'], 'tiktok_access_token');
+                $toko['tiktok_refresh_token'] = $tokoMetaModel->getMeta($toko['id'], 'tiktok_refresh_token');
+                $toko['tiktok_upcharge'] = (float) ($tokoMetaModel->getMeta($toko['id'], 'tiktok_upcharge') ?? 0);
+                $toko['is_tiktok_integrated'] = !empty($toko['tiktok_access_token']);
+
                 return $this->jsonResponse->oneResp("", $toko, 200);
             } else {
                 return $this->jsonResponse->error("Toko Not Found", 404);
@@ -278,6 +299,7 @@ class TokoController extends BaseController
                 $tokoObj->tiktok_shop_cipher = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_shop_cipher');
                 $tokoObj->tiktok_access_token = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_access_token');
                 $tokoObj->tiktok_refresh_token = $tokoMetaModel->getMeta($tokoObj->id, 'tiktok_refresh_token');
+                $tokoObj->tiktok_upcharge = (float) ($tokoMetaModel->getMeta($tokoObj->id, 'tiktok_upcharge') ?? 0);
                 $tokoObj->is_tiktok_integrated = !empty($tokoObj->tiktok_access_token);
             }
 
@@ -475,6 +497,133 @@ class TokoController extends BaseController
             return $this->jsonResponse->oneResp("Bank configuration cleared successfully", null, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * POST / PUT /api/v2/toko/(:num)/tiktok-upcharge
+     * Update tiktok_upcharge for a specific shop and trigger sync if integrated
+     */
+    public function updateTiktokUpcharge($id = null)
+    {
+        try {
+            $data = $this->request->getJSON();
+            if (empty($data)) {
+                $data = (object) $this->request->getPost();
+            }
+
+            $upcharge = isset($data->tiktok_upcharge) ? $data->tiktok_upcharge : ($data->upcharge ?? null);
+            if ($upcharge === null) {
+                return $this->jsonResponse->error('tiktok_upcharge wajib diisi', 400);
+            }
+
+            $upchargeVal = (float) $upcharge;
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            $tokoMetaModel->setMeta((int) $id, 'tiktok_upcharge', $upchargeVal);
+
+            $accessToken = $tokoMetaModel->getMeta((int) $id, 'tiktok_access_token');
+            $isIntegrated = !empty($accessToken);
+            $syncResult = null;
+
+            if ($isIntegrated) {
+                $this->triggerBackgroundSync((int) $id);
+                $syncResult = 'Proses sinkronisasi berjalan di background.';
+            }
+
+            return $this->jsonResponse->oneResp('TikTok upcharge berhasil diperbarui', [
+                'id_toko' => (int) $id,
+                'tiktok_upcharge' => $upchargeVal,
+                'is_tiktok_integrated' => $isIntegrated,
+                'sync_result' => $syncResult
+            ], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Helper to sync all eligible products (stock > 0 and images > 0) to TikTok Shop for a given Toko ID
+     */
+    public function syncAllProductsToTiktokForToko(int $idToko)
+    {
+        try {
+            $stockModel   = new \App\Models\StockModel();
+            $productModel = new \App\Models\ProductModel();
+            $imageModel   = new \App\Models\ImageModel();
+
+            // Find stock records with stock > 0 for this store
+            $stockRecords = $stockModel->where('id_toko', $idToko)
+                ->where('stock >', 0)
+                ->findAll();
+
+            if (empty($stockRecords)) {
+                return ['processed' => 0, 'success' => 0, 'failed' => 0];
+            }
+
+            $tiktokController = new \App\Controllers\TiktokController();
+            $tiktokService    = new \App\Libraries\TiktokService();
+
+            $successCount = 0;
+            $failCount = 0;
+
+            foreach ($stockRecords as $stockRow) {
+                $idBarang = $stockRow['id_barang'];
+
+                $product = $productModel->where('id_barang', $idBarang)->first();
+                if (!$product) {
+                    continue;
+                }
+
+                $idProduct = $product['id'];
+
+                // Check if images > 0
+                $imageCount = $imageModel->where('type', 'product')
+                    ->where('kode', $idProduct)
+                    ->countAllResults();
+
+                if ($imageCount <= 0) {
+                    continue;
+                }
+
+                // If already uploaded to TikTok
+                if (!empty($stockRow['tiktok_product_id'])) {
+                    // Sync stock & price
+                    $tiktokService->syncProductStock((int) $idProduct, (int) $idToko);
+                    $tiktokService->syncProductPrice((int) $idProduct, (int) $idToko);
+                    $successCount++;
+                } else {
+                    // Upload product to TikTok
+                    $uploadRes = $tiktokController->uploadProductToTiktok($idProduct, $idToko);
+                    if (isset($uploadRes['success']) && $uploadRes['success']) {
+                        $successCount++;
+                    } else {
+                        $failCount++;
+                    }
+                }
+            }
+
+            return ['processed' => count($stockRecords), 'success' => $successCount, 'failed' => $failCount];
+        } catch (\Exception $e) {
+            log_message('error', "[syncAllProductsToTiktokForToko] Error for toko {$idToko}: " . $e->getMessage());
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Helper to trigger background sync CLI process without blocking HTTP request
+     */
+    private function triggerBackgroundSync(int $idToko)
+    {
+        try {
+            $sparkPath = ROOTPATH . 'spark';
+            if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+                pclose(popen("start /B php {$sparkPath} tiktok:sync-bekasi {$idToko}", "r"));
+            } else {
+                exec("php {$sparkPath} tiktok:sync-bekasi {$idToko} > /dev/null 2>&1 &");
+            }
+        } catch (\Exception $e) {
+            log_message('error', "[triggerBackgroundSync] Failed to launch background process: " . $e->getMessage());
         }
     }
 }

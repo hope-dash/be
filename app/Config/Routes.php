@@ -148,6 +148,8 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
     $routes->get('toko/(:num)', 'TokoController::getDetailById/$1');
     $routes->get('toko', 'TokoController::getAllToko');
     $routes->put('toko/(:num)', 'TokoController::update/$1');
+    $routes->post('toko/(:num)/tiktok-upcharge', 'TokoController::updateTiktokUpcharge/$1');
+    $routes->put('toko/(:num)/tiktok-upcharge', 'TokoController::updateTiktokUpcharge/$1');
     $routes->delete('toko/(:num)', 'TokoController::delete/$1');
 
     // Inventory (Model & Seri)
@@ -257,6 +259,8 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('toko/(:num)/bank', 'TokoController::updateBankConfig/$1');
         $routes->get('toko/(:num)/bank', 'TokoController::getBankConfig/$1');
         $routes->delete('toko/(:num)/bank', 'TokoController::deleteBankConfig/$1');
+        $routes->post('toko/(:num)/tiktok-upcharge', 'TokoController::updateTiktokUpcharge/$1');
+        $routes->put('toko/(:num)/tiktok-upcharge', 'TokoController::updateTiktokUpcharge/$1');
 
         // Accounting & Journal
         $routes->get('journal', 'JournalController::index');
@@ -301,6 +305,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('product/(:num)/move-to-normal', 'ProductController::moveToNormal/$1');
         $routes->post('product/(:num)/write-off-cacat', 'ProductController::writeOffCacat/$1');
         $routes->post('product/(:num)/sync-tiktok', 'ProductController::syncTiktokAllShops/$1');
+        $routes->post('product/sync-bekasi-tiktok', 'ProductController::syncBekasiTiktok');
         $routes->post('product/tiktok-connect', 'ProductController::connectTiktok');
 
         $routes->get('tenant-profile', 'TenantControllerV2::profile');

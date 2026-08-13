@@ -2482,6 +2482,96 @@ class ProductController extends ResourceController
         }
     }
 
+    /**
+     * POST /api/v2/product/sync-bekasi-tiktok
+     * Custom script: Sync all products with stock > 1 in Bekasi store & image count > 0 to TikTok Shop
+     */
+    public function syncBekasiTiktok()
+    {
+        try {
+            $tokoModel    = new \App\Models\TokoModel();
+            $stockModel   = new \App\Models\StockModel();
+            $productModel = new \App\Models\ProductModel();
+            $imageModel   = new \App\Models\ImageModel();
+
+            $idToko = 1;
+            $toko = $tokoModel->find($idToko);
+            $tokoName = $toko['toko_name'] ?? "Toko ID {$idToko}";
+
+            $stockRecords = $stockModel->where('id_toko', $idToko)
+                ->where('stock >', 0)
+                ->findAll();
+
+            if (empty($stockRecords)) {
+                return $this->jsonResponse->oneResp("Tidak ada produk di Toko ID {$idToko} dengan stok > 0.", [
+                    'processed' => 0,
+                    'success' => [],
+                    'failed' => [],
+                    'skipped' => []
+                ], 200);
+            }
+
+            $tiktokController = new \App\Controllers\TiktokController();
+            $tiktokService    = new \App\Libraries\TiktokService();
+
+            $successList = [];
+            $failList    = [];
+            $skippedList = [];
+
+            foreach ($stockRecords as $stockRow) {
+                $idBarang = $stockRow['id_barang'];
+
+                $product = $productModel->where('id_barang', $idBarang)->first();
+                if (!$product) {
+                    $skippedList[] = ['id_barang' => $idBarang, 'reason' => 'Product record not found'];
+                    continue;
+                }
+
+                $idProduct  = $product['id'];
+                $namaBarang = $product['nama_barang'];
+
+                $imageCount = $imageModel->where('type', 'product')
+                    ->where('kode', $idProduct)
+                    ->countAllResults();
+
+                if ($imageCount <= 0) {
+                    $skippedList[] = ['id_product' => $idProduct, 'nama_barang' => $namaBarang, 'reason' => 'Jumlah gambar 0'];
+                    continue;
+                }
+
+                if (!empty($stockRow['tiktok_product_id'])) {
+                    $syncRes = $tiktokService->syncProductStock((int) $idProduct, (int) $idToko);
+                    if (isset($syncRes['success']) && $syncRes['success']) {
+                        $successList[] = ['id_product' => $idProduct, 'nama_barang' => $namaBarang, 'action' => 'SYNC_STOCK_SUCCESS'];
+                    } else {
+                        $failList[] = ['id_product' => $idProduct, 'nama_barang' => $namaBarang, 'action' => 'SYNC_STOCK_FAILED', 'message' => $syncRes['message'] ?? 'Failed'];
+                    }
+                } else {
+                    $uploadRes = $tiktokController->uploadProductToTiktok($idProduct, $idToko);
+                    if (isset($uploadRes['success']) && $uploadRes['success']) {
+                        $successList[] = ['id_product' => $idProduct, 'nama_barang' => $namaBarang, 'action' => 'UPLOAD_SUCCESS', 'tiktok_product_id' => $uploadRes['tiktok_product_id'] ?? null];
+                    } else {
+                        $failList[] = ['id_product' => $idProduct, 'nama_barang' => $namaBarang, 'action' => 'UPLOAD_FAILED', 'message' => $uploadRes['message'] ?? 'Failed'];
+                    }
+                }
+            }
+
+            return $this->jsonResponse->oneResp("Selesai memproses sinkronisasi TikTok untuk Toko ID {$idToko} ({$tokoName}).", [
+                'toko_name' => $tokoName,
+                'total_checked' => count($stockRecords),
+                'success_count' => count($successList),
+                'fail_count' => count($failList),
+                'skipped_count' => count($skippedList),
+                'success' => $successList,
+                'failed' => $failList,
+                'skipped' => $skippedList
+            ], 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
     public function deleteByProductId($id)
     {
         $token = $this->request->user;

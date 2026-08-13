@@ -301,6 +301,11 @@ class TiktokController extends ResourceController
             }
 
             $sku = !empty($product['tiktok_sku']) ? $product['tiktok_sku'] : $product['id_barang'];
+            $basePrice = (float) $product['harga_jual'];
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            $upchargePercent = (float) ($tokoMetaModel->getMeta((int) $idToko, 'tiktok_upcharge') ?? 0);
+            $uploadPrice = $upchargePercent > 0 ? (int) round($basePrice * (1 + ($upchargePercent / 100))) : (int) $basePrice;
+
             $stockRecord = $stockModel->where('id_barang', $product['id_barang'])
                 ->where('id_toko', $idToko)
                 ->first();
@@ -426,7 +431,7 @@ class TiktokController extends ResourceController
                     [
                         'seller_sku' => $sku,
                         'price' => [
-                            'amount' => (string) (int) $product['harga_jual'],
+                            'amount' => (string) $uploadPrice,
                             'currency' => 'IDR'
                         ],
                         'inventory' => [
@@ -716,7 +721,7 @@ class TiktokController extends ResourceController
                             [
                                 'seller_sku' => $sku,
                                 'price' => [
-                                    'amount' => (string) (int) $product['harga_jual'],
+                                    'amount' => (string) $uploadPrice,
                                     'currency' => 'IDR'
                                 ],
                                 'inventory' => [

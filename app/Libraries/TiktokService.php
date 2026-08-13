@@ -251,7 +251,10 @@ class TiktokService
             return ['success' => false, 'message' => 'Product is not mapped to TikTok Shop yet'];
         }
 
-        $price = (float) $product['harga_jual'];
+        $basePrice = (float) $product['harga_jual'];
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $upchargePercent = (float) ($tokoMetaModel->getMeta($idToko, 'tiktok_upcharge') ?? 0);
+        $price = $upchargePercent > 0 ? (int) round($basePrice * (1 + ($upchargePercent / 100))) : (int) $basePrice;
 
         $tiktokSkuId = $product['tiktok_sku'];
         if (!empty($product['tiktok_meta'])) {
