@@ -91,20 +91,86 @@ class CronController extends Controller
      */
     public function runScheduler()
     {
-        // Check if the library is installed
-        if (!class_exists('\Daycry\CronJob\JobRunner')) {
-            return $this->jsonResponse->error('Daycry CronJob library is not installed correctly.', 500);
+        $schedulerResult = [];
+
+        // 1. Run Daycry CronJob runner if available
+        if (class_exists('\Daycry\CronJob\JobRunner')) {
+            try {
+                $config = config('CronJob');
+                $scheduler = service('scheduler');
+                $config->init($scheduler);
+
+                $runner = new \Daycry\CronJob\JobRunner($config);
+                $runner->run();
+                $schedulerResult['scheduler'] = 'Ran Daycry CronJob scheduler';
+            } catch (\Exception $e) {
+                $schedulerResult['scheduler_error'] = $e->getMessage();
+            }
         }
 
+        // 2. Always run TikTok token refresh process
         try {
-            $config = config('CronJob');
-            $scheduler = service('scheduler');
-            $config->init($scheduler);
+            $tiktokRes = $this->performTiktokTokenRefresh();
+            $schedulerResult['tiktok_refresh_token'] = $tiktokRes;
+        } catch (\Exception $e) {
+            $schedulerResult['tiktok_refresh_token_error'] = $e->getMessage();
+        }
 
-            $runner = new \Daycry\CronJob\JobRunner($config);
-            $runner->run();
+        return $this->jsonResponse->oneResp('Scheduler run successfully', $schedulerResult, 200);
+    }
 
-            return $this->jsonResponse->oneResp('Scheduler run successfully', [], 200);
+    /**
+     * Internal helper to refresh TikTok tokens
+     */
+    private function performTiktokTokenRefresh()
+    {
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $tokens = $tokoMetaModel->where('meta_key', 'tiktok_refresh_token')
+                               ->where('meta_value !=', '')
+                               ->findAll();
+
+        if (empty($tokens)) {
+            return ['status' => 'No integrated TikTok stores found'];
+        }
+
+        $controller = new \App\Controllers\TiktokController();
+        $results = [];
+
+        foreach ($tokens as $tokenRow) {
+            $tokoId = $tokenRow['toko_id'];
+            $res = $controller->performTokenRefresh($tokoId);
+            $results[$tokoId] = $res;
+        }
+
+        return $results;
+    }
+
+    /**
+     * Refresh TikTok access tokens for all integrated shops
+     * GET /api/cron/tiktok-refresh-token
+     */
+    public function refreshTiktokTokens()
+    {
+        try {
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            $tokens = $tokoMetaModel->where('meta_key', 'tiktok_refresh_token')
+                                   ->where('meta_value !=', '')
+                                   ->findAll();
+
+            if (empty($tokens)) {
+                return $this->jsonResponse->oneResp('No integrated TikTok stores found', [], 200);
+            }
+
+            $controller = new \App\Controllers\TiktokController();
+            $results = [];
+
+            foreach ($tokens as $tokenRow) {
+                $tokoId = $tokenRow['toko_id'];
+                $res = $controller->performTokenRefresh($tokoId);
+                $results[$tokoId] = $res;
+            }
+
+            return $this->jsonResponse->oneResp('TikTok token refresh completed', $results, 200);
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 500);
         }

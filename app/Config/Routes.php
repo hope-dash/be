@@ -31,6 +31,7 @@ $routes->get('tiktok_verif', 'TiktokController::callback');
 // Cron Jobs
 $routes->get('api/cron/process-email', 'CronController::processEmailQueue');
 $routes->get('api/cron/run-scheduler', 'CronController::runScheduler');
+$routes->get('api/cron/tiktok-refresh-token', 'CronController::refreshTiktokTokens');
 
 // Webhooks
 // (Routes removed for rebuild)
