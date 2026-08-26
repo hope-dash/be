@@ -120,9 +120,9 @@ class CronController extends Controller
     }
 
     /**
-     * Internal helper to refresh TikTok tokens
+     * Internal helper to refresh TikTok tokens (Daily check: only refresh if updated > 18 hours ago)
      */
-    private function performTiktokTokenRefresh()
+    private function performTiktokTokenRefresh(bool $force = false)
     {
         $tokoMetaModel = new \App\Models\TokoMetaModel();
         $tokens = $tokoMetaModel->where('meta_key', 'tiktok_refresh_token')
@@ -138,6 +138,23 @@ class CronController extends Controller
 
         foreach ($tokens as $tokenRow) {
             $tokoId = $tokenRow['toko_id'];
+
+            if (!$force) {
+                // Daily check: skip if access token was updated less than 18 hours ago
+                $accessMeta = $tokoMetaModel->where('toko_id', $tokoId)->where('meta_key', 'tiktok_access_token')->first();
+                if ($accessMeta && !empty($accessMeta['updated_at'])) {
+                    $lastUpdated = strtotime($accessMeta['updated_at']);
+                    if ((time() - $lastUpdated) < 18 * 3600) {
+                        $results[$tokoId] = [
+                            'success' => true,
+                            'skipped' => true,
+                            'message' => 'Token sudah diperbarui hari ini (kurang dari 18 jam yang lalu).'
+                        ];
+                        continue;
+                    }
+                }
+            }
+
             $res = $controller->performTokenRefresh($tokoId);
             $results[$tokoId] = $res;
         }

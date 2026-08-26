@@ -76,7 +76,7 @@ class CronJob extends BaseConfig
         // Process email queue every minute
         $schedule->command('email:process-queue')->everyMinute()->named('email-queue');
 
-        // Refresh TikTok Shop tokens every 4 hours
-        $schedule->command('tiktok:refresh-token')->cron('0 */4 * * *')->named('tiktok-refresh-token');
+        // Refresh TikTok Shop tokens daily at 01:00
+        $schedule->command('tiktok:refresh-token')->daily('01:00')->named('tiktok-refresh-token');
     }
 }
