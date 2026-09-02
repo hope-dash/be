@@ -2594,6 +2594,32 @@ class TransactionControllerV2 extends ResourceController
 
             $transaction['meta'] = $metaMap;
 
+            // Expose key fee & shipping fields at top level of transaction data
+            $actualTotal = (float)$transaction['actual_total'];
+            $amountSubtotal = (float)$transaction['amount'];
+            $shippingCost = (float)($transaction['biaya_pengiriman'] ?? 0);
+            $extraFeeDiff = max(0, $actualTotal - ($amountSubtotal + $shippingCost));
+
+            $biayaPenanganan = (float)($metaMap['biaya_penanganan'] ?? ($metaMap['handling_fee'] ?? 0));
+            $biayaLayanan = (float)($metaMap['biaya_layanan_aplikasi'] ?? ($metaMap['service_fee'] ?? 0));
+
+            if ($biayaPenanganan == 0 && $biayaLayanan == 0 && $extraFeeDiff > 0) {
+                $biayaPenanganan = $extraFeeDiff;
+                $metaMap['biaya_penanganan'] = (string)$extraFeeDiff;
+                $metaMap['handling_fee'] = (string)$extraFeeDiff;
+                $transaction['meta'] = $metaMap;
+            }
+
+            $transaction['biaya_penanganan'] = $biayaPenanganan;
+            $transaction['handling_fee'] = $biayaPenanganan;
+            $transaction['biaya_layanan_aplikasi'] = $biayaLayanan;
+            $transaction['service_fee'] = $biayaLayanan;
+            $transaction['biaya_pengiriman_setelah_diskon'] = (float)($metaMap['biaya_pengiriman_setelah_diskon'] ?? ($metaMap['biaya_pengiriman'] ?? ($transaction['biaya_pengiriman'] ?? 0)));
+            $transaction['pengiriman'] = !empty($transaction['pengiriman']) ? $transaction['pengiriman'] : ($metaMap['pengiriman'] ?? ($metaMap['courier'] ?? 'Pengiriman Standar'));
+            $transaction['courier'] = $metaMap['courier'] ?? ($transaction['pengiriman'] ?? 'Pengiriman Standar');
+            $transaction['shipping_provider'] = $metaMap['shipping_provider'] ?? '';
+            $transaction['shipping_status'] = $metaMap['shipping_status'] ?? ($transaction['status'] ?? '');
+
             // Security Check: If hit by Customer, verify ownership
             if (property_exists($this->request, 'customer') && isset($this->request->customer)) {
                 $customerId = $this->request->customer['id'];

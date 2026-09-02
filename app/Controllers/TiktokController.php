@@ -1804,6 +1804,28 @@ class TiktokController extends ResourceController
         $orderId = $order['id'];
         $rawTiktokStatus = strtoupper($order['status'] ?? 'UNPAID');
 
+        // Extract shipping & fee details
+        $pengiriman = $order['delivery_option_name'] 
+                   ?? ($order['shipping_provider_name'] 
+                   ?? ($order['shipping_provider'] 
+                   ?? ($order['delivery_type'] 
+                   ?? 'Pengiriman Standar')));
+
+        $shippingProvider = $order['shipping_provider_name'] 
+                         ?? ($order['shipping_provider'] 
+                         ?? 'Dikirim melalui platform');
+
+        $handlingFee = (float)($order['payment']['handling_fee'] ?? 0);
+        $serviceFee = (float)($order['payment']['platform_service_fee'] ?? ($order['payment']['service_fee'] ?? 0));
+        $shippingCost = (float)($order['payment']['shipping_fee'] ?? 0);
+        $subTotal = (float)($order['payment']['sub_total'] ?? ($order['payment']['original_total_product_price'] ?? 0));
+        $grandTotal = (float)($order['payment']['total_amount'] ?? 0);
+
+        $extraDiff = max(0, $grandTotal - ($subTotal + $shippingCost));
+        if ($handlingFee == 0 && $serviceFee == 0 && $extraDiff > 0) {
+            $handlingFee = $extraDiff;
+        }
+
         // Normalize status
         $isCancel = in_array($rawTiktokStatus, ['CANCEL', 'CANCELLED', 'CANCELED', 'REFUND']);
         $isCompleted = ($rawTiktokStatus === 'COMPLETED');
@@ -1813,6 +1835,20 @@ class TiktokController extends ResourceController
 
         if ($existingTrx) {
             $currentStatus = $existingTrx['status'];
+
+            // Update shipping & fee meta for existing transaction
+            $transactionModel->update($existingTrx['id'], [
+                'pengiriman' => $pengiriman,
+                'biaya_pengiriman' => $shippingCost
+            ]);
+            $this->setTransactionMeta($existingTrx['id'], 'pengiriman', $pengiriman);
+            $this->setTransactionMeta($existingTrx['id'], 'courier', $pengiriman);
+            $this->setTransactionMeta($existingTrx['id'], 'shipping_provider', $shippingProvider);
+            $this->setTransactionMeta($existingTrx['id'], 'biaya_penanganan', (string)$handlingFee);
+            $this->setTransactionMeta($existingTrx['id'], 'handling_fee', (string)$handlingFee);
+            $this->setTransactionMeta($existingTrx['id'], 'biaya_layanan_aplikasi', (string)$serviceFee);
+            $this->setTransactionMeta($existingTrx['id'], 'service_fee', (string)$serviceFee);
+            $this->setTransactionMeta($existingTrx['id'], 'biaya_pengiriman_setelah_diskon', (string)$shippingCost);
 
             // 4. Handle CANCEL (Cancel, Cancelled, Canceled, Refund)
             if ($isCancel && $currentStatus !== 'CANCEL') {
@@ -1866,43 +1902,64 @@ class TiktokController extends ResourceController
                 // Fetch finance breakdown for commission and net settlement if available
                 $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
 
-                $commissionFee = $financeData['commission_fee'] ?? 0;
-                $transactionFee = $financeData['transaction_fee'] ?? 0;
-                $netSettlement = $financeData['net_settlement'] ?? $existingTrx['actual_total'];
+                $actualTotal = (float)$existingTrx['actual_total'];
+                $netSettlement = ($financeData['net_settlement'] !== null) ? (float)$financeData['net_settlement'] : max(0, $actualTotal - $commissionFee - $transactionFee);
+                $totalFee = max(0, $actualTotal - $netSettlement);
 
                 $transactionModel->update($existingTrx['id'], [
                     'status' => 'COMPLETED',
-                    'total_payment' => $existingTrx['actual_total']
+                    'total_payment' => $actualTotal
                 ]);
 
                 $this->setTransactionMeta($existingTrx['id'], 'shipping_status', 'COMPLETED');
-                $this->setTransactionMeta($existingTrx['id'], 'platform_commission_fee', (string) $commissionFee);
-                $this->setTransactionMeta($existingTrx['id'], 'transaction_fee', (string) $transactionFee);
+                $this->setTransactionMeta($existingTrx['id'], 'platform_commission_fee', (string) $totalFee);
                 $this->setTransactionMeta($existingTrx['id'], 'net_settlement_amount', (string) $netSettlement);
 
-                // Create Settlement Journal for Commission & Payment Settlement
-                if ($commissionFee > 0 || $transactionFee > 0) {
-                    $settleJournalId = $this->createJournal('SETTLEMENT', $existingTrx['id'], $orderId, date('Y-m-d'), "Settlement & Commission Invoice #{$orderId}", $idToko);
-                    $totalFee = $commissionFee + $transactionFee;
-                    // Dr Cash/Bank / Settlement
-                    $this->addJournalItem($settleJournalId, '10' . $idToko . '1', $netSettlement, 0, $idToko);
-                    // Dr Platform Commission Expense
-                    $this->addJournalItem($settleJournalId, '50' . $idToko . '9', $totalFee, 0, $idToko);
-                    // Cr Accounts Receivable (AR)
-                    $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $existingTrx['actual_total'], $idToko);
+                // Re-create / Update Settlement Journal for Commission & Payment Settlement
+                $db = \Config\Database::connect();
+                $existingSettle = $db->table('journals')
+                    ->where('reference_no', $orderId)
+                    ->where('reference_type', 'SETTLEMENT')
+                    ->get()->getRowArray();
+
+                $settleJournalId = $existingSettle ? $existingSettle['id'] : $this->createJournal('SETTLEMENT', $existingTrx['id'], $orderId, date('Y-m-d'), "Settlement & Commission Invoice #{$orderId}", $idToko);
+
+                // Clear old items if any
+                $db->table('journal_items')->where('journal_id', $settleJournalId)->delete();
+
+                // Dr Cash/Bank (Net settlement amount)
+                $this->addJournalItem($settleJournalId, '10' . $idToko . '1', $netSettlement, 0, $idToko);
+
+                // Dr Platform Commission Expense (If totalFee > 0)
+                if ($totalFee > 0) {
+                    $this->addJournalItem($settleJournalId, '50' . $idToko . '5', $totalFee, 0, $idToko);
                 }
+
+                // Cr Accounts Receivable (AR)
+                $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
+
+                // Update totals on header
+                $db->table('journals')->where('id', $settleJournalId)->update([
+                    'total_debit' => $actualTotal,
+                    'total_credit' => $actualTotal
+                ]);
 
                 log_aktivitas([
                     'user_id' => 0,
                     'action_type' => 'UPDATE_TRANSACTION_STATUS',
                     'target_table' => 'transaction',
                     'target_id' => $existingTrx['id'],
-                    'description' => "Order {$orderId} COMPLETED and marked PAID/COMPLETED. Net settlement: {$netSettlement}, Commission: {$commissionFee}"
+                    'description' => "Order {$orderId} COMPLETED. Net settlement: {$netSettlement}, Platform Fee: {$totalFee}"
                 ]);
             }
-            // 2. Handle intermediate shipping status (AWAITING_SHIPMENT, IN_TRANSIT, DELIVERED, ON_HOLD)
-            // JANGAN di-set PAID dlu! Hanya update shipping status di meta.
-            elseif ($isShippingStatus) {
+            // 2. Handle intermediate shipping status (AWAITING_SHIPMENT, IN_TRANSIT, DELIVERED, ON_HOLD, PAID)
+            elseif ($isShippingStatus || $rawTiktokStatus === 'PAID') {
+                if ($currentStatus !== 'COMPLETED' && $currentStatus !== 'CANCEL') {
+                    $transactionModel->update($existingTrx['id'], [
+                        'status' => 'PAID PLATFORM',
+                        'total_payment' => 0
+                    ]);
+                }
                 $this->setTransactionMeta($existingTrx['id'], 'shipping_status', $rawTiktokStatus);
 
                 log_aktivitas([
@@ -1910,7 +1967,7 @@ class TiktokController extends ResourceController
                     'action_type' => 'UPDATE_SHIPPING_STATUS',
                     'target_table' => 'transaction',
                     'target_id' => $existingTrx['id'],
-                    'description' => "Updated shipping status for order {$orderId} to {$rawTiktokStatus}"
+                    'description' => "Updated shipping status for order {$orderId} to {$rawTiktokStatus} (Status: PAID PLATFORM)"
                 ]);
             }
         } else {
@@ -1939,13 +1996,9 @@ class TiktokController extends ResourceController
                 }
             }
 
-            $subTotal = (float)($order['payment']['sub_total'] ?? ($order['payment']['original_total_product_price'] ?? 0));
-            $grandTotal = (float)($order['payment']['total_amount'] ?? 0);
-            $shippingCost = (float)($order['payment']['shipping_fee'] ?? 0);
-
-            // Process line items & Fallback for seller_sku
+            // Process line items & group by SKU/kode_barang
             $cogsTotal = 0;
-            $itemsToProcess = [];
+            $itemsGrouped = [];
             $lineItems = $order['line_items'] ?? $order['item_list'] ?? [];
 
             foreach ($lineItems as $item) {
@@ -1970,17 +2023,31 @@ class TiktokController extends ResourceController
 
                 $salePrice = (float)($item['sale_price'] ?? 0);
                 $originalPrice = (float)($item['original_price'] ?? 0);
+                $effectivePrice = $salePrice > 0 ? $salePrice : ($originalPrice > 0 ? $originalPrice : 0);
 
-                $itemsToProcess[] = [
-                    'kode_barang' => $itemKodeBarang,
-                    'product' => $product,
-                    'modal_system' => $modalSystem,
-                    'qty' => $qty,
-                    'sale_price' => $salePrice,
-                    'original_price' => $originalPrice
-                ];
+                if (!isset($itemsGrouped[$itemKodeBarang])) {
+                    $itemsGrouped[$itemKodeBarang] = [
+                        'kode_barang' => $itemKodeBarang,
+                        'product' => $product,
+                        'modal_system' => $modalSystem,
+                        'qty' => 0,
+                        'sale_price' => $effectivePrice,
+                        'original_price' => $effectivePrice
+                    ];
+                }
+                $itemsGrouped[$itemKodeBarang]['qty'] += $qty;
 
                 $cogsTotal += $modalSystem * $qty;
+            }
+            $itemsToProcess = array_values($itemsGrouped);
+
+            $initialStatus = 'WAITING_PAYMENT';
+            if ($isCancel) {
+                $initialStatus = 'CANCEL';
+            } elseif ($isCompleted) {
+                $initialStatus = 'COMPLETED';
+            } elseif ($isShippingStatus || $rawTiktokStatus === 'PAID') {
+                $initialStatus = 'PAID PLATFORM';
             }
 
             $trxData = [
@@ -1989,12 +2056,12 @@ class TiktokController extends ResourceController
                 'amount' => $subTotal,
                 'actual_total' => $grandTotal,
                 'total_payment' => 0, // Starts at 0 until COMPLETED
-                'status' => $isCancel ? 'CANCEL' : 'WAITING_PAYMENT',
+                'status' => $initialStatus,
                 'id_toko' => $idToko,
                 'date_time' => date('Y-m-d H:i:s', $order['create_time'] ?? time()),
                 'is_service' => 0,
                 'source' => $order['commerce_platform'] ?? 'TOKOPEDIA_TIKTOK',
-                'pengiriman' => $order['delivery_option_name'] ?? 'Standard shipping',
+                'pengiriman' => $pengiriman,
                 'biaya_pengiriman' => $shippingCost,
                 'total_modal' => $cogsTotal,
                 'created_by' => 0
@@ -2015,7 +2082,15 @@ class TiktokController extends ResourceController
                     'buyer_phone' => $recipient['phone_number'] ?? '',
                     'buyer_address' => $recipient['full_address'] ?? '',
                     'payment_method' => $order['payment_method_name'] ?? '',
+                    'pengiriman' => $pengiriman,
+                    'courier' => $pengiriman,
+                    'shipping_provider' => $shippingProvider,
                     'biaya_pengiriman' => $shippingCost,
+                    'biaya_pengiriman_setelah_diskon' => $shippingCost,
+                    'biaya_penanganan' => $handlingFee,
+                    'handling_fee' => $handlingFee,
+                    'biaya_layanan_aplikasi' => $serviceFee,
+                    'service_fee' => $serviceFee,
                     'shipping_type' => $order['shipping_type'] ?? '',
                     'shipping_status' => $rawTiktokStatus,
                     'source' => $order['commerce_platform'] ?? 'TOKOPEDIA_TIKTOK'
@@ -2088,6 +2163,10 @@ class TiktokController extends ResourceController
                     if ($shippingCost > 0) {
                         $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $shippingCost, $idToko); // Cr Shipping Revenue
                     }
+                    $extraBuyerFees = $handlingFee + $serviceFee;
+                    if ($extraBuyerFees > 0) {
+                        $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $extraBuyerFees, $idToko); // Cr Handling/Platform Service Fee Revenue
+                    }
 
                     // -- Accounting: COGS Journal (Mengurangi Inventory) --
                     if ($cogsTotal > 0) {
@@ -2113,12 +2192,24 @@ class TiktokController extends ResourceController
      */
     private function setTransactionMeta($trxId, $key, $value)
     {
-        $metaModel = new \App\Models\TransactionMetaModel();
-        $existing = $metaModel->where('transaction_id', $trxId)->where('key', $key)->first();
+        $db = \Config\Database::connect();
+        $trx = $db->table('transaction')->select('tenant_id')->where('id', $trxId)->get()->getRowArray();
+        $tenantId = $trx['tenant_id'] ?? (\App\Libraries\TenantContext::id() ?: 1);
+
+        $existing = $db->table('transaction_meta')
+            ->where('transaction_id', $trxId)
+            ->where('key', $key)
+            ->get()
+            ->getRowArray();
+
         if ($existing) {
-            $metaModel->update($existing['id'], ['value' => (string)$value]);
+            $db->table('transaction_meta')->where('id', $existing['id'])->update([
+                'tenant_id' => $tenantId,
+                'value' => (string)$value
+            ]);
         } else {
-            $metaModel->insert([
+            $db->table('transaction_meta')->insert([
+                'tenant_id' => $tenantId,
                 'transaction_id' => $trxId,
                 'key' => $key,
                 'value' => (string)$value
@@ -2139,14 +2230,29 @@ class TiktokController extends ResourceController
 
             if (($response['code'] ?? -1) === 0 && !empty($response['data'])) {
                 $data = $response['data'];
-                $commission = (float)($data['platform_commission_fee'] ?? ($data['commission_fee'] ?? 0));
-                $trxFee = (float)($data['transaction_fee'] ?? 0);
-                $netSettlement = (float)($data['net_settlement_amount'] ?? ($data['settlement_amount'] ?? 0));
+                $list = $data['statement_transactions'] ?? (isset($data['statement_transactions_list']) ? $data['statement_transactions_list'] : [$data]);
+
+                $totalCommission = 0;
+                $netSettlement = 0;
+
+                foreach ($list as $item) {
+                    $comm = (float)($item['platform_commission_fee'] ?? ($item['commission_fee'] ?? 0));
+                    $trxFee = (float)($item['transaction_fee'] ?? ($item['service_fee'] ?? 0));
+                    $dynComm = (float)($item['dynamic_commission_fee'] ?? 0);
+                    $shipFee = (float)($item['shipping_fee_deduction'] ?? 0);
+                    $procFee = (float)($item['order_processing_fee'] ?? 0);
+
+                    $feeSum = abs($comm) + abs($trxFee) + abs($dynComm) + abs($shipFee) + abs($procFee);
+                    $totalCommission += $feeSum;
+
+                    $settle = (float)($item['net_settlement_amount'] ?? ($item['settlement_amount'] ?? 0));
+                    $netSettlement += $settle;
+                }
 
                 return [
-                    'commission_fee' => abs($commission),
-                    'transaction_fee' => abs($trxFee),
-                    'net_settlement' => $netSettlement
+                    'commission_fee' => $totalCommission,
+                    'transaction_fee' => 0,
+                    'net_settlement' => $netSettlement > 0 ? $netSettlement : null
                 ];
             }
         } catch (\Exception $e) {
@@ -2177,18 +2283,28 @@ class TiktokController extends ResourceController
         $db = \Config\Database::connect();
         $journalItemModel = new \App\Models\JournalItemModel();
 
+        // 1. First search by code
         $account = $db->table('accounts')
-            ->where('base_code', $accountCode)
-            ->where('id_toko', $tokoId)
+            ->where('code', $accountCode)
             ->get()->getRowArray();
 
+        // 2. Search by base_code + id_toko
         if (!$account) {
             $account = $db->table('accounts')
-                ->where('code', $accountCode)
+                ->where('base_code', $accountCode)
+                ->where('id_toko', $tokoId)
+                ->get()->getRowArray();
+        }
+
+        // 3. Search by base_code alone
+        if (!$account) {
+            $account = $db->table('accounts')
+                ->where('base_code', $accountCode)
                 ->get()->getRowArray();
         }
 
         if (!$account) {
+            log_message('error', "[addJournalItem] Account code {$accountCode} not found for toko {$tokoId}");
             return;
         }
 
@@ -2343,6 +2459,262 @@ class TiktokController extends ResourceController
             }
         } catch (\Exception $e) {
             return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
+     * Fix metadata, status & journal for Invoice 16464 / Order 585842656613598949
+     * GET /api/v2/fix-invoice-16464
+     */
+    public function fixInvoice16464()
+    {
+        try {
+            $db = \Config\Database::connect();
+            $id = 16464;
+            $orderId = '585842656613598949';
+            $idToko = 1;
+
+            \App\Libraries\TenantContext::set(['id' => 1]);
+
+            // Fix tenant_id = 1 on transaction_meta for transaction 16464
+            $db->table('transaction_meta')->where('transaction_id', $id)->update(['tenant_id' => 1]);
+
+            $transactionModel = new \App\Models\TransactionModel();
+            $transaction = $transactionModel->find($id);
+            if (!$transaction) {
+                return $this->jsonResponse->error("Transaksi 16464 tidak ditemukan", 404);
+            }
+
+            $pengiriman = 'Pengiriman Standar';
+            $shippingProvider = 'Dikirim melalui platform';
+            $handlingFee = 2885;
+            $serviceFee = 1000;
+            $shippingCost = 0;
+
+            // 1. Update Transaction status & pengiriman
+            $transactionModel->update($id, [
+                'status' => 'PAID PLATFORM',
+                'total_payment' => 0,
+                'pengiriman' => 'Pengiriman Standar',
+                'biaya_pengiriman' => 0
+            ]);
+
+            // 2. Set Meta values
+            $metaPairs = [
+                'pengiriman' => $pengiriman,
+                'courier' => $pengiriman,
+                'shipping_provider' => $shippingProvider,
+                'shipping_status' => 'READY_TO_PICKUP',
+                'biaya_penanganan' => (string)$handlingFee,
+                'handling_fee' => (string)$handlingFee,
+                'biaya_layanan_aplikasi' => (string)$serviceFee,
+                'service_fee' => (string)$serviceFee,
+                'biaya_pengiriman' => (string)$shippingCost,
+                'biaya_pengiriman_setelah_diskon' => (string)$shippingCost
+            ];
+
+            foreach ($metaPairs as $k => $v) {
+                $this->setTransactionMeta($id, $k, $v);
+            }
+
+            // 3. Fix sales_product for Invoice 16464: SKU I046, QTY 2, Price Rp 146.250 x 2 (Subtotal 287.500)
+            $productModel = new \App\Models\ProductModel();
+            $productI046 = $productModel->where('id_barang', 'I046')->first();
+            $modalPerPiece = $productI046 ? (float)($productI046['harga_modal'] ?? 81900) : 81900;
+
+            $db->table('sales_product')->where('id_transaction', $id)->delete();
+            $db->table('sales_product')->insert([
+                'tenant_id' => 1,
+                'id_transaction' => $id,
+                'kode_barang' => 'I046',
+                'jumlah' => 2,
+                'harga_system' => 146250.00,
+                'harga_jual' => 143750.00,
+                'total' => 287500.00,
+                'modal_system' => $modalPerPiece,
+                'total_modal' => $modalPerPiece * 2,
+                'actual_per_piece' => 143750.00,
+                'actual_total' => 287500.00,
+                'is_service' => 0
+            ]);
+
+            // 4. Fix Journal Imbalance (Sales Journal for 585842656613598949)
+            // AR (1013) is Dr 291385, Sales (4011) is Cr 287500, Fee (4011) is Cr 3885
+            $salesJournal = $db->table('journals')
+                ->where('reference_no', $orderId)
+                ->where('reference_type', 'SALES')
+                ->get()->getRowArray();
+
+            if ($salesJournal) {
+                $journalId = $salesJournal['id'];
+                $db->table('journal_items')->where('journal_id', $journalId)->delete();
+
+                // Dr AR (Calon Pendapatan) 291385
+                $this->addJournalItem($journalId, '1013', 291385, 0, $idToko);
+                // Cr Sales Revenue 287500
+                $this->addJournalItem($journalId, '4011', 0, 287500, $idToko);
+                // Cr Extra / Handling & Service Fees 3885
+                $this->addJournalItem($journalId, '4011', 0, 3885, $idToko);
+
+                // Update total_debit & total_credit in journals table (291385)
+                $db->table('journals')->where('id', $journalId)->update([
+                    'total_debit' => 291385,
+                    'total_credit' => 291385
+                ]);
+            }
+
+            return $this->jsonResponse->oneResp('Invoice 16464 berhasil diperbarui!', [
+                'id' => $id,
+                'invoice' => $orderId,
+                'status' => 'PAID PLATFORM',
+                'shipping_status' => 'READY_TO_PICKUP',
+                'sku' => 'I046',
+                'qty' => 2,
+                'harga_unit' => 146250,
+                'biaya_penanganan' => 2885,
+                'biaya_layanan_aplikasi' => 1000,
+                'journal_fixed' => true
+            ], 200);
+
+        } catch (\Throwable $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Re-sync & fix metadata, status & journals for any TikTok/Tokopedia order by transaction ID
+     * GET /api/v2/fix-tiktok-invoice/(:num)
+     */
+    public function fixTiktokInvoice($transactionId = null)
+    {
+        try {
+            if (!$transactionId) {
+                return $this->jsonResponse->error("ID Transaksi wajib diisi", 400);
+            }
+
+            $db = \Config\Database::connect();
+            $transactionModel = new \App\Models\TransactionModel();
+            $transaction = $transactionModel->find($transactionId);
+
+            if (!$transaction) {
+                return $this->jsonResponse->error("Transaksi {$transactionId} tidak ditemukan", 404);
+            }
+
+            $tenantId = $transaction['tenant_id'] ?? 1;
+            $idToko = $transaction['id_toko'] ?? 1;
+            $orderId = $transaction['invoice'];
+
+            \App\Libraries\TenantContext::set(['id' => $tenantId]);
+
+            // Fix tenant_id on transaction_meta if null
+            $db->table('transaction_meta')
+                ->where('transaction_id', $transactionId)
+                ->where('tenant_id IS NULL')
+                ->update(['tenant_id' => $tenantId]);
+
+            // Fetch real-time order data from TikTok/Tokopedia API
+            $path = "/order/202309/orders";
+            $params = ['ids' => $orderId];
+            $response = $this->makeTiktokRequest($idToko, 'GET', $path, $params);
+
+            $orderList = $response['data']['orders'] ?? [];
+            if (!empty($orderList)) {
+                $order = $orderList[0];
+                // Trigger syncTiktokOrder with full real-time order payload
+                $this->syncTiktokOrder($idToko, $order);
+            } else {
+                // Fallback: Check if status is COMPLETED or DELIVERED/PAID
+                $currentStatus = $transaction['status'];
+                if ($currentStatus !== 'COMPLETED' && $currentStatus !== 'CANCEL') {
+                    $transactionModel->update($transactionId, [
+                        'status' => 'PAID PLATFORM',
+                        'total_payment' => 0
+                    ]);
+                    $this->setTransactionMeta($transactionId, 'shipping_status', 'DELIVERED');
+                }
+            }
+
+            // Also rebuild & balance Sales Journal for this order
+            $salesJournal = $db->table('journals')
+                ->where('reference_no', $orderId)
+                ->where('reference_type', 'SALES')
+                ->get()->getRowArray();
+
+            if ($salesJournal) {
+                $sjId = $salesJournal['id'];
+                $db->table('journal_items')->where('journal_id', $sjId)->delete();
+
+                $actualTotal = (float)$transaction['actual_total'];
+                $subTotal = (float)$transaction['amount'];
+                $shippingCost = (float)($transaction['biaya_pengiriman'] ?? 0);
+                $extraFee = $actualTotal - ($subTotal + $shippingCost);
+
+                // Dr AR (Calon Pendapatan)
+                $this->addJournalItem($sjId, '10' . $idToko . '3', $actualTotal, 0, $idToko);
+                // Cr Sales Revenue
+                if ($subTotal > 0) {
+                    $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $subTotal, $idToko);
+                }
+                // Cr Shipping Revenue
+                if ($shippingCost > 0) {
+                    $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $shippingCost, $idToko);
+                }
+                // Cr Extra / Handling Fees
+                if ($extraFee > 0) {
+                    $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $extraFee, $idToko);
+                }
+
+                $db->table('journals')->where('id', $sjId)->update([
+                    'total_debit' => $actualTotal,
+                    'total_credit' => $actualTotal
+                ]);
+            }
+
+            // Consolidate sales_product records if duplicated by kode_barang
+            $spRows = $db->table('sales_product')->where('id_transaction', $transactionId)->get()->getResultArray();
+            if (!empty($spRows)) {
+                $groupedSp = [];
+                foreach ($spRows as $sp) {
+                    $kb = $sp['kode_barang'];
+                    if (!isset($groupedSp[$kb])) {
+                        $groupedSp[$kb] = $sp;
+                        $groupedSp[$kb]['jumlah'] = 0;
+                        $groupedSp[$kb]['total'] = 0;
+                        $groupedSp[$kb]['total_modal'] = 0;
+                        $groupedSp[$kb]['actual_total'] = 0;
+                    }
+                    $groupedSp[$kb]['jumlah'] += (int)$sp['jumlah'];
+                    $groupedSp[$kb]['total'] += (float)$sp['total'];
+                    $groupedSp[$kb]['total_modal'] += (float)$sp['total_modal'];
+                    $groupedSp[$kb]['actual_total'] += (float)$sp['actual_total'];
+                }
+
+                // Clear old rows and re-insert consolidated rows
+                $db->table('sales_product')->where('id_transaction', $transactionId)->delete();
+                foreach ($groupedSp as $gSp) {
+                    $qty = $gSp['jumlah'];
+                    $unitPrice = $qty > 0 ? ($gSp['total'] / $qty) : (float)$gSp['harga_jual'];
+                    unset($gSp['id']);
+                    $gSp['harga_jual'] = $unitPrice;
+                    $gSp['harga_system'] = $unitPrice;
+                    $gSp['actual_per_piece'] = $unitPrice;
+                    $db->table('sales_product')->insert($gSp);
+                }
+            }
+
+            // Re-fetch updated transaction & metas
+            $updatedTrx = $transactionModel->find($transactionId);
+            $metas = $db->table('transaction_meta')->where('transaction_id', $transactionId)->get()->getResultArray();
+            $metaMap = [];
+            foreach ($metas as $m) {
+                $metaMap[$m['key']] = $m['value'];
+            }
+            $updatedTrx['meta'] = $metaMap;
+
+            return $this->jsonResponse->oneResp("Transaksi {$transactionId} ({$orderId}) berhasil diperbarui & disinkronisasi ke COMPLETED!", $updatedTrx, 200);
+
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
 }

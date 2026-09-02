@@ -956,7 +956,13 @@ class TransactionController extends BaseController
             MAX(CASE WHEN tm.key = 'estimasi_selesai' THEN tm.value END) AS estimasi_selesai,
             MAX(CASE WHEN tm.key = 'imei' THEN tm.value END) AS imei,
             MAX(CASE WHEN tm.key = 'teknisi_id' THEN tm.value END) AS teknisi_id,
-            MAX(CASE WHEN tm.key = 'nama_teknisi' THEN tm.value END) AS nama_teknisi
+            MAX(CASE WHEN tm.key = 'nama_teknisi' THEN tm.value END) AS nama_teknisi,
+            MAX(CASE WHEN tm.key = 'biaya_penanganan' THEN tm.value END) AS biaya_penanganan,
+            MAX(CASE WHEN tm.key = 'handling_fee' THEN tm.value END) AS handling_fee,
+            MAX(CASE WHEN tm.key = 'biaya_layanan_aplikasi' THEN tm.value END) AS biaya_layanan_aplikasi,
+            MAX(CASE WHEN tm.key = 'service_fee' THEN tm.value END) AS service_fee,
+            MAX(CASE WHEN tm.key = 'courier' THEN tm.value END) AS courier,
+            MAX(CASE WHEN tm.key = 'shipping_status' THEN tm.value END) AS shipping_status
         ")
             ->join('toko tk', 't.id_toko = tk.id', 'left')
             ->join('transaction_meta tm_cust', "t.id = tm_cust.transaction_id AND tm_cust.key = 'customer_id'", 'left')
