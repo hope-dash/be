@@ -1751,11 +1751,10 @@ class TiktokController extends ResourceController
                 $idToko = $this->getTokoIdByShopId($shopId);
                 if ($idToko) {
                     try {
-                        // Fetch order details from TikTok Shop API
-                        $path = "/order/202507/orders";
+                        // Fetch order details from TikTok Shop API (V2 Partner endpoint)
+                        $path = "/order/202309/orders";
                         $params = [
-                            'ids' => $orderId,
-                            'version' => '202507'
+                            'ids' => $orderId
                         ];
                         $response = $this->makeTiktokRequest($idToko, 'GET', $path, $params, null);
 
@@ -1780,7 +1779,7 @@ class TiktokController extends ResourceController
     }
 
     /**
-     * Synchronize a TikTok order to local transactions
+     * Synchronize a TikTok / Tokopedia order to local transactions
      */
     private function syncTiktokOrder($idToko, $order)
     {
@@ -1803,79 +1802,121 @@ class TiktokController extends ResourceController
         $customerModel = new \App\Models\CustomerModel();
 
         $orderId = $order['id'];
-        $tiktokStatus = strtoupper($order['status'] ?? 'UNPAID');
+        $rawTiktokStatus = strtoupper($order['status'] ?? 'UNPAID');
 
-        // Map status
-        $localStatus = 'WAITING_PAYMENT';
-        if ($tiktokStatus === 'CANCEL') {
-            $localStatus = 'CANCEL';
-        } elseif (in_array($tiktokStatus, ['AWAITING_SHIPMENT', 'AWAITING_COLLECTION', 'IN_TRANSIT'])) {
-            $localStatus = 'PAID';
-        } elseif ($tiktokStatus === 'DELIVERED') {
-            $localStatus = 'DELIVERED';
-        } elseif ($tiktokStatus === 'COMPLETED') {
-            $localStatus = 'COMPLETED';
-        }
+        // Normalize status
+        $isCancel = in_array($rawTiktokStatus, ['CANCEL', 'CANCELLED', 'CANCELED', 'REFUND']);
+        $isCompleted = ($rawTiktokStatus === 'COMPLETED');
+        $isShippingStatus = in_array($rawTiktokStatus, ['AWAITING_SHIPMENT', 'AWAITING_COLLECTION', 'IN_TRANSIT', 'DELIVERED', 'ON_HOLD']);
 
         $existingTrx = $transactionModel->where('invoice', $orderId)->first();
 
         if ($existingTrx) {
-            // Transaction exists, check if status changed
             $currentStatus = $existingTrx['status'];
 
-            if ($currentStatus !== $localStatus) {
-                // If transitioning to CANCEL, restore stock
-                if ($localStatus === 'CANCEL' && $currentStatus !== 'CANCEL') {
-                    $items = $salesProductModel->where('id_transaction', $existingTrx['id'])->findAll();
-                    foreach ($items as $item) {
-                        if (!$item['is_service']) {
-                            // Restore Stock
-                            $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
-                            if (!$stockEntry) {
-                                $stockModel->insert([
-                                    'id_barang' => $item['kode_barang'],
-                                    'id_toko' => $idToko,
-                                    'stock' => 0,
-                                    'barang_cacat' => 0
-                                ]);
-                                $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
-                            }
-                            $newStock = $stockEntry['stock'] + $item['jumlah'];
-                            $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
-
-                            $stockLedgerModel->insert([
+            // 4. Handle CANCEL (Cancel, Cancelled, Canceled, Refund)
+            if ($isCancel && $currentStatus !== 'CANCEL') {
+                $items = $salesProductModel->where('id_transaction', $existingTrx['id'])->findAll();
+                foreach ($items as $item) {
+                    if (!$item['is_service']) {
+                        // Restore Stock
+                        $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
+                        if (!$stockEntry) {
+                            $stockModel->insert([
                                 'id_barang' => $item['kode_barang'],
                                 'id_toko' => $idToko,
-                                'qty' => $item['jumlah'],
-                                'balance' => $newStock,
-                                'reference_type' => 'RETURN',
-                                'reference_id' => $existingTrx['id'],
-                                'description' => "TikTok Cancel Order Webhook: {$orderId}"
+                                'stock' => 0,
+                                'barang_cacat' => 0
                             ]);
-
-                            // Removed syncProductStock API call to prevent double sync since it is initiated from TikTok
+                            $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
                         }
+                        $newStock = $stockEntry['stock'] + $item['jumlah'];
+                        $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
+
+                        $stockLedgerModel->insert([
+                            'id_barang' => $item['kode_barang'],
+                            'id_toko' => $idToko,
+                            'qty' => $item['jumlah'],
+                            'balance' => $newStock,
+                            'reference_type' => 'RETURN',
+                            'reference_id' => $existingTrx['id'],
+                            'description' => "TikTok/Tokopedia Cancel Order Webhook: {$orderId}"
+                        ]);
                     }
                 }
 
-                // If transitioning to PAID, update payment total
-                $updateData = ['status' => $localStatus];
-                if ($localStatus === 'PAID') {
-                    $updateData['total_payment'] = $existingTrx['actual_total'];
-                }
+                $transactionModel->update($existingTrx['id'], [
+                    'status' => 'CANCEL',
+                    'total_payment' => 0
+                ]);
 
-                $transactionModel->update($existingTrx['id'], $updateData);
+                // Update Meta
+                $this->setTransactionMeta($existingTrx['id'], 'shipping_status', $rawTiktokStatus);
 
                 log_aktivitas([
-                    'user_id' => 0, // system
+                    'user_id' => 0,
                     'action_type' => 'UPDATE_TRANSACTION_STATUS',
                     'target_table' => 'transaction',
                     'target_id' => $existingTrx['id'],
-                    'description' => "Updated TikTok order {$orderId} status from {$currentStatus} to {$localStatus}"
+                    'description' => "Updated order {$orderId} status from {$currentStatus} to CANCEL"
+                ]);
+            }
+            // 3. Handle COMPLETED (Dana diteruskan ke seller -> baru di-set PAID & catat komisi di jurnal)
+            elseif ($isCompleted && $currentStatus !== 'COMPLETED') {
+                // Fetch finance breakdown for commission and net settlement if available
+                $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
+
+                $commissionFee = $financeData['commission_fee'] ?? 0;
+                $transactionFee = $financeData['transaction_fee'] ?? 0;
+                $netSettlement = $financeData['net_settlement'] ?? $existingTrx['actual_total'];
+
+                $transactionModel->update($existingTrx['id'], [
+                    'status' => 'COMPLETED',
+                    'total_payment' => $existingTrx['actual_total']
+                ]);
+
+                $this->setTransactionMeta($existingTrx['id'], 'shipping_status', 'COMPLETED');
+                $this->setTransactionMeta($existingTrx['id'], 'platform_commission_fee', (string) $commissionFee);
+                $this->setTransactionMeta($existingTrx['id'], 'transaction_fee', (string) $transactionFee);
+                $this->setTransactionMeta($existingTrx['id'], 'net_settlement_amount', (string) $netSettlement);
+
+                // Create Settlement Journal for Commission & Payment Settlement
+                if ($commissionFee > 0 || $transactionFee > 0) {
+                    $settleJournalId = $this->createJournal('SETTLEMENT', $existingTrx['id'], $orderId, date('Y-m-d'), "Settlement & Commission Invoice #{$orderId}", $idToko);
+                    $totalFee = $commissionFee + $transactionFee;
+                    // Dr Cash/Bank / Settlement
+                    $this->addJournalItem($settleJournalId, '10' . $idToko . '1', $netSettlement, 0, $idToko);
+                    // Dr Platform Commission Expense
+                    $this->addJournalItem($settleJournalId, '50' . $idToko . '9', $totalFee, 0, $idToko);
+                    // Cr Accounts Receivable (AR)
+                    $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $existingTrx['actual_total'], $idToko);
+                }
+
+                log_aktivitas([
+                    'user_id' => 0,
+                    'action_type' => 'UPDATE_TRANSACTION_STATUS',
+                    'target_table' => 'transaction',
+                    'target_id' => $existingTrx['id'],
+                    'description' => "Order {$orderId} COMPLETED and marked PAID/COMPLETED. Net settlement: {$netSettlement}, Commission: {$commissionFee}"
+                ]);
+            }
+            // 2. Handle intermediate shipping status (AWAITING_SHIPMENT, IN_TRANSIT, DELIVERED, ON_HOLD)
+            // JANGAN di-set PAID dlu! Hanya update shipping status di meta.
+            elseif ($isShippingStatus) {
+                $this->setTransactionMeta($existingTrx['id'], 'shipping_status', $rawTiktokStatus);
+
+                log_aktivitas([
+                    'user_id' => 0,
+                    'action_type' => 'UPDATE_SHIPPING_STATUS',
+                    'target_table' => 'transaction',
+                    'target_id' => $existingTrx['id'],
+                    'description' => "Updated shipping status for order {$orderId} to {$rawTiktokStatus}"
                 ]);
             }
         } else {
-            // Customer Handling
+            // 1. Initial Order Creation (ON_HOLD / UNPAID / WAITING_PAYMENT / AWAITING_SHIPMENT)
+            // Order langsung dicatat invoice, mengurangi stok, status WAITING_PAYMENT, jurnal mencatat calon pendapatan & cogs.
+
             $buyerEmail = $order['buyer_email'] ?? '';
             $recipient = $order['recipient_address'] ?? [];
             $customerId = null;
@@ -1898,24 +1939,32 @@ class TiktokController extends ResourceController
                 }
             }
 
-            // Create New Transaction
             $subTotal = (float)($order['payment']['sub_total'] ?? ($order['payment']['original_total_product_price'] ?? 0));
             $grandTotal = (float)($order['payment']['total_amount'] ?? 0);
             $shippingCost = (float)($order['payment']['shipping_fee'] ?? 0);
 
-            // Calculate total COGS
+            // Process line items & Fallback for seller_sku
             $cogsTotal = 0;
             $itemsToProcess = [];
+            $lineItems = $order['line_items'] ?? $order['item_list'] ?? [];
 
-            // Process line item values
-            $lineItems = $order['line_items'] ?? [];
             foreach ($lineItems as $item) {
-                $sellerSku = $item['seller_sku'] ?? null;
-                if (!$sellerSku) {
-                    continue;
+                $sellerSku = $item['seller_sku'] ?? $item['sku_id'] ?? null;
+                $product = null;
+
+                if (!empty($sellerSku)) {
+                    $product = $productModel->where('id_barang', $sellerSku)->first();
                 }
 
-                $product = $productModel->where('id_barang', $sellerSku)->first();
+                // Fallback: search product by tiktok_product_id or item product_id if seller_sku not matched
+                if (!$product) {
+                    $tiktokPid = $item['product_id'] ?? null;
+                    if ($tiktokPid) {
+                        $product = $productModel->where('tiktok_product_id', $tiktokPid)->first();
+                    }
+                }
+
+                $itemKodeBarang = $product ? $product['id_barang'] : ($sellerSku ?: ($item['product_id'] ?? 'SKU-UNKNOWN'));
                 $modalSystem = $product ? (float)($product['harga_modal'] ?? 0) : 0;
                 $qty = isset($item['quantity']) ? (int)$item['quantity'] : (isset($item['qty']) ? (int)$item['qty'] : 1);
 
@@ -1923,7 +1972,7 @@ class TiktokController extends ResourceController
                 $originalPrice = (float)($item['original_price'] ?? 0);
 
                 $itemsToProcess[] = [
-                    'seller_sku' => $sellerSku,
+                    'kode_barang' => $itemKodeBarang,
                     'product' => $product,
                     'modal_system' => $modalSystem,
                     'qty' => $qty,
@@ -1939,12 +1988,12 @@ class TiktokController extends ResourceController
                 'invoice' => $orderId,
                 'amount' => $subTotal,
                 'actual_total' => $grandTotal,
-                'total_payment' => ($localStatus === 'WAITING_PAYMENT' || $localStatus === 'CANCEL') ? 0 : $grandTotal,
-                'status' => $localStatus,
+                'total_payment' => 0, // Starts at 0 until COMPLETED
+                'status' => $isCancel ? 'CANCEL' : 'WAITING_PAYMENT',
                 'id_toko' => $idToko,
                 'date_time' => date('Y-m-d H:i:s', $order['create_time'] ?? time()),
                 'is_service' => 0,
-                'source' => $order['commerce_platform'] ?? 'TIKTOK_SHOP',
+                'source' => $order['commerce_platform'] ?? 'TOKOPEDIA_TIKTOK',
                 'pengiriman' => $order['delivery_option_name'] ?? 'Standard shipping',
                 'biaya_pengiriman' => $shippingCost,
                 'total_modal' => $cogsTotal,
@@ -1960,10 +2009,6 @@ class TiktokController extends ResourceController
                     'customer_name' => $buyerEmail,
                     'customer_phone' => $recipient['phone_number'] ?? '',
                     'alamat' => $recipient['full_address'] ?? '',
-                    'provinsi' => '',
-                    'kota_kabupaten' => '',
-                    'kecamatan' => '',
-                    'kelurahan' => '',
                     'kode_pos' => $recipient['postal_code'] ?? '',
                     'buyer_email' => $buyerEmail,
                     'buyer_name' => $recipient['name'] ?? '',
@@ -1972,7 +2017,8 @@ class TiktokController extends ResourceController
                     'payment_method' => $order['payment_method_name'] ?? '',
                     'biaya_pengiriman' => $shippingCost,
                     'shipping_type' => $order['shipping_type'] ?? '',
-                    'source' => $order['commerce_platform'] ?? 'TIKTOK_SHOP'
+                    'shipping_status' => $rawTiktokStatus,
+                    'source' => $order['commerce_platform'] ?? 'TOKOPEDIA_TIKTOK'
                 ];
 
                 foreach ($metaData as $mk => $mv) {
@@ -1983,90 +2029,131 @@ class TiktokController extends ResourceController
                     ]);
                 }
 
-                // Process Line Items (Products & Stock deduction)
-                foreach ($itemsToProcess as $item) {
-                    $sellerSku = $item['seller_sku'];
-                    $product = $item['product'];
-                    $modalSystem = $item['modal_system'];
-                    $qty = $item['qty'];
-                    $salePrice = $item['sale_price'];
-                    $originalPrice = $item['original_price'];
+                // Deduct stock & create SalesProduct records (Only if not cancel)
+                if (!$isCancel) {
+                    foreach ($itemsToProcess as $item) {
+                        $kodeBarang = $item['kode_barang'];
+                        $modalSystem = $item['modal_system'];
+                        $qty = $item['qty'];
+                        $salePrice = $item['sale_price'];
+                        $originalPrice = $item['original_price'];
 
-                    $salesProductModel->insert([
-                        'tenant_id' => $tenantId,
-                        'id_transaction' => $trxId,
-                        'actual_per_piece' => $salePrice,
-                        'actual_total' => $salePrice * $qty,
-                        'kode_barang' => $sellerSku,
-                        'jumlah' => $qty,
-                        'harga_system' => $originalPrice,
-                        'harga_jual' => $salePrice,
-                        'total' => $salePrice * $qty,
-                        'modal_system' => $modalSystem,
-                        'total_modal' => $modalSystem * $qty,
-                        'is_service' => 0
-                    ]);
-
-                    // Deduct Stock
-                    $stockEntry = $stockModel->where('id_barang', $sellerSku)->where('id_toko', $idToko)->first();
-                    if (!$stockEntry) {
-                        $stockModel->insert([
-                            'id_barang' => $sellerSku,
-                            'id_toko' => $idToko,
-                            'stock' => 0,
-                            'barang_cacat' => 0
+                        $salesProductModel->insert([
+                            'tenant_id' => $tenantId,
+                            'id_transaction' => $trxId,
+                            'actual_per_piece' => $salePrice,
+                            'actual_total' => $salePrice * $qty,
+                            'kode_barang' => $kodeBarang,
+                            'jumlah' => $qty,
+                            'harga_system' => $originalPrice,
+                            'harga_jual' => $salePrice,
+                            'total' => $salePrice * $qty,
+                            'modal_system' => $modalSystem,
+                            'total_modal' => $modalSystem * $qty,
+                            'is_service' => 0
                         ]);
-                        $stockEntry = $stockModel->where('id_barang', $sellerSku)->where('id_toko', $idToko)->first();
+
+                        // Deduct Stock
+                        $stockEntry = $stockModel->where('id_barang', $kodeBarang)->where('id_toko', $idToko)->first();
+                        if (!$stockEntry) {
+                            $stockModel->insert([
+                                'id_barang' => $kodeBarang,
+                                'id_toko' => $idToko,
+                                'stock' => 0,
+                                'barang_cacat' => 0
+                            ]);
+                            $stockEntry = $stockModel->where('id_barang', $kodeBarang)->where('id_toko', $idToko)->first();
+                        }
+
+                        $newStock = $stockEntry['stock'] - $qty;
+                        $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
+
+                        $stockLedgerModel->insert([
+                            'id_barang' => $kodeBarang,
+                            'id_toko' => $idToko,
+                            'qty' => -$qty,
+                            'balance' => $newStock,
+                            'reference_type' => 'TRANSACTION',
+                            'reference_id' => $trxId,
+                            'description' => "TikTok/Tokopedia Order Webhook Created: {$orderId}"
+                        ]);
                     }
 
-                    $newStock = $stockEntry['stock'] - $qty;
-                    $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
+                    // -- Accounting: Sales Journal (Calon Pendapatan) --
+                    $journalId = $this->createJournal('SALES', $trxId, $orderId, date('Y-m-d'), "Invoice #{$orderId}", $idToko);
+                    $this->addJournalItem($journalId, '10' . $idToko . '3', $grandTotal, 0, $idToko); // Dr AR (Calon Pendapatan)
+                    if ($subTotal > 0) {
+                        $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $subTotal, $idToko); // Cr Sales Revenue
+                    }
+                    if ($shippingCost > 0) {
+                        $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $shippingCost, $idToko); // Cr Shipping Revenue
+                    }
 
-                    $stockLedgerModel->insert([
-                        'id_barang' => $sellerSku,
-                        'id_toko' => $idToko,
-                        'qty' => -$qty,
-                        'balance' => $newStock,
-                        'reference_type' => 'TRANSACTION',
-                        'reference_id' => $trxId,
-                        'description' => "TikTok Order Webhook Created: {$orderId}"
-                    ]);
-
-                    // Removed syncProductStock API call to prevent double sync since it is initiated from TikTok
-                }
-
-                // -- Accounting: Sales Journal --
-                $journalId = $this->createJournal('SALES', $trxId, $orderId, date('Y-m-d'), "Invoice #{$orderId}", $idToko);
-
-                // 1. Dr AR (Total Receivables)
-                $this->addJournalItem($journalId, '10' . $idToko . '3', $grandTotal, 0, $idToko);
-
-                // 3. Cr Sales Revenue (subTotal)
-                if ($subTotal > 0) {
-                    $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $subTotal, $idToko);
-                }
-
-                // 5. Shipping Logic (buyer pays shipping, Cr Shipping Revenue)
-                if ($shippingCost > 0) {
-                    $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $shippingCost, $idToko);
-                }
-
-                // -- Accounting: COGS Journal --
-                if ($cogsTotal > 0) {
-                    $cogsJournalId = $this->createJournal('COGS', $trxId, $orderId, date('Y-m-d'), "COGS Invoice {$orderId}", $idToko);
-                    $this->addJournalItem($cogsJournalId, '50' . $idToko . '1', $cogsTotal, 0, $idToko); // Dr COGS
-                    $this->addJournalItem($cogsJournalId, '10' . $idToko . '4', 0, $cogsTotal, $idToko); // Cr Inventory
+                    // -- Accounting: COGS Journal (Mengurangi Inventory) --
+                    if ($cogsTotal > 0) {
+                        $cogsJournalId = $this->createJournal('COGS', $trxId, $orderId, date('Y-m-d'), "COGS Invoice {$orderId}", $idToko);
+                        $this->addJournalItem($cogsJournalId, '50' . $idToko . '1', $cogsTotal, 0, $idToko); // Dr COGS
+                        $this->addJournalItem($cogsJournalId, '10' . $idToko . '4', 0, $cogsTotal, $idToko); // Cr Inventory
+                    }
                 }
 
                 log_aktivitas([
-                    'user_id' => 0, // system
+                    'user_id' => 0,
                     'action_type' => 'CREATE_TRANSACTION',
                     'target_table' => 'transaction',
                     'target_id' => $trxId,
-                    'description' => "Created TikTok order transaction {$orderId} with status {$localStatus}"
+                    'description' => "Created TikTok/Tokopedia order transaction {$orderId} with status WAITING_PAYMENT"
                 ]);
             }
         }
+    }
+
+    /**
+     * Helper to insert or update transaction meta
+     */
+    private function setTransactionMeta($trxId, $key, $value)
+    {
+        $metaModel = new \App\Models\TransactionMetaModel();
+        $existing = $metaModel->where('transaction_id', $trxId)->where('key', $key)->first();
+        if ($existing) {
+            $metaModel->update($existing['id'], ['value' => (string)$value]);
+        } else {
+            $metaModel->insert([
+                'transaction_id' => $trxId,
+                'key' => $key,
+                'value' => (string)$value
+            ]);
+        }
+    }
+
+    /**
+     * Fetch finance settlement breakdown for an order from TikTok/Tokopedia Finance API
+     */
+    private function fetchOrderFinanceBreakdown($idToko, $orderId)
+    {
+        try {
+            $path = "/finance/202309/orders/{$orderId}/statement_transactions";
+            $response = $this->makeTiktokRequest($idToko, 'GET', $path, [], null);
+
+            log_message('info', "[fetchOrderFinanceBreakdown] Order {$orderId} response: " . json_encode($response));
+
+            if (($response['code'] ?? -1) === 0 && !empty($response['data'])) {
+                $data = $response['data'];
+                $commission = (float)($data['platform_commission_fee'] ?? ($data['commission_fee'] ?? 0));
+                $trxFee = (float)($data['transaction_fee'] ?? 0);
+                $netSettlement = (float)($data['net_settlement_amount'] ?? ($data['settlement_amount'] ?? 0));
+
+                return [
+                    'commission_fee' => abs($commission),
+                    'transaction_fee' => abs($trxFee),
+                    'net_settlement' => $netSettlement
+                ];
+            }
+        } catch (\Exception $e) {
+            log_message('error', "[fetchOrderFinanceBreakdown] Error for order {$orderId}: " . $e->getMessage());
+        }
+
+        return ['commission_fee' => 0, 'transaction_fee' => 0, 'net_settlement' => null];
     }
 
     private function createJournal($refType, $refId, $refNo, $date, $desc, $tokoId = null)
