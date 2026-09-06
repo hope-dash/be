@@ -39,6 +39,7 @@ $routes->post('api/v2/moota/webhook', 'MootaController::webhook');
 $routes->post('api/v2/tiktok/webhook', 'TiktokController::webhook');
 $routes->get('api/v2/fix-invoice-16464', 'TiktokController::fixInvoice16464');
 $routes->get('api/v2/fix-tiktok-invoice/(:num)', 'TiktokController::fixTiktokInvoice/$1');
+$routes->get('api/v2/fix-all-tiktok-invoices', 'TiktokController::fixAllTiktokInvoices');
 
 // Wilayah Indonesia API
 $routes->group('api/wilayah', function ($routes) {
