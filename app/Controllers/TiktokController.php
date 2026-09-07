@@ -1903,8 +1903,8 @@ class TiktokController extends ResourceController
                 $db = \Config\Database::connect();
                 $actualTotal = (float)$existingTrx['actual_total'];
                 $subTotal = (float)$existingTrx['amount'];
-                $shippingCost = (float)($existingTrx['biaya_pengiriman'] ?? 0);
-                $extraFee = max(0, $actualTotal - ($subTotal + $shippingCost));
+                $shipMeta = $db->table('transaction_meta')->where('transaction_id', $existingTrx['id'])->where('key', 'biaya_pengiriman')->get()->getRowArray();
+                $shippingCost = (float)($shipMeta['value'] ?? ($existingTrx['biaya_pengiriman'] ?? 0));
                 $cogsTotal = (float)($existingTrx['total_modal'] ?? 0);
 
                 // 1. CANCEL_SALES Journal
@@ -1915,20 +1915,39 @@ class TiktokController extends ResourceController
                 $csId = $existingCancelSales ? $existingCancelSales['id'] : $this->createJournal('CANCEL_SALES', $existingTrx['id'], $orderId, date('Y-m-d'), "Cancellation {$orderId}", $idToko);
                 $db->table('journal_items')->where('journal_id', $csId)->delete();
 
-                if ($subTotal > 0) {
-                    $this->addJournalItem($csId, '40' . $idToko . '1', $subTotal, 0, $idToko);
+                // Reversing from existing SALES journal ensures 100% exact symmetry and balance
+                $existingSales = $db->table('journals')
+                    ->where('reference_no', $orderId)
+                    ->where('reference_type', 'SALES')
+                    ->get()->getRowArray();
+
+                if ($existingSales) {
+                    $salesItems = $db->table('journal_items')->where('journal_id', $existingSales['id'])->get()->getResultArray();
+                    foreach ($salesItems as $si) {
+                        $db->table('journal_items')->insert([
+                            'journal_id' => $csId,
+                            'account_id' => $si['account_id'],
+                            'debit' => $si['credit'],
+                            'credit' => $si['debit'],
+                            'created_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
+                } else {
+                    $salesDiff = round($actualTotal - ($subTotal + $shippingCost), 2);
+                    if ($subTotal > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $subTotal, 0, $idToko);
+                    }
+                    if ($shippingCost > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $shippingCost, 0, $idToko);
+                    }
+                    if ($salesDiff > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $salesDiff, 0, $idToko);
+                    } elseif ($salesDiff < 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '2', 0, abs($salesDiff), $idToko);
+                    }
+                    $this->addJournalItem($csId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
                 }
-                if ($shippingCost > 0) {
-                    $this->addJournalItem($csId, '40' . $idToko . '1', $shippingCost, 0, $idToko);
-                }
-                if ($extraFee > 0) {
-                    $this->addJournalItem($csId, '40' . $idToko . '1', $extraFee, 0, $idToko);
-                }
-                $this->addJournalItem($csId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
-                $db->table('journals')->where('id', $csId)->update([
-                    'total_debit' => $actualTotal,
-                    'total_credit' => $actualTotal
-                ]);
+                $this->finalizeJournalTotals($csId);
 
                 // 2. CANCEL_COGS Journal
                 if ($cogsTotal > 0) {
@@ -1941,10 +1960,7 @@ class TiktokController extends ResourceController
 
                     $this->addJournalItem($ccId, '10' . $idToko . '4', $cogsTotal, 0, $idToko); // Dr Inventory
                     $this->addJournalItem($ccId, '50' . $idToko . '1', 0, $cogsTotal, $idToko); // Cr COGS
-                    $db->table('journals')->where('id', $ccId)->update([
-                        'total_debit' => $cogsTotal,
-                        'total_credit' => $cogsTotal
-                    ]);
+                    $this->finalizeJournalTotals($ccId);
                 }
 
                 log_aktivitas([
@@ -2221,16 +2237,24 @@ class TiktokController extends ResourceController
                     if ($shippingCost > 0) {
                         $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $shippingCost, $idToko); // Cr Shipping Revenue
                     }
-                    $extraBuyerFees = $handlingFee + $serviceFee;
-                    if ($extraBuyerFees > 0) {
-                        $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $extraBuyerFees, $idToko); // Cr Handling/Platform Service Fee Revenue
+
+                    // Balance check: Grand Total vs (SubTotal + ShippingCost)
+                    $salesDiff = round($grandTotal - ($subTotal + $shippingCost), 2);
+                    if ($salesDiff > 0) {
+                        // Buyer paid extra handling fee / platform fee -> Credit platform fee revenue
+                        $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $salesDiff, $idToko);
+                    } elseif ($salesDiff < 0) {
+                        // Discount / voucher applied -> Debit Sales Discount
+                        $this->addJournalItem($journalId, '40' . $idToko . '2', abs($salesDiff), 0, $idToko);
                     }
+                    $this->finalizeJournalTotals($journalId);
 
                     // -- Accounting: COGS Journal (Mengurangi Inventory) --
                     if ($cogsTotal > 0) {
                         $cogsJournalId = $this->createJournal('COGS', $trxId, $orderId, date('Y-m-d'), "COGS Invoice {$orderId}", $idToko);
                         $this->addJournalItem($cogsJournalId, '50' . $idToko . '1', $cogsTotal, 0, $idToko); // Dr COGS
                         $this->addJournalItem($cogsJournalId, '10' . $idToko . '4', 0, $cogsTotal, $idToko); // Cr Inventory
+                        $this->finalizeJournalTotals($cogsJournalId);
                     }
                 }
 
@@ -2372,6 +2396,28 @@ class TiktokController extends ResourceController
             'debit' => $debit,
             'credit' => $credit,
             'created_at' => date('Y-m-d H:i:s')
+        ]);
+    }
+
+    private function finalizeJournalTotals($journalId)
+    {
+        $db = \Config\Database::connect();
+        $sums = $db->table('journal_items')
+            ->where('journal_id', $journalId)
+            ->selectSum('debit', 'total_debit')
+            ->selectSum('credit', 'total_credit')
+            ->get()->getRowArray();
+
+        $totalDebit = round((float)($sums['total_debit'] ?? 0), 2);
+        $totalCredit = round((float)($sums['total_credit'] ?? 0), 2);
+
+        if ($totalDebit !== $totalCredit) {
+            log_message('error', "[JOURNAL_IMBALANCE_WARNING] Journal ID {$journalId} has debit {$totalDebit} != credit {$totalCredit}");
+        }
+
+        $db->table('journals')->where('id', $journalId)->update([
+            'total_debit' => $totalDebit,
+            'total_credit' => $totalCredit
         ]);
     }
 
@@ -2718,8 +2764,8 @@ class TiktokController extends ResourceController
 
                 $actualTotal = (float)$transaction['actual_total'];
                 $subTotal = (float)$transaction['amount'];
-                $shippingCost = (float)($transaction['biaya_pengiriman'] ?? 0);
-                $extraFee = max(0, $actualTotal - ($subTotal + $shippingCost));
+                $shipMeta = $db->table('transaction_meta')->where('transaction_id', $transactionId)->where('key', 'biaya_pengiriman')->get()->getRowArray();
+                $shippingCost = (float)($shipMeta['value'] ?? ($transaction['biaya_pengiriman'] ?? 0));
                 $cogsTotal = (float)($transaction['total_modal'] ?? 0);
 
                 // 1. CANCEL_SALES Journal
@@ -2730,20 +2776,39 @@ class TiktokController extends ResourceController
                 $csId = $existingCancelSales ? $existingCancelSales['id'] : $this->createJournal('CANCEL_SALES', $transactionId, $orderId, date('Y-m-d'), "Cancellation {$orderId}", $idToko);
                 $db->table('journal_items')->where('journal_id', $csId)->delete();
 
-                if ($subTotal > 0) {
-                    $this->addJournalItem($csId, '40' . $idToko . '1', $subTotal, 0, $idToko);
+                // Reverse from existing SALES journal to ensure perfect symmetry and balance
+                $existingSales = $db->table('journals')
+                    ->where('reference_no', $orderId)
+                    ->where('reference_type', 'SALES')
+                    ->get()->getRowArray();
+
+                if ($existingSales) {
+                    $salesItems = $db->table('journal_items')->where('journal_id', $existingSales['id'])->get()->getResultArray();
+                    foreach ($salesItems as $si) {
+                        $db->table('journal_items')->insert([
+                            'journal_id' => $csId,
+                            'account_id' => $si['account_id'],
+                            'debit' => $si['credit'],
+                            'credit' => $si['debit'],
+                            'created_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
+                } else {
+                    $salesDiff = round($actualTotal - ($subTotal + $shippingCost), 2);
+                    if ($subTotal > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $subTotal, 0, $idToko);
+                    }
+                    if ($shippingCost > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $shippingCost, 0, $idToko);
+                    }
+                    if ($salesDiff > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $salesDiff, 0, $idToko);
+                    } elseif ($salesDiff < 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '2', 0, abs($salesDiff), $idToko);
+                    }
+                    $this->addJournalItem($csId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
                 }
-                if ($shippingCost > 0) {
-                    $this->addJournalItem($csId, '40' . $idToko . '1', $shippingCost, 0, $idToko);
-                }
-                if ($extraFee > 0) {
-                    $this->addJournalItem($csId, '40' . $idToko . '1', $extraFee, 0, $idToko);
-                }
-                $this->addJournalItem($csId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
-                $db->table('journals')->where('id', $csId)->update([
-                    'total_debit' => $actualTotal,
-                    'total_credit' => $actualTotal
-                ]);
+                $this->finalizeJournalTotals($csId);
 
                 // 2. CANCEL_COGS Journal
                 if ($cogsTotal > 0) {
@@ -2756,10 +2821,7 @@ class TiktokController extends ResourceController
 
                     $this->addJournalItem($ccId, '10' . $idToko . '4', $cogsTotal, 0, $idToko); // Dr Inventory
                     $this->addJournalItem($ccId, '50' . $idToko . '1', 0, $cogsTotal, $idToko); // Cr COGS
-                    $db->table('journals')->where('id', $ccId)->update([
-                        'total_debit' => $cogsTotal,
-                        'total_credit' => $cogsTotal
-                    ]);
+                    $this->finalizeJournalTotals($ccId);
                 }
             } else {
                 // Rebuild & balance Sales Journal for active non-cancelled order
@@ -2774,8 +2836,9 @@ class TiktokController extends ResourceController
 
                     $actualTotal = (float)$transaction['actual_total'];
                     $subTotal = (float)$transaction['amount'];
-                    $shippingCost = (float)($transaction['biaya_pengiriman'] ?? 0);
-                    $extraFee = $actualTotal - ($subTotal + $shippingCost);
+                    $shipMeta = $db->table('transaction_meta')->where('transaction_id', $transactionId)->where('key', 'biaya_pengiriman')->get()->getRowArray();
+                    $shippingCost = (float)($shipMeta['value'] ?? ($transaction['biaya_pengiriman'] ?? 0));
+                    $salesDiff = round($actualTotal - ($subTotal + $shippingCost), 2);
 
                     // Dr AR (Calon Pendapatan)
                     $this->addJournalItem($sjId, '10' . $idToko . '3', $actualTotal, 0, $idToko);
@@ -2787,15 +2850,14 @@ class TiktokController extends ResourceController
                     if ($shippingCost > 0) {
                         $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $shippingCost, $idToko);
                     }
-                    // Cr Extra / Handling Fees
-                    if ($extraFee > 0) {
-                        $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $extraFee, $idToko);
+                    // Balance: Extra fees or voucher/discount
+                    if ($salesDiff > 0) {
+                        $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $salesDiff, $idToko);
+                    } elseif ($salesDiff < 0) {
+                        $this->addJournalItem($sjId, '40' . $idToko . '2', abs($salesDiff), 0, $idToko);
                     }
 
-                    $db->table('journals')->where('id', $sjId)->update([
-                        'total_debit' => $actualTotal,
-                        'total_credit' => $actualTotal
-                    ]);
+                    $this->finalizeJournalTotals($sjId);
                 }
             }
 

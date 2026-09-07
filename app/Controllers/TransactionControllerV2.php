@@ -175,7 +175,7 @@ class TransactionControllerV2 extends ResourceController
                 }
                 else {
                     $itemDiscountType = 'FIXED';
-                    $itemDiscountValue = $itemDiscountAmount * $qty; // Discount per unit
+                    $itemDiscountValue = min($itemTotal, (float)$itemDiscountAmount * $qty); // Discount per unit, capped at item total
                 }
 
                 if ($isService) {
@@ -256,7 +256,7 @@ class TransactionControllerV2 extends ResourceController
             }
             else {
                 $txDiscountType = 'FIXED';
-                $txDiscountValue = $txDiscountAmount;
+                $txDiscountValue = min(max(0, $itemActualSubtotal), (float)$txDiscountAmount);
             }
 
             $totalDiscount = $totalItemDiscount + $txDiscountValue;
@@ -568,6 +568,7 @@ class TransactionControllerV2 extends ResourceController
                 $cogsJournalId = $this->createJournal('COGS', $trxId, $trxData['invoice'], date('Y-m-d'), "COGS Invoice {$trxData['invoice']}", $data->id_toko);
                 $this->addJournalItem($cogsJournalId, '50' . $data->id_toko . '1', $cogsTotal, 0, $data->id_toko); // Dr COGS
                 $this->addJournalItem($cogsJournalId, '10' . $data->id_toko . '4', 0, $cogsTotal, $data->id_toko); // Cr Inventory
+                $this->finalizeJournalTotals($cogsJournalId);
             }
 
             // -- Accounting: Cost of Service (Commission) Journal --
@@ -575,7 +576,10 @@ class TransactionControllerV2 extends ResourceController
                 $cosJournalId = $this->createJournal('COST_OF_SERVICE', $trxId, $trxData['invoice'], date('Y-m-d'), "Commission Cost Invoice {$trxData['invoice']}", $data->id_toko);
                 $this->addJournalItem($cosJournalId, '50' . $data->id_toko . '2', $totalCommission, 0, $data->id_toko); // Dr Cost of Service
                 $this->addJournalItem($cosJournalId, '20' . $data->id_toko . '1', 0, $totalCommission, $data->id_toko); // Cr Accounts Payable
+                $this->finalizeJournalTotals($cosJournalId);
             }
+
+            $this->finalizeJournalTotals($journalId);
 
             $this->db->transComplete();
 
@@ -699,7 +703,7 @@ class TransactionControllerV2 extends ResourceController
                     $itemDiscountValue = ($itemTotal * $itemDiscountAmount) / 100;
                 }
                 else {
-                    $itemDiscountValue = $itemDiscountAmount;
+                    $itemDiscountValue = min($itemTotal, (float)$itemDiscountAmount);
                 }
 
                 $grossAmount += $itemTotal;
@@ -716,7 +720,7 @@ class TransactionControllerV2 extends ResourceController
                 $txDiscountValue = ($itemActualSubtotal * $txDiscountAmount) / 100;
             }
             else {
-                $txDiscountValue = $txDiscountAmount;
+                $txDiscountValue = min(max(0, $itemActualSubtotal), (float)$txDiscountAmount);
             }
 
             $afterDiscountSubtotal = $itemActualSubtotal - $txDiscountValue;
@@ -2091,14 +2095,18 @@ class TransactionControllerV2 extends ResourceController
                 // 3. Cr AR (10x3)
                 $this->addJournalItem($jid, '10' . $trx['id_toko'] . '3', 0, $totalARReduction, $trx['id_toko']);
 
-                // 4. Cr Discount Adjustment (Item Discount + Tx Discount reduction)
-                $oldTotalDisc = (float)($metaMap['item_discount_total'] ?? 0) + (float)($metaMap['tx_discount_value'] ?? 0);
-                $newTotalDisc = $newItemDiscountTotal + $newTxDiscountValue;
-                $discReductionAdjustment = $oldTotalDisc - $newTotalDisc;
+                // 4. Cr/Dr Discount Adjustment (Balances any discrepancy between Gross Reduction + Tax vs AR Reduction)
+                $totalDebitRetur = (float)$goodsGrossRevenueReduction + (float)$serviceGrossRevenueReduction + max(0, (float)$ppnReduction);
+                $totalCreditRetur = (float)$totalARReduction;
+                $discReductionAdjustment = round($totalDebitRetur - $totalCreditRetur, 2);
                 
                 if ($discReductionAdjustment > 0) {
                      $this->addJournalItem($jid, '40' . $trx['id_toko'] . '2', 0, $discReductionAdjustment, $trx['id_toko']);
+                } elseif ($discReductionAdjustment < 0) {
+                     $this->addJournalItem($jid, '40' . $trx['id_toko'] . '2', abs($discReductionAdjustment), 0, $trx['id_toko']);
                 }
+
+                $this->finalizeJournalTotals($jid);
             }
 
             // 6. Handle Refund needed
@@ -2437,6 +2445,27 @@ class TransactionControllerV2 extends ResourceController
             'debit' => $debit,
             'credit' => $credit,
             'created_at' => date('Y-m-d H:i:s')
+        ]);
+    }
+
+    private function finalizeJournalTotals($journalId)
+    {
+        $sums = $this->db->table('journal_items')
+            ->where('journal_id', $journalId)
+            ->selectSum('debit', 'total_debit')
+            ->selectSum('credit', 'total_credit')
+            ->get()->getRowArray();
+
+        $totalDebit = round((float)($sums['total_debit'] ?? 0), 2);
+        $totalCredit = round((float)($sums['total_credit'] ?? 0), 2);
+
+        if ($totalDebit !== $totalCredit) {
+            log_message('error', "[JOURNAL_IMBALANCE_WARNING] Journal ID {$journalId} has debit {$totalDebit} != credit {$totalCredit}");
+        }
+
+        $this->db->table('journals')->where('id', $journalId)->update([
+            'total_debit' => $totalDebit,
+            'total_credit' => $totalCredit
         ]);
     }
 
