@@ -1800,6 +1800,7 @@ class TiktokController extends ResourceController
 
         // Scope queries and inserts to this tenant
         \App\Libraries\TenantContext::set(['id' => $tenantId]);
+        helper('log');
 
         $transactionModel = new \App\Models\TransactionModel();
         $salesProductModel = new \App\Models\SalesProductModel();
@@ -1869,43 +1870,122 @@ class TiktokController extends ResourceController
             $this->setTransactionMeta($existingTrx['id'], 'biaya_pengiriman_setelah_diskon', (string)$shippingCost);
 
             // 4. Handle CANCEL (Cancel, Cancelled, Canceled, Refund)
-            if ($isCancel && $currentStatus !== 'CANCEL') {
-                $items = $salesProductModel->where('id_transaction', $existingTrx['id'])->findAll();
-                foreach ($items as $item) {
-                    if (!$item['is_service']) {
-                        // Restore Stock
-                        $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
-                        if (!$stockEntry) {
-                            $stockModel->insert([
+            if ($isCancel) {
+                $db = \Config\Database::connect();
+                $existingReturn = $db->table('stock_ledgers')
+                    ->where('reference_id', $existingTrx['id'])
+                    ->where('reference_type', 'RETURN')
+                    ->get()->getRowArray();
+
+                if (!$existingReturn) {
+                    $items = $salesProductModel->where('id_transaction', $existingTrx['id'])->findAll();
+
+                    // Fallback to order line_items if sales_product is empty
+                    $lineItems = $order['line_items'] ?? $order['item_list'] ?? [];
+                    if (empty($items) && !empty($lineItems)) {
+                        foreach ($lineItems as $li) {
+                            $sku = $li['seller_sku'] ?? $li['sku_id'] ?? null;
+                            $prod = null;
+                            if ($sku) {
+                                $prod = $productModel->where('id_barang', $sku)->first();
+                            }
+                            if (!$prod && !empty($li['product_id'])) {
+                                $prod = $productModel->where('tiktok_product_id', $li['product_id'])->first();
+                            }
+                            $kb = $prod ? $prod['id_barang'] : $sku;
+                            $q = isset($li['quantity']) ? (int)$li['quantity'] : (isset($li['qty']) ? (int)$li['qty'] : 1);
+                            if ($kb && $q > 0) {
+                                $items[] = [
+                                    'kode_barang' => $kb,
+                                    'jumlah' => $q,
+                                    'is_service' => 0
+                                ];
+                            }
+                        }
+                    }
+
+                    foreach ($items as $item) {
+                        if (!$item['is_service']) {
+                            // Restore Stock
+                            $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
+                            if (!$stockEntry) {
+                                $stockModel->insert([
+                                    'tenant_id' => $tenantId,
+                                    'id_barang' => $item['kode_barang'],
+                                    'id_toko' => $idToko,
+                                    'stock' => 0,
+                                    'barang_cacat' => 0
+                                ]);
+                                $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
+                            }
+                            $newStock = (int)$stockEntry['stock'] + (int)$item['jumlah'];
+                            $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
+
+                            $stockLedgerModel->insert([
+                                'tenant_id' => $tenantId,
                                 'id_barang' => $item['kode_barang'],
                                 'id_toko' => $idToko,
-                                'stock' => 0,
-                                'barang_cacat' => 0
+                                'qty' => (int)$item['jumlah'],
+                                'balance' => $newStock,
+                                'reference_type' => 'RETURN',
+                                'reference_id' => $existingTrx['id'],
+                                'description' => "TikTok/Tokopedia Cancel Order Webhook: {$orderId}",
+                                'created_at' => date('Y-m-d H:i:s'),
+                                'updated_at' => date('Y-m-d H:i:s')
                             ]);
-                            $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
-                        }
-                        $newStock = $stockEntry['stock'] + $item['jumlah'];
-                        $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
 
-                        $stockLedgerModel->insert([
-                            'id_barang' => $item['kode_barang'],
-                            'id_toko' => $idToko,
-                            'qty' => $item['jumlah'],
-                            'balance' => $newStock,
-                            'reference_type' => 'RETURN',
-                            'reference_id' => $existingTrx['id'],
-                            'description' => "TikTok/Tokopedia Cancel Order Webhook: {$orderId}"
-                        ]);
+                            // Log Aktivitas: Pengembalian Barang
+                            $p = $productModel->where('id_barang', $item['kode_barang'])->first();
+                            log_aktivitas([
+                                'user_id' => 0,
+                                'action_type' => 'STOCK_IN',
+                                'target_table' => 'product',
+                                'target_id' => $p ? $p['id'] : 0,
+                                'description' => "Penambahan Stock (Cancel TikTok): Produk {$item['kode_barang']} di Toko #{$idToko}. Qty: +{$item['jumlah']}, Total: {$newStock}. Ref: TikTok/Tokopedia Cancel Order: {$orderId}",
+                                'detail' => [
+                                    'order_id' => $orderId,
+                                    'id_toko' => $idToko,
+                                    'kode_barang' => $item['kode_barang'],
+                                    'qty' => (int)$item['jumlah'],
+                                    'total_stock' => $newStock
+                                ]
+                            ]);
+
+                            // Sync stock back to TikTok Shop
+                            if ($p && !empty($p['id'])) {
+                                try {
+                                    $tiktokService = new \App\Libraries\TiktokService();
+                                    $tiktokService->syncProductStock((int)$p['id'], (int)$idToko);
+                                } catch (\Exception $ex) {
+                                    log_message('error', "[syncTiktokOrder] Failed to sync TikTok stock on cancel for product {$p['id']}: " . $ex->getMessage());
+                                }
+                            }
+                        }
                     }
                 }
 
-                $transactionModel->update($existingTrx['id'], [
-                    'status' => 'CANCEL',
-                    'total_payment' => 0
-                ]);
+                if ($currentStatus !== 'CANCEL') {
+                    $transactionModel->update($existingTrx['id'], [
+                        'status' => 'CANCEL',
+                        'total_payment' => 0
+                    ]);
 
-                // Update Meta
-                $this->setTransactionMeta($existingTrx['id'], 'shipping_status', $rawTiktokStatus);
+                    // Update Meta
+                    $this->setTransactionMeta($existingTrx['id'], 'shipping_status', $rawTiktokStatus);
+
+                    log_aktivitas([
+                        'user_id' => 0,
+                        'action_type' => 'CANCEL',
+                        'target_table' => 'transaction',
+                        'target_id' => $existingTrx['id'],
+                        'description' => "Transaksi TikTok/Tokopedia {$orderId} dibatalkan. Status: CANCEL",
+                        'detail' => [
+                            'invoice' => $orderId,
+                            'status' => 'CANCEL',
+                            'raw_tiktok_status' => $rawTiktokStatus
+                        ]
+                    ]);
+                }
 
                 // Build / Ensure CANCEL_SALES and CANCEL_COGS journals exist to maintain full audit trail
                 $db = \Config\Database::connect();
@@ -2214,6 +2294,7 @@ class TiktokController extends ResourceController
                         $stockEntry = $stockModel->where('id_barang', $kodeBarang)->where('id_toko', $idToko)->first();
                         if (!$stockEntry) {
                             $stockModel->insert([
+                                'tenant_id' => $tenantId,
                                 'id_barang' => $kodeBarang,
                                 'id_toko' => $idToko,
                                 'stock' => 0,
@@ -2222,19 +2303,62 @@ class TiktokController extends ResourceController
                             $stockEntry = $stockModel->where('id_barang', $kodeBarang)->where('id_toko', $idToko)->first();
                         }
 
-                        $newStock = $stockEntry['stock'] - $qty;
+                        $newStock = (int)$stockEntry['stock'] - (int)$qty;
                         $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
 
                         $stockLedgerModel->insert([
+                            'tenant_id' => $tenantId,
                             'id_barang' => $kodeBarang,
                             'id_toko' => $idToko,
                             'qty' => -$qty,
                             'balance' => $newStock,
                             'reference_type' => 'TRANSACTION',
                             'reference_id' => $trxId,
-                            'description' => "TikTok/Tokopedia Order Webhook Created: {$orderId}"
+                            'description' => "TikTok/Tokopedia Order Webhook Created: {$orderId}",
+                            'created_at' => date('Y-m-d H:i:s'),
+                            'updated_at' => date('Y-m-d H:i:s')
                         ]);
+
+                        // Log Aktivitas: Pengurangan Barang (STOCK_OUT)
+                        $p = $item['product'] ?? $productModel->where('id_barang', $kodeBarang)->first();
+                        log_aktivitas([
+                            'user_id' => 0,
+                            'action_type' => 'STOCK_OUT',
+                            'target_table' => 'product',
+                            'target_id' => $p ? $p['id'] : 0,
+                            'description' => "Pengurangan Stock (TikTok Order): Produk {$kodeBarang} di Toko #{$idToko}. Qty: -{$qty}, Sisa: {$newStock}. Ref: TikTok/Tokopedia Order {$orderId}",
+                            'detail' => [
+                                'order_id' => $orderId,
+                                'id_toko' => $idToko,
+                                'kode_barang' => $kodeBarang,
+                                'qty' => -$qty,
+                                'sisa_stock' => $newStock
+                            ]
+                        ]);
+
+                        // Sync stock to TikTok Shop
+                        if ($p && !empty($p['id'])) {
+                            try {
+                                $tiktokService = new \App\Libraries\TiktokService();
+                                $tiktokService->syncProductStock((int)$p['id'], (int)$idToko);
+                            } catch (\Exception $ex) {
+                                log_message('error', "[syncTiktokOrder] Failed to sync TikTok stock on order create for product {$p['id']}: " . $ex->getMessage());
+                            }
+                        }
                     }
+
+                    log_aktivitas([
+                        'user_id' => 0,
+                        'action_type' => 'CREATE_TRANSACTION',
+                        'target_table' => 'transaction',
+                        'target_id' => $trxId,
+                        'description' => "Created TikTok/Tokopedia transaction {$orderId} (Status: {$initialStatus})",
+                        'detail' => [
+                            'invoice' => $orderId,
+                            'status' => $initialStatus,
+                            'grand_total' => $grandTotal
+                        ]
+                    ]);
 
                     // -- Accounting: Sales Journal (Calon Pendapatan) --
                     $journalId = $this->createJournal('SALES', $trxId, $orderId, date('Y-m-d'), "Invoice #{$orderId}", $idToko);
@@ -2264,15 +2388,44 @@ class TiktokController extends ResourceController
                         $this->addJournalItem($cogsJournalId, '10' . $idToko . '4', 0, $cogsTotal, $idToko); // Cr Inventory
                         $this->finalizeJournalTotals($cogsJournalId);
                     }
-                }
+                } else {
+                    // If arrived as already cancelled, record sales_product for audit trail
+                    foreach ($itemsToProcess as $item) {
+                        $kodeBarang = $item['kode_barang'];
+                        $modalSystem = $item['modal_system'];
+                        $qty = $item['qty'];
+                        $salePrice = $item['sale_price'];
+                        $originalPrice = $item['original_price'];
 
-                log_aktivitas([
-                    'user_id' => 0,
-                    'action_type' => 'CREATE_TRANSACTION',
-                    'target_table' => 'transaction',
-                    'target_id' => $trxId,
-                    'description' => "Created TikTok/Tokopedia order transaction {$orderId} with status WAITING_PAYMENT"
-                ]);
+                        $salesProductModel->insert([
+                            'tenant_id' => $tenantId,
+                            'id_transaction' => $trxId,
+                            'actual_per_piece' => $salePrice,
+                            'actual_total' => $salePrice * $qty,
+                            'kode_barang' => $kodeBarang,
+                            'jumlah' => $qty,
+                            'harga_system' => $originalPrice,
+                            'harga_jual' => $salePrice,
+                            'total' => $salePrice * $qty,
+                            'modal_system' => $modalSystem,
+                            'total_modal' => $modalSystem * $qty,
+                            'is_service' => 0
+                        ]);
+                    }
+
+                    log_aktivitas([
+                        'user_id' => 0,
+                        'action_type' => 'CREATE_TRANSACTION',
+                        'target_table' => 'transaction',
+                        'target_id' => $trxId,
+                        'description' => "Created TikTok/Tokopedia transaction {$orderId} (Status: CANCEL)",
+                        'detail' => [
+                            'invoice' => $orderId,
+                            'status' => 'CANCEL',
+                            'grand_total' => $grandTotal
+                        ]
+                    ]);
+                }
             }
         }
     }
