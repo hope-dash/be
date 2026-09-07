@@ -200,6 +200,37 @@ class TiktokService
                 ?? null;
         }
 
+        // Auto-heal: If tiktok_sku is missing, query TikTok API to fetch product details & SKU ID
+        if (empty($tiktokSkuId)) {
+            try {
+                $this->initializeForToko($idToko);
+                $detailResp = $this->request('GET', "/product/202309/products/" . $product['tiktok_product_id']);
+                if (($detailResp['code'] ?? -1) === 0 && !empty($detailResp['data']['skus'])) {
+                    $tiktokSkuId = $detailResp['data']['skus'][0]['id'] ?? null;
+                    if (empty($warehouseId)) {
+                        $warehouseId = $detailResp['data']['skus'][0]['inventory'][0]['warehouse_id']
+                            ?? $detailResp['data']['skus'][0]['stock_infos'][0]['warehouse_id']
+                            ?? null;
+                    }
+                    if ($tiktokSkuId) {
+                        $productModel->update($idProduct, [
+                            'tiktok_sku' => $tiktokSkuId,
+                            'tiktok_meta' => json_encode($detailResp['data'])
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                log_message('error', "[TiktokService] Auto-fetch SKU ID failed for product {$idProduct}: " . $e->getMessage());
+            }
+        }
+
+        if (empty($tiktokSkuId)) {
+            return [
+                'success' => false,
+                'message' => "TikTok SKU ID tidak ditemukan untuk produk {$product['id_barang']} (Product ID: {$product['tiktok_product_id']})"
+            ];
+        }
+
         if (empty($warehouseId) || $warehouseId === 'default') {
             $warehouseId = $this->getWarehouseId($idToko);
         }
@@ -283,6 +314,32 @@ class TiktokService
         if (!empty($product['tiktok_meta'])) {
             $meta = json_decode($product['tiktok_meta'], true);
             $tiktokSkuId = $meta['skus'][0]['id'] ?? $product['tiktok_sku'];
+        }
+
+        // Auto-heal: If tiktok_sku is missing, query TikTok API to fetch product details & SKU ID
+        if (empty($tiktokSkuId)) {
+            try {
+                $this->initializeForToko($idToko);
+                $detailResp = $this->request('GET', "/product/202309/products/" . $product['tiktok_product_id']);
+                if (($detailResp['code'] ?? -1) === 0 && !empty($detailResp['data']['skus'])) {
+                    $tiktokSkuId = $detailResp['data']['skus'][0]['id'] ?? null;
+                    if ($tiktokSkuId) {
+                        $productModel->update($idProduct, [
+                            'tiktok_sku' => $tiktokSkuId,
+                            'tiktok_meta' => json_encode($detailResp['data'])
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                log_message('error', "[TiktokService] Auto-fetch SKU ID failed for product {$idProduct}: " . $e->getMessage());
+            }
+        }
+
+        if (empty($tiktokSkuId)) {
+            return [
+                'success' => false,
+                'message' => "TikTok SKU ID tidak ditemukan untuk produk {$product['id_barang']} (Product ID: {$product['tiktok_product_id']})"
+            ];
         }
 
         $this->initializeForToko($idToko);

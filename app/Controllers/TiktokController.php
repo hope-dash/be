@@ -1685,11 +1685,19 @@ class TiktokController extends ResourceController
                             }
 
                             if ($localProduct) {
-                                // Update Product table (only tiktok_product_id if empty)
+                                // Update Product table
+                                $updateProductData = [];
                                 if (empty($localProduct['tiktok_product_id'])) {
-                                    $productModel->update($localProduct['id'], [
-                                        'tiktok_product_id' => $productId
-                                    ]);
+                                    $updateProductData['tiktok_product_id'] = $productId;
+                                }
+                                if (empty($localProduct['tiktok_sku']) && !empty($productData['skus'][0]['id'])) {
+                                    $updateProductData['tiktok_sku'] = $productData['skus'][0]['id'];
+                                }
+                                if (empty($localProduct['tiktok_meta'])) {
+                                    $updateProductData['tiktok_meta'] = json_encode($productData);
+                                }
+                                if (!empty($updateProductData)) {
+                                    $productModel->update($localProduct['id'], $updateProductData);
                                 }
 
                                 // Update Stock table
