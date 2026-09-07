@@ -621,6 +621,12 @@ class TiktokController extends ResourceController
                         ->first();
                     $quantity = $stockRecord ? (int) $stockRecord['stock'] : 0;
 
+                    // Calculate upload price with upcharge
+                    $basePrice = (float) $product['harga_jual'];
+                    $tokoMetaModelBulk = new \App\Models\TokoMetaModel();
+                    $upchargePercent = (float) ($tokoMetaModelBulk->getMeta((int) $idToko, 'tiktok_upcharge') ?? 0);
+                    $uploadPrice = $upchargePercent > 0 ? (int) round($basePrice * (1 + ($upchargePercent / 100))) : (int) $basePrice;
+
                     $weightKg = !empty($product['berat']) ? (float) $product['berat'] / 1000 : 0.1;
                     $weightStr = number_format($weightKg, 2, '.', '');
 
@@ -987,9 +993,41 @@ class TiktokController extends ResourceController
         }
 
         $response = curl_exec($ch);
+        $curlErr = curl_error($ch);
         curl_close($ch);
 
-        return json_decode($response, true);
+        if ($curlErr) {
+            log_message('error', "[makeTiktokRequest] cURL Error for {$path}: {$curlErr}");
+            throw new \Exception("TikTok API Connection Error: " . $curlErr);
+        }
+
+        $decoded = json_decode($response, true);
+
+        // Auto-refresh token if expired and retry once
+        if (in_array(($decoded['code'] ?? 0), [105001, 105002, 105003])) {
+            log_message('info', "[makeTiktokRequest] Token expired for toko {$idToko}, auto-refreshing...");
+            $refreshResult = $this->performTokenRefresh($idToko);
+            if ($refreshResult['success']) {
+                // Rebuild request with new token
+                $tokoMetaModel2 = new \App\Models\TokoMetaModel();
+                $newAccessToken = $tokoMetaModel2->getMeta($idToko, 'tiktok_access_token');
+                $headers[1] = "x-tts-access-token: " . $newAccessToken;
+
+                $ch2 = curl_init();
+                curl_setopt($ch2, CURLOPT_URL, $url);
+                curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch2, CURLOPT_CUSTOMREQUEST, strtoupper($method));
+                curl_setopt($ch2, CURLOPT_HTTPHEADER, $headers);
+                if ($method === 'POST' || $method === 'PUT' || $method === 'DELETE') {
+                    curl_setopt($ch2, CURLOPT_POSTFIELDS, $jsonBody ?? '{}');
+                }
+                $response = curl_exec($ch2);
+                curl_close($ch2);
+                $decoded = json_decode($response, true);
+            }
+        }
+
+        return $decoded;
     }
 
     /**
@@ -1851,6 +1889,10 @@ class TiktokController extends ResourceController
             strpos($rawUpper, 'DELIVERED') !== false
         );
 
+        // Derive order datetime from TikTok for consistent timestamps
+        $orderDateTime = date('Y-m-d H:i:s', $order['create_time'] ?? time());
+        $orderDate = date('Y-m-d', $order['create_time'] ?? time());
+
         $existingTrx = $transactionModel->where('invoice', $orderId)->first();
 
         if ($existingTrx) {
@@ -1987,9 +2029,9 @@ class TiktokController extends ResourceController
                 // Build / Ensure CANCEL_SALES and CANCEL_COGS journals exist to maintain full audit trail
                 $db = \Config\Database::connect();
                 $actualTotal = (float)$existingTrx['actual_total'];
-                $subTotal = (float)$existingTrx['amount'];
+                $subTotalCancel = (float)$existingTrx['amount'];
                 $shipMeta = $db->table('transaction_meta')->where('transaction_id', $existingTrx['id'])->where('key', 'biaya_pengiriman')->get()->getRowArray();
-                $shippingCost = (float)($shipMeta['value'] ?? ($existingTrx['biaya_pengiriman'] ?? 0));
+                $shippingCostCancel = (float)($shipMeta['value'] ?? ($existingTrx['biaya_pengiriman'] ?? 0));
                 $cogsTotal = (float)($existingTrx['total_modal'] ?? 0);
 
                 // 1. CANCEL_SALES Journal
@@ -2018,17 +2060,17 @@ class TiktokController extends ResourceController
                         ]);
                     }
                 } else {
-                    $salesDiff = round($actualTotal - ($subTotal + $shippingCost), 2);
-                    if ($subTotal > 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '1', $subTotal, 0, $idToko);
+                    $salesDiffCancel = round($actualTotal - ($subTotalCancel + $shippingCostCancel), 2);
+                    if ($subTotalCancel > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $subTotalCancel, 0, $idToko);
                     }
-                    if ($shippingCost > 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '1', $shippingCost, 0, $idToko);
+                    if ($shippingCostCancel > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $shippingCostCancel, 0, $idToko);
                     }
-                    if ($salesDiff > 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '1', $salesDiff, 0, $idToko);
-                    } elseif ($salesDiff < 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '2', 0, abs($salesDiff), $idToko);
+                    if ($salesDiffCancel > 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '1', $salesDiffCancel, 0, $idToko);
+                    } elseif ($salesDiffCancel < 0) {
+                        $this->addJournalItem($csId, '40' . $idToko . '2', 0, abs($salesDiffCancel), $idToko);
                     }
                     $this->addJournalItem($csId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
                 }
@@ -2048,6 +2090,32 @@ class TiktokController extends ResourceController
                     $this->finalizeJournalTotals($ccId);
                 }
 
+                // 3. Reverse SETTLEMENT Journal if one exists (order was COMPLETED before being cancelled)
+                $existingSettle = $db->table('journals')
+                    ->where('reference_no', $orderId)
+                    ->where('reference_type', 'SETTLEMENT')
+                    ->get()->getRowArray();
+                if ($existingSettle) {
+                    $existingCancelSettle = $db->table('journals')
+                        ->where('reference_no', $orderId)
+                        ->where('reference_type', 'CANCEL_SETTLEMENT')
+                        ->get()->getRowArray();
+                    $cancelSettleId = $existingCancelSettle ? $existingCancelSettle['id'] : $this->createJournal('CANCEL_SETTLEMENT', $existingTrx['id'], $orderId, date('Y-m-d'), "Reversal Settlement {$orderId}", $idToko);
+                    $db->table('journal_items')->where('journal_id', $cancelSettleId)->delete();
+
+                    $settleItems = $db->table('journal_items')->where('journal_id', $existingSettle['id'])->get()->getResultArray();
+                    foreach ($settleItems as $si) {
+                        $db->table('journal_items')->insert([
+                            'journal_id' => $cancelSettleId,
+                            'account_id' => $si['account_id'],
+                            'debit' => $si['credit'],
+                            'credit' => $si['debit'],
+                            'created_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
+                    $this->finalizeJournalTotals($cancelSettleId);
+                }
+
                 log_aktivitas([
                     'user_id' => 0,
                     'action_type' => 'UPDATE_TRANSACTION_STATUS',
@@ -2062,6 +2130,8 @@ class TiktokController extends ResourceController
                 $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
 
                 $actualTotal = (float)$existingTrx['actual_total'];
+                $commissionFee = (float)($financeData['commission_fee'] ?? 0);
+                $transactionFee = (float)($financeData['transaction_fee'] ?? 0);
                 $netSettlement = ($financeData['net_settlement'] !== null) ? (float)$financeData['net_settlement'] : max(0, $actualTotal - $commissionFee - $transactionFee);
                 $totalFee = max(0, $actualTotal - $netSettlement);
 
@@ -2133,6 +2203,13 @@ class TiktokController extends ResourceController
             // 1. Initial Order Creation (ON_HOLD / UNPAID / WAITING_PAYMENT / AWAITING_SHIPMENT)
             // Order langsung dicatat invoice, mengurangi stok, status WAITING_PAYMENT, jurnal mencatat calon pendapatan & cogs.
 
+            // BUG 9 FIX: Idempotency guard — re-check right before insert to prevent duplicate from webhook retries
+            $existingTrxRecheck = $transactionModel->where('invoice', $orderId)->first();
+            if ($existingTrxRecheck) {
+                log_message('info', "[syncTiktokOrder] Order {$orderId} already exists (idempotency guard). Skipping creation.");
+                return;
+            }
+
             $buyerEmail = $order['buyer_email'] ?? '';
             $recipient = $order['recipient_address'] ?? [];
             $customerId = null;
@@ -2182,7 +2259,8 @@ class TiktokController extends ResourceController
 
                 $salePrice = (float)($item['sale_price'] ?? 0);
                 $originalPrice = (float)($item['original_price'] ?? 0);
-                $effectivePrice = $salePrice > 0 ? $salePrice : ($originalPrice > 0 ? $originalPrice : 0);
+                $skuOriginalPrice = (float)($item['sku_original_price'] ?? 0);
+                $effectivePrice = $salePrice > 0 ? $salePrice : ($originalPrice > 0 ? $originalPrice : ($skuOriginalPrice > 0 ? $skuOriginalPrice : 0));
 
                 if (!isset($itemsGrouped[$itemKodeBarang])) {
                     $itemsGrouped[$itemKodeBarang] = [
@@ -2312,8 +2390,8 @@ class TiktokController extends ResourceController
                             'reference_type' => 'TRANSACTION',
                             'reference_id' => $trxId,
                             'description' => "TikTok/Tokopedia Order Webhook Created: {$orderId}",
-                            'created_at' => date('Y-m-d H:i:s'),
-                            'updated_at' => date('Y-m-d H:i:s')
+                            'created_at' => $orderDateTime,
+                            'updated_at' => $orderDateTime
                         ]);
 
                         // Log Aktivitas: Pengurangan Barang (STOCK_OUT)
@@ -2358,7 +2436,7 @@ class TiktokController extends ResourceController
                     ]);
 
                     // -- Accounting: Sales Journal (Calon Pendapatan) --
-                    $journalId = $this->createJournal('SALES', $trxId, $orderId, date('Y-m-d'), "Invoice #{$orderId}", $idToko);
+                    $journalId = $this->createJournal('SALES', $trxId, $orderId, $orderDate, "Invoice #{$orderId}", $idToko);
                     $this->addJournalItem($journalId, '10' . $idToko . '3', $grandTotal, 0, $idToko); // Dr AR (Calon Pendapatan)
                     if ($subTotal > 0) {
                         $this->addJournalItem($journalId, '40' . $idToko . '1', 0, $subTotal, $idToko); // Cr Sales Revenue
@@ -2380,7 +2458,7 @@ class TiktokController extends ResourceController
 
                     // -- Accounting: COGS Journal (Mengurangi Inventory) --
                     if ($cogsTotal > 0) {
-                        $cogsJournalId = $this->createJournal('COGS', $trxId, $orderId, date('Y-m-d'), "COGS Invoice {$orderId}", $idToko);
+                        $cogsJournalId = $this->createJournal('COGS', $trxId, $orderId, $orderDate, "COGS Invoice {$orderId}", $idToko);
                         $this->addJournalItem($cogsJournalId, '50' . $idToko . '1', $cogsTotal, 0, $idToko); // Dr COGS
                         $this->addJournalItem($cogsJournalId, '10' . $idToko . '4', 0, $cogsTotal, $idToko); // Cr Inventory
                         $this->finalizeJournalTotals($cogsJournalId);
@@ -2725,125 +2803,6 @@ class TiktokController extends ResourceController
     }
 
     /**
-     * Fix metadata, status & journal for Invoice 16464 / Order 585842656613598949
-     * GET /api/v2/fix-invoice-16464
-     */
-    public function fixInvoice16464()
-    {
-        try {
-            $db = \Config\Database::connect();
-            $id = 16464;
-            $orderId = '585842656613598949';
-            $idToko = 1;
-
-            \App\Libraries\TenantContext::set(['id' => 1]);
-
-            // Fix tenant_id = 1 on transaction_meta for transaction 16464
-            $db->table('transaction_meta')->where('transaction_id', $id)->update(['tenant_id' => 1]);
-
-            $transactionModel = new \App\Models\TransactionModel();
-            $transaction = $transactionModel->find($id);
-            if (!$transaction) {
-                return $this->jsonResponse->error("Transaksi 16464 tidak ditemukan", 404);
-            }
-
-            $pengiriman = 'Pengiriman Standar';
-            $shippingProvider = 'Dikirim melalui platform';
-            $handlingFee = 2885;
-            $serviceFee = 1000;
-            $shippingCost = 0;
-
-            // 1. Update Transaction status & pengiriman
-            $transactionModel->update($id, [
-                'status' => 'PAID PLATFORM',
-                'total_payment' => 0,
-                'pengiriman' => 'Pengiriman Standar',
-                'biaya_pengiriman' => 0
-            ]);
-
-            // 2. Set Meta values
-            $metaPairs = [
-                'pengiriman' => $pengiriman,
-                'courier' => $pengiriman,
-                'shipping_provider' => $shippingProvider,
-                'shipping_status' => 'READY_TO_PICKUP',
-                'biaya_penanganan' => (string)$handlingFee,
-                'handling_fee' => (string)$handlingFee,
-                'biaya_layanan_aplikasi' => (string)$serviceFee,
-                'service_fee' => (string)$serviceFee,
-                'biaya_pengiriman' => (string)$shippingCost,
-                'biaya_pengiriman_setelah_diskon' => (string)$shippingCost
-            ];
-
-            foreach ($metaPairs as $k => $v) {
-                $this->setTransactionMeta($id, $k, $v);
-            }
-
-            // 3. Fix sales_product for Invoice 16464: SKU I046, QTY 2, Price Rp 146.250 x 2 (Subtotal 287.500)
-            $productModel = new \App\Models\ProductModel();
-            $productI046 = $productModel->where('id_barang', 'I046')->first();
-            $modalPerPiece = $productI046 ? (float)($productI046['harga_modal'] ?? 81900) : 81900;
-
-            $db->table('sales_product')->where('id_transaction', $id)->delete();
-            $db->table('sales_product')->insert([
-                'tenant_id' => 1,
-                'id_transaction' => $id,
-                'kode_barang' => 'I046',
-                'jumlah' => 2,
-                'harga_system' => 146250.00,
-                'harga_jual' => 143750.00,
-                'total' => 287500.00,
-                'modal_system' => $modalPerPiece,
-                'total_modal' => $modalPerPiece * 2,
-                'actual_per_piece' => 143750.00,
-                'actual_total' => 287500.00,
-                'is_service' => 0
-            ]);
-
-            // 4. Fix Journal Imbalance (Sales Journal for 585842656613598949)
-            // AR (1013) is Dr 291385, Sales (4011) is Cr 287500, Fee (4011) is Cr 3885
-            $salesJournal = $db->table('journals')
-                ->where('reference_no', $orderId)
-                ->where('reference_type', 'SALES')
-                ->get()->getRowArray();
-
-            if ($salesJournal) {
-                $journalId = $salesJournal['id'];
-                $db->table('journal_items')->where('journal_id', $journalId)->delete();
-
-                // Dr AR (Calon Pendapatan) 291385
-                $this->addJournalItem($journalId, '1013', 291385, 0, $idToko);
-                // Cr Sales Revenue 287500
-                $this->addJournalItem($journalId, '4011', 0, 287500, $idToko);
-                // Cr Extra / Handling & Service Fees 3885
-                $this->addJournalItem($journalId, '4011', 0, 3885, $idToko);
-
-                // Update total_debit & total_credit in journals table (291385)
-                $db->table('journals')->where('id', $journalId)->update([
-                    'total_debit' => 291385,
-                    'total_credit' => 291385
-                ]);
-            }
-
-            return $this->jsonResponse->oneResp('Invoice 16464 berhasil diperbarui!', [
-                'id' => $id,
-                'invoice' => $orderId,
-                'status' => 'PAID PLATFORM',
-                'shipping_status' => 'READY_TO_PICKUP',
-                'sku' => 'I046',
-                'qty' => 2,
-                'harga_unit' => 146250,
-                'biaya_penanganan' => 2885,
-                'biaya_layanan_aplikasi' => 1000,
-                'journal_fixed' => true
-            ], 200);
-
-        } catch (\Throwable $e) {
-            return $this->jsonResponse->error($e->getMessage(), 500);
-        }
-    }
-
-    /**
      * Re-sync & fix metadata, status & journals for any TikTok/Tokopedia order by transaction ID
      * GET /api/v2/fix-tiktok-invoice/(:num)
      */
@@ -2909,7 +2868,7 @@ class TiktokController extends ResourceController
 
             // Check if updated transaction status is CANCEL
             $updatedTrxCheck = $transactionModel->find($transactionId);
-            $isCancelledOrder = ($updatedTrxCheck['status'] === 'CANCEL' || strpos(strtoupper((string)($updatedTrxCheck['status'] ?? '')), 'CANCEL') !== false || in_array($orderId, ['585740089727485620', '585756360820295477']) || in_array((int)$transactionId, [15751, 15906]));
+            $isCancelledOrder = ($updatedTrxCheck['status'] === 'CANCEL' || strpos(strtoupper((string)($updatedTrxCheck['status'] ?? '')), 'CANCEL') !== false);
 
             if ($isCancelledOrder) {
                 // Mark transaction as CANCEL & build CANCEL_SALES / CANCEL_COGS journals
@@ -2928,6 +2887,7 @@ class TiktokController extends ResourceController
                 if (!$existingReturn) {
                     $stockModel = new \App\Models\StockModel();
                     $stockLedgerModel = new \App\Models\StockLedgerModel();
+                    $salesProductModel = new \App\Models\SalesProductModel();
                     $items = $salesProductModel->where('id_transaction', $transactionId)->findAll();
                     foreach ($items as $item) {
                         if (!$item['is_service']) {

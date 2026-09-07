@@ -6,7 +6,7 @@ class TransactionModel extends TenantScopedModel
 {
     protected $table = 'transaction';
     protected $primaryKey = 'id';
-    protected $allowedFields = ['tenant_id', 'amount', 'total_payment', 'po', 'status', 'delivery_status', 'discount_type', 'discount_amount', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by', 'actual_total', 'total_modal', 'is_service', 'service_status'];
+    protected $allowedFields = ['tenant_id', 'amount', 'total_payment', 'po', 'status', 'delivery_status', 'discount_type', 'discount_amount', 'invoice', 'id_toko', 'date_time', 'created_by', 'updated_by', 'actual_total', 'total_modal', 'is_service', 'service_status', 'pengiriman', 'biaya_pengiriman', 'source'];
 
     protected $statuses = [
         'SUCCESS' => 'Success',
@@ -20,7 +20,8 @@ class TransactionModel extends TenantScopedModel
         'PACKING' => 'Packing',
         'IN_DELIVERY' => 'In Delivery',
         'PARTIALLY_PAID' => 'DP',
-
+        'PAID PLATFORM' => 'Paid via Platform',
+        'COMPLETED' => 'Completed',
     ];
 
     protected $useTimestamps = true;
