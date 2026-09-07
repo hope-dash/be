@@ -1760,9 +1760,10 @@ class TiktokController extends ResourceController
                 if ($idToko) {
                     try {
                         // Fetch order details from TikTok Shop API (V2 Partner endpoint)
-                        $path = "/order/202309/orders";
+                        $path = "/order/202507/orders";
                         $params = [
-                            'ids' => $orderId
+                            'ids' => $orderId,
+                            'version' => '202507'
                         ];
                         $response = $this->makeTiktokRequest($idToko, 'GET', $path, $params, null);
 
@@ -1856,10 +1857,6 @@ class TiktokController extends ResourceController
             $currentStatus = $existingTrx['status'];
 
             // Update shipping & fee meta for existing transaction
-            $transactionModel->update($existingTrx['id'], [
-                'pengiriman' => $pengiriman,
-                'biaya_pengiriman' => $shippingCost
-            ]);
             $this->setTransactionMeta($existingTrx['id'], 'pengiriman', $pengiriman);
             $this->setTransactionMeta($existingTrx['id'], 'courier', $pengiriman);
             $this->setTransactionMeta($existingTrx['id'], 'shipping_provider', $shippingProvider);
@@ -2878,9 +2875,12 @@ class TiktokController extends ResourceController
                 ->update(['tenant_id' => $tenantId]);
 
             // Fetch real-time order data from TikTok/Tokopedia API
-            $path = "/order/202309/orders";
-            $params = ['ids' => $orderId];
-            $response = $this->makeTiktokRequest($idToko, 'GET', $path, $params);
+            $path = "/order/202507/orders";
+            $params = [
+                'ids' => $orderId,
+                'version' => '202507'
+            ];
+            $response = $this->makeTiktokRequest($idToko, 'GET', $path, $params, null);
 
             $orderList = $response['data']['orders'] ?? [];
             if (!empty($orderList)) {
