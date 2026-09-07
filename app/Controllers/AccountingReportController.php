@@ -75,12 +75,61 @@ class AccountingReportController extends ResourceController
             $builder->where('j.id_toko', $tokoId);
         }
 
-        $search = $this->request->getGet('search') ?? $this->request->getGet('description');
+        $search = $this->request->getGet('search') ?? $this->request->getGet('q') ?? $this->request->getGet('description');
+        $referenceNo = $this->request->getGet('reference_no') ?? $this->request->getGet('ref');
+        $accountId = $this->request->getGet('account_id');
+        $accountCode = $this->request->getGet('account_code');
+
+        if ($referenceNo) {
+            $builder->where('j.reference_no', $referenceNo);
+        }
+
         if ($search) {
-            $builder->groupStart()
-                ->like('j.description', $search)
-                ->orLike('j.reference_no', $search)
+            $matchingSub = $this->db->table('journals j2')
+                ->select('j2.id')
+                ->join('journal_items ji2', 'ji2.journal_id = j2.id', 'left')
+                ->join('accounts a2', 'a2.id = ji2.account_id', 'left')
+                ->where('j2.date >=', $startDate)
+                ->where('j2.date <=', $endDate);
+            if ($tokoId) {
+                $matchingSub->where('j2.id_toko', $tokoId);
+            }
+            $matchingSub->groupStart()
+                ->like('j2.description', $search)
+                ->orLike('j2.reference_no', $search)
+                ->orLike('a2.name', $search)
+                ->orLike('a2.code', $search)
                 ->groupEnd();
+            $matchingIds = array_column($matchingSub->distinct()->get()->getResultArray(), 'id');
+            if (empty($matchingIds)) {
+                return $this->jsonResponse->oneResp('Journal Report', [
+                    'journals' => [],
+                    'total_debit' => 0,
+                    'total_credit' => 0
+                ], 200);
+            }
+            $builder->whereIn('j.id', $matchingIds);
+        }
+
+        if ($accountId || $accountCode) {
+            $accSub = $this->db->table('journal_items ji3')
+                ->select('ji3.journal_id')
+                ->join('accounts a3', 'a3.id = ji3.account_id');
+            if ($accountId) {
+                $accSub->where('ji3.account_id', $accountId);
+            }
+            if ($accountCode) {
+                $accSub->where('a3.code', $accountCode);
+            }
+            $accJournalIds = array_column($accSub->distinct()->get()->getResultArray(), 'journal_id');
+            if (empty($accJournalIds)) {
+                return $this->jsonResponse->oneResp('Journal Report', [
+                    'journals' => [],
+                    'total_debit' => 0,
+                    'total_credit' => 0
+                ], 200);
+            }
+            $builder->whereIn('j.id', $accJournalIds);
         }
 
         $results = $builder->orderBy('j.date', 'DESC')

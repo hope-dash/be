@@ -2736,11 +2736,7 @@ class TiktokController extends ResourceController
                         'status' => 'CANCEL',
                         'total_payment' => 0
                     ]);
-                    $jRows = $db->table('journals')->where('reference_no', $orderId)->get()->getResultArray();
-                    foreach ($jRows as $j) {
-                        $db->table('journal_items')->where('journal_id', $j['id'])->delete();
-                    }
-                    $db->table('journals')->where('reference_no', $orderId)->delete();
+                    $this->setTransactionMeta($transactionId, 'shipping_status', 'CANCELLED');
                 } elseif ($currentStatus !== 'COMPLETED') {
                     $transactionModel->update($transactionId, [
                         'status' => 'PAID PLATFORM',
@@ -2762,61 +2758,120 @@ class TiktokController extends ResourceController
                 ]);
                 $this->setTransactionMeta($transactionId, 'shipping_status', 'CANCELLED');
 
+                // Restore stock if not already restored
+                $existingReturn = $db->table('stock_ledgers')
+                    ->where('reference_id', $transactionId)
+                    ->where('reference_type', 'RETURN')
+                    ->get()->getRowArray();
+
+                if (!$existingReturn) {
+                    $stockModel = new \App\Models\StockModel();
+                    $stockLedgerModel = new \App\Models\StockLedgerModel();
+                    $items = $salesProductModel->where('id_transaction', $transactionId)->findAll();
+                    foreach ($items as $item) {
+                        if (!$item['is_service']) {
+                            $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
+                            if (!$stockEntry) {
+                                $stockModel->insert([
+                                    'id_barang' => $item['kode_barang'],
+                                    'id_toko' => $idToko,
+                                    'stock' => 0,
+                                    'barang_cacat' => 0
+                                ]);
+                                $stockEntry = $stockModel->where('id_barang', $item['kode_barang'])->where('id_toko', $idToko)->first();
+                            }
+                            $newStock = (int)$stockEntry['stock'] + (int)$item['jumlah'];
+                            $stockModel->update($stockEntry['id'], ['stock' => $newStock]);
+
+                            $stockLedgerModel->insert([
+                                'tenant_id' => $tenantId,
+                                'id_barang' => $item['kode_barang'],
+                                'id_toko' => $idToko,
+                                'qty' => (int)$item['jumlah'],
+                                'balance' => $newStock,
+                                'reference_type' => 'RETURN',
+                                'reference_id' => $transactionId,
+                                'description' => "TikTok/Tokopedia Cancel Order: {$orderId}",
+                                'created_at' => date('Y-m-d H:i:s'),
+                                'updated_at' => date('Y-m-d H:i:s')
+                            ]);
+                        }
+                    }
+                }
+
                 $actualTotal = (float)$transaction['actual_total'];
                 $subTotal = (float)$transaction['amount'];
                 $shipMeta = $db->table('transaction_meta')->where('transaction_id', $transactionId)->where('key', 'biaya_pengiriman')->get()->getRowArray();
                 $shippingCost = (float)($shipMeta['value'] ?? ($transaction['biaya_pengiriman'] ?? 0));
                 $cogsTotal = (float)($transaction['total_modal'] ?? 0);
 
-                // 1. CANCEL_SALES Journal
-                $existingCancelSales = $db->table('journals')
-                    ->where('reference_no', $orderId)
-                    ->where('reference_type', 'CANCEL_SALES')
-                    ->get()->getRowArray();
-                $csId = $existingCancelSales ? $existingCancelSales['id'] : $this->createJournal('CANCEL_SALES', $transactionId, $orderId, date('Y-m-d'), "Cancellation {$orderId}", $idToko);
-                $db->table('journal_items')->where('journal_id', $csId)->delete();
+                $orderDate = !empty($transaction['date_time']) ? date('Y-m-d', strtotime($transaction['date_time'])) : date('Y-m-d');
+                $cancelDate = !empty($transaction['updated_at']) ? date('Y-m-d', strtotime($transaction['updated_at'])) : date('Y-m-d');
 
-                // Reverse from existing SALES journal to ensure perfect symmetry and balance
+                // 1. Ensure original SALES Journal exists on order creation date
                 $existingSales = $db->table('journals')
                     ->where('reference_no', $orderId)
                     ->where('reference_type', 'SALES')
                     ->get()->getRowArray();
+                $sjId = $existingSales ? $existingSales['id'] : $this->createJournal('SALES', $transactionId, $orderId, $orderDate, "Invoice #{$orderId}", $idToko);
+                $db->table('journal_items')->where('journal_id', $sjId)->delete();
 
-                if ($existingSales) {
-                    $salesItems = $db->table('journal_items')->where('journal_id', $existingSales['id'])->get()->getResultArray();
-                    foreach ($salesItems as $si) {
-                        $db->table('journal_items')->insert([
-                            'journal_id' => $csId,
-                            'account_id' => $si['account_id'],
-                            'debit' => $si['credit'],
-                            'credit' => $si['debit'],
-                            'created_at' => date('Y-m-d H:i:s')
-                        ]);
-                    }
-                } else {
-                    $salesDiff = round($actualTotal - ($subTotal + $shippingCost), 2);
-                    if ($subTotal > 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '1', $subTotal, 0, $idToko);
-                    }
-                    if ($shippingCost > 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '1', $shippingCost, 0, $idToko);
-                    }
-                    if ($salesDiff > 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '1', $salesDiff, 0, $idToko);
-                    } elseif ($salesDiff < 0) {
-                        $this->addJournalItem($csId, '40' . $idToko . '2', 0, abs($salesDiff), $idToko);
-                    }
-                    $this->addJournalItem($csId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
+                $salesDiff = round($actualTotal - ($subTotal + $shippingCost), 2);
+                $this->addJournalItem($sjId, '10' . $idToko . '3', $actualTotal, 0, $idToko); // Dr AR
+                if ($subTotal > 0) {
+                    $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $subTotal, $idToko); // Cr Sales Revenue
+                }
+                if ($shippingCost > 0) {
+                    $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $shippingCost, $idToko); // Cr Shipping Revenue
+                }
+                if ($salesDiff > 0) {
+                    $this->addJournalItem($sjId, '40' . $idToko . '1', 0, $salesDiff, $idToko);
+                } elseif ($salesDiff < 0) {
+                    $this->addJournalItem($sjId, '40' . $idToko . '2', abs($salesDiff), 0, $idToko);
+                }
+                $this->finalizeJournalTotals($sjId);
+
+                // 2. Ensure original COGS Journal exists on order creation date
+                if ($cogsTotal > 0) {
+                    $existingCogs = $db->table('journals')
+                        ->where('reference_no', $orderId)
+                        ->where('reference_type', 'COGS')
+                        ->get()->getRowArray();
+                    $cogsId = $existingCogs ? $existingCogs['id'] : $this->createJournal('COGS', $transactionId, $orderId, $orderDate, "COGS Invoice {$orderId}", $idToko);
+                    $db->table('journal_items')->where('journal_id', $cogsId)->delete();
+
+                    $this->addJournalItem($cogsId, '50' . $idToko . '1', $cogsTotal, 0, $idToko); // Dr COGS
+                    $this->addJournalItem($cogsId, '10' . $idToko . '4', 0, $cogsTotal, $idToko); // Cr Inventory
+                    $this->finalizeJournalTotals($cogsId);
+                }
+
+                // 3. Ensure CANCEL_SALES Journal exists on cancellation date (exact reversal of SALES)
+                $existingCancelSales = $db->table('journals')
+                    ->where('reference_no', $orderId)
+                    ->where('reference_type', 'CANCEL_SALES')
+                    ->get()->getRowArray();
+                $csId = $existingCancelSales ? $existingCancelSales['id'] : $this->createJournal('CANCEL_SALES', $transactionId, $orderId, $cancelDate, "Cancellation {$orderId}", $idToko);
+                $db->table('journal_items')->where('journal_id', $csId)->delete();
+
+                $salesItems = $db->table('journal_items')->where('journal_id', $sjId)->get()->getResultArray();
+                foreach ($salesItems as $si) {
+                    $db->table('journal_items')->insert([
+                        'journal_id' => $csId,
+                        'account_id' => $si['account_id'],
+                        'debit' => $si['credit'], // Reversal
+                        'credit' => $si['debit'],
+                        'created_at' => date('Y-m-d H:i:s')
+                    ]);
                 }
                 $this->finalizeJournalTotals($csId);
 
-                // 2. CANCEL_COGS Journal
+                // 4. Ensure CANCEL_COGS Journal exists on cancellation date (exact reversal of COGS)
                 if ($cogsTotal > 0) {
                     $existingCancelCogs = $db->table('journals')
                         ->where('reference_no', $orderId)
                         ->where('reference_type', 'CANCEL_COGS')
                         ->get()->getRowArray();
-                    $ccId = $existingCancelCogs ? $existingCancelCogs['id'] : $this->createJournal('CANCEL_COGS', $transactionId, $orderId, date('Y-m-d'), "Reversal COGS {$orderId}", $idToko);
+                    $ccId = $existingCancelCogs ? $existingCancelCogs['id'] : $this->createJournal('CANCEL_COGS', $transactionId, $orderId, $cancelDate, "Reversal COGS {$orderId}", $idToko);
                     $db->table('journal_items')->where('journal_id', $ccId)->delete();
 
                     $this->addJournalItem($ccId, '10' . $idToko . '4', $cogsTotal, 0, $idToko); // Dr Inventory
