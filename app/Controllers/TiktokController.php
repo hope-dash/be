@@ -2130,10 +2130,6 @@ class TiktokController extends ResourceController
                 $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
 
                 $actualTotal = (float)$existingTrx['actual_total'];
-                $commissionFee = (float)($financeData['commission_fee'] ?? 0);
-                $transactionFee = (float)($financeData['transaction_fee'] ?? 0);
-                $netSettlement = ($financeData['net_settlement'] !== null) ? (float)$financeData['net_settlement'] : max(0, $actualTotal - $commissionFee - $transactionFee);
-                $totalFee = max(0, $actualTotal - $netSettlement);
 
                 $transactionModel->update($existingTrx['id'], [
                     'status' => 'COMPLETED',
@@ -2141,45 +2137,62 @@ class TiktokController extends ResourceController
                 ]);
 
                 $this->setTransactionMeta($existingTrx['id'], 'shipping_status', 'COMPLETED');
-                $this->setTransactionMeta($existingTrx['id'], 'platform_commission_fee', (string) $totalFee);
-                $this->setTransactionMeta($existingTrx['id'], 'net_settlement_amount', (string) $netSettlement);
 
-                // Re-create / Update Settlement Journal for Commission & Payment Settlement
-                $db = \Config\Database::connect();
-                $existingSettle = $db->table('journals')
-                    ->where('reference_no', $orderId)
-                    ->where('reference_type', 'SETTLEMENT')
-                    ->get()->getRowArray();
+                // Only create settlement journal if finance API returned real data
+                // If net_settlement is null, the API didn't have data yet — skip and fix later via fixTiktokInvoice
+                $hasFinanceData = ($financeData['net_settlement'] !== null && (float)$financeData['net_settlement'] > 0);
 
-                $settleJournalId = $existingSettle ? $existingSettle['id'] : $this->createJournal('SETTLEMENT', $existingTrx['id'], $orderId, date('Y-m-d'), "Settlement & Commission Invoice #{$orderId}", $idToko);
+                if ($hasFinanceData) {
+                    $netSettlement = (float)$financeData['net_settlement'];
+                    $totalFee = max(0, $actualTotal - $netSettlement);
 
-                // Clear old items if any
-                $db->table('journal_items')->where('journal_id', $settleJournalId)->delete();
+                    $this->setTransactionMeta($existingTrx['id'], 'platform_commission_fee', (string) $totalFee);
+                    $this->setTransactionMeta($existingTrx['id'], 'net_settlement_amount', (string) $netSettlement);
 
-                // Dr Cash/Bank (Net settlement amount)
-                $this->addJournalItem($settleJournalId, '10' . $idToko . '1', $netSettlement, 0, $idToko);
+                    // Re-create / Update Settlement Journal for Commission & Payment Settlement
+                    $db = \Config\Database::connect();
+                    $existingSettle = $db->table('journals')
+                        ->where('reference_no', $orderId)
+                        ->where('reference_type', 'SETTLEMENT')
+                        ->get()->getRowArray();
 
-                // Dr Platform Commission Expense (If totalFee > 0)
-                if ($totalFee > 0) {
-                    $this->addJournalItem($settleJournalId, '50' . $idToko . '5', $totalFee, 0, $idToko);
+                    $settleJournalId = $existingSettle ? $existingSettle['id'] : $this->createJournal('SETTLEMENT', $existingTrx['id'], $orderId, date('Y-m-d'), "Settlement & Commission Invoice #{$orderId}", $idToko);
+
+                    // Clear old items if any
+                    $db->table('journal_items')->where('journal_id', $settleJournalId)->delete();
+
+                    // Dr Bank (Net settlement amount — marketplace payouts go to bank)
+                    $this->addJournalItem($settleJournalId, '10' . $idToko . '2', $netSettlement, 0, $idToko);
+
+                    // Dr Platform Commission Expense (If totalFee > 0)
+                    if ($totalFee > 0) {
+                        $this->addJournalItem($settleJournalId, '50' . $idToko . '5', $totalFee, 0, $idToko);
+                    }
+
+                    // Cr Accounts Receivable (AR)
+                    $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
+
+                    $this->finalizeJournalTotals($settleJournalId);
+
+                    log_aktivitas([
+                        'user_id' => 0,
+                        'action_type' => 'UPDATE_TRANSACTION_STATUS',
+                        'target_table' => 'transaction',
+                        'target_id' => $existingTrx['id'],
+                        'description' => "Order {$orderId} COMPLETED. Net settlement: {$netSettlement}, Platform Fee: {$totalFee}"
+                    ]);
+                } else {
+                    // Finance data not ready yet — log warning, settlement journal will be created later via fixTiktokInvoice
+                    log_message('warning', "[syncTiktokOrder] COMPLETED order {$orderId} but finance API returned no settlement data. Settlement journal SKIPPED — run fixTiktokInvoice later.");
+
+                    log_aktivitas([
+                        'user_id' => 0,
+                        'action_type' => 'UPDATE_TRANSACTION_STATUS',
+                        'target_table' => 'transaction',
+                        'target_id' => $existingTrx['id'],
+                        'description' => "Order {$orderId} COMPLETED. Settlement journal PENDING — finance data not available yet."
+                    ]);
                 }
-
-                // Cr Accounts Receivable (AR)
-                $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
-
-                // Update totals on header
-                $db->table('journals')->where('id', $settleJournalId)->update([
-                    'total_debit' => $actualTotal,
-                    'total_credit' => $actualTotal
-                ]);
-
-                log_aktivitas([
-                    'user_id' => 0,
-                    'action_type' => 'UPDATE_TRANSACTION_STATUS',
-                    'target_table' => 'transaction',
-                    'target_id' => $existingTrx['id'],
-                    'description' => "Order {$orderId} COMPLETED. Net settlement: {$netSettlement}, Platform Fee: {$totalFee}"
-                ]);
             }
             // 2. Handle intermediate shipping status (AWAITING_SHIPMENT, IN_TRANSIT, DELIVERED, ON_HOLD, PAID)
             elseif ($isShippingStatus || $rawTiktokStatus === 'PAID') {
@@ -2543,6 +2556,8 @@ class TiktokController extends ResourceController
         try {
             $path = "/finance/202309/orders/{$orderId}/statement_transactions";
             $response = $this->makeTiktokRequest($idToko, 'GET', $path, [], null);
+
+            log_message('info', "[fetchOrderFinanceBreakdown] Raw API response for order {$orderId}: code=" . ($response['code'] ?? 'null'));
 
             log_message('info', "[fetchOrderFinanceBreakdown] Order {$orderId} response: " . json_encode($response));
 
@@ -3034,6 +3049,44 @@ class TiktokController extends ResourceController
                     }
 
                     $this->finalizeJournalTotals($sjId);
+                }
+
+                // Rebuild SETTLEMENT Journal for COMPLETED orders
+                if ($updatedTrxCheck['status'] === 'COMPLETED') {
+                    $actualTotal = (float)$transaction['actual_total'];
+                    $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
+
+                    $commissionFee = (float)($financeData['commission_fee'] ?? 0);
+                    $transactionFee = (float)($financeData['transaction_fee'] ?? 0);
+                    $netSettlement = ($financeData['net_settlement'] !== null) ? (float)$financeData['net_settlement'] : max(0, $actualTotal - $commissionFee - $transactionFee);
+                    $totalFee = max(0, $actualTotal - $netSettlement);
+
+                    $this->setTransactionMeta($transactionId, 'platform_commission_fee', (string) $totalFee);
+                    $this->setTransactionMeta($transactionId, 'net_settlement_amount', (string) $netSettlement);
+
+                    $existingSettle = $db->table('journals')
+                        ->where('reference_no', $orderId)
+                        ->where('reference_type', 'SETTLEMENT')
+                        ->get()->getRowArray();
+
+                    $settleDate = !empty($transaction['updated_at']) ? date('Y-m-d', strtotime($transaction['updated_at'])) : date('Y-m-d');
+                    $settleJournalId = $existingSettle ? $existingSettle['id'] : $this->createJournal('SETTLEMENT', $transactionId, $orderId, $settleDate, "Settlement & Commission Invoice #{$orderId}", $idToko);
+                    $db->table('journal_items')->where('journal_id', $settleJournalId)->delete();
+
+                    // Dr Bank (Net settlement — marketplace payouts go to bank)
+                    $this->addJournalItem($settleJournalId, '10' . $idToko . '2', $netSettlement, 0, $idToko);
+
+                    // Dr Platform Commission Expense
+                    if ($totalFee > 0) {
+                        $this->addJournalItem($settleJournalId, '50' . $idToko . '5', $totalFee, 0, $idToko);
+                    }
+
+                    // Cr Accounts Receivable (AR)
+                    $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
+
+                    $this->finalizeJournalTotals($settleJournalId);
+
+                    log_message('info', "[fixTiktokInvoice] Rebuilt SETTLEMENT journal for {$orderId}. Net: {$netSettlement}, Fee: {$totalFee}");
                 }
             }
 
