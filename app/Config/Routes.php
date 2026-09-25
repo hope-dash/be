@@ -287,6 +287,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('purchase', 'PembelianControllerV2::create');
         $routes->post('purchase/(:num)/review', 'PembelianControllerV2::review/$1');
         $routes->post('purchase/(:num)/execute', 'PembelianControllerV2::execute/$1');
+        $routes->post('purchase/(:num)/rollback', 'PembelianControllerV2::rollback/$1');
 
         // Closing V2
         $routes->get('closing/preview', 'ClosingControllerV2::preview');

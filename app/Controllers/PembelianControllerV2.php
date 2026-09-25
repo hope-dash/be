@@ -43,6 +43,8 @@ class PembelianControllerV2 extends ResourceController
         $this->accountModel = new AccountModel();
         $this->productModel = new ProductModel();
         $this->jsonResponse = new JsonResponse();
+        $this->request = service('request');
+        $this->response = service('response');
         $this->db = \Config\Database::connect();
         helper('log');
     }
@@ -312,6 +314,352 @@ class PembelianControllerV2 extends ResourceController
             return $this->jsonResponse->oneResp('Pembelian berhasil diproses', ['id' => $pembelianId], 200);
 
         } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * ROLLBACK / UNDO PEMBELIAN
+     * Reverses stock, stock_ledgers (with negative qty), journals, and activity logs.
+     * Optionally transfers and re-executes purchase to a target store (e.g. target_id_toko = 3).
+     * POST /api/v2/purchase/(:num)/rollback
+     */
+    public function rollback($pembelianId = null, $cliTargetIdToko = null, $cliReason = null)
+    {
+        if ($pembelianId === null) {
+            return $this->jsonResponse->error('ID Pembelian wajib diisi.', 400);
+        }
+
+        $request = $this->request ?? service('request');
+        $user = ($request && isset($request->user)) ? $request->user : [];
+        $userId = $user['user_id'] ?? 1;
+
+        $requestData = [];
+        if ($request && method_exists($request, 'getJSON')) {
+            try {
+                $requestData = $request->getJSON(true) ?: ($request->getPost() ?: []);
+            } catch (\Throwable $e) {
+                $requestData = $request->getPost() ?: [];
+            }
+        }
+
+        $targetIdToko = ($cliTargetIdToko !== null && $cliTargetIdToko !== 0) ? (int)$cliTargetIdToko : (!empty($requestData['target_id_toko']) ? (int)$requestData['target_id_toko'] : null);
+        $reason = $cliReason !== null ? $cliReason : ($requestData['reason'] ?? 'Salah input toko');
+
+        $pembelian = $this->pembelianModel->find($pembelianId);
+        if (!$pembelian) {
+            return $this->jsonResponse->error('Data pembelian tidak ditemukan.', 404);
+        }
+
+        if ($pembelian['status'] !== 'SUCCESS') {
+            return $this->jsonResponse->error('Hanya pembelian dengan status SUCCESS yang dapat di-rollback. Status saat ini: ' . $pembelian['status'], 400);
+        }
+
+        $wrongTokoId = (int)$pembelian['id_toko'];
+        $details = $this->pembelianDetailModel->where('pembelian_id', $pembelianId)->findAll();
+        if (empty($details)) {
+            return $this->jsonResponse->error('Detail pembelian tidak ditemukan untuk pembelian ID: ' . $pembelianId, 400);
+        }
+
+        $biayas = $this->pembelianBiayaModel->where('pembelian_id', $pembelianId)->findAll();
+        $totalBiayaLain = array_sum(array_column($biayas, 'jumlah'));
+        $totalQtyAll = array_sum(array_column($details, 'jumlah'));
+        $biayaPerUnit = ($totalQtyAll > 0) ? round($totalBiayaLain / $totalQtyAll) : 0;
+        $totalBelanja = (float)$pembelian['total_belanja'];
+
+        $this->db->transStart();
+
+        try {
+            // ========================================================
+            // STEP 1: UNDO STOCK & RECORD MINUS STOCK LEDGER AT WRONG TOKO
+            // ========================================================
+            $rollbackSummary = [];
+            foreach ($details as $item) {
+                $kodeBarang = $item['kode_barang'];
+                $qty = (int)$item['jumlah'];
+
+                $product = $this->productModel->where('id_barang', $kodeBarang)->first();
+                $stockEntry = $this->stockModel
+                    ->where('id_barang', $kodeBarang)
+                    ->where('id_toko', $wrongTokoId)
+                    ->first();
+
+                $oldStock = $stockEntry ? (int)$stockEntry['stock'] : 0;
+                $newStock = $oldStock - $qty;
+
+                // Update stock in wrong store
+                if ($stockEntry) {
+                    $this->stockModel->update($stockEntry['id'], ['stock' => $newStock]);
+                } else {
+                    $this->stockModel->insert([
+                        'id_barang' => $kodeBarang,
+                        'id_toko' => $wrongTokoId,
+                        'stock' => $newStock,
+                        'barang_cacat' => 0
+                    ]);
+                }
+
+                // Add minus entry in stock_ledgers
+                $this->stockLedgerModel->insert([
+                    'tenant_id' => $pembelian['tenant_id'] ?? 1,
+                    'id_barang' => $kodeBarang,
+                    'id_toko' => $wrongTokoId,
+                    'qty' => -$qty,
+                    'balance' => $newStock,
+                    'reference_type' => 'PURCHASE_CANCEL',
+                    'reference_id' => $pembelianId,
+                    'description' => "Koreksi salah input toko - Rollback Pembelian #{$pembelianId} di Toko #{$wrongTokoId} (Stok dikurangi: -{$qty}). Alasan: {$reason}",
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+
+                // Activity log for stock out / reversal
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'STOCK_OUT',
+                    'target_table' => 'product',
+                    'target_id' => $product['id'] ?? null,
+                    'description' => "Koreksi salah input toko Pembelian #{$pembelianId}: Stok Produk {$kodeBarang} di Toko #{$wrongTokoId} dikurangi (-{$qty}). Stok: {$oldStock} -> {$newStock}. Alasan: {$reason}"
+                ]);
+
+                $rollbackSummary[] = [
+                    'kode_barang' => $kodeBarang,
+                    'qty_dikurangi' => $qty,
+                    'stok_lama' => $oldStock,
+                    'stok_baru' => $newStock
+                ];
+            }
+
+            // ========================================================
+            // STEP 2: REVERSE JOURNAL AT WRONG TOKO
+            // ========================================================
+            $existingJournal = $this->journalModel
+                ->where('reference_type', 'PURCHASE')
+                ->where('reference_id', $pembelianId)
+                ->first();
+
+            $revDate = date('Y-m-d');
+            $revJournalId = $this->createJournal(
+                'PURCHASE_CANCEL',
+                $pembelianId,
+                "REV-PO-{$pembelianId}",
+                $revDate,
+                "Pembalikan Jurnal Pembelian #{$pembelianId} karena salah input toko #{$wrongTokoId}",
+                $wrongTokoId
+            );
+
+            if ($existingJournal) {
+                $origItems = $this->journalItemModel->where('journal_id', $existingJournal['id'])->findAll();
+                foreach ($origItems as $oi) {
+                    $this->journalItemModel->insert([
+                        'journal_id' => $revJournalId,
+                        'account_id' => $oi['account_id'],
+                        'debit' => $oi['credit'],   // Flip debit & credit
+                        'credit' => $oi['debit'],
+                        'created_at' => date('Y-m-d H:i:s')
+                    ]);
+                }
+            } else {
+                // Fallback standard reversal: Dr Bank, Cr Inventory
+                $this->addJournalItem($revJournalId, '10' . $wrongTokoId . '2', $totalBelanja, 0, $wrongTokoId);
+                $this->addJournalItem($revJournalId, '10' . $wrongTokoId . '4', 0, $totalBelanja, $wrongTokoId);
+            }
+
+            // ========================================================
+            // STEP 3: REVERSE CASHFLOW (IF ANY RECORD EXISTS)
+            // ========================================================
+            $existingCashflow = $this->db->table('cashflow')
+                ->where('id_toko', $wrongTokoId)
+                ->like('noted', "Belanja ID {$pembelianId}")
+                ->get()->getRowArray();
+
+            if ($existingCashflow) {
+                $this->db->table('cashflow')->insert([
+                    'debit' => $totalBelanja,
+                    'credit' => 0,
+                    'noted' => "Koreksi/Pembalikan Belanja ID {$pembelianId} karena salah input toko #{$wrongTokoId}",
+                    'type' => 'Koreksi Belanja',
+                    'status' => 'SUCCESS',
+                    'date_time' => date('Y-m-d H:i:s'),
+                    'id_toko' => $wrongTokoId,
+                ]);
+            }
+
+            // Activity log for overall rollback
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'ROLLBACK_PURCHASE',
+                'target_table' => 'pembelian',
+                'target_id' => $pembelianId,
+                'description' => "Rollback Pembelian ID: #{$pembelianId} dari Toko #{$wrongTokoId}. Stok dikurangi dan jurnal dibalik (Reversal Journal #{$revJournalId}). Alasan: {$reason}"
+            ]);
+
+            // ========================================================
+            // STEP 4: TRANSFER & EXECUTE TO TARGET TOKO (IF REQUESTED)
+            // ========================================================
+            $targetExecutionSummary = null;
+            if ($targetIdToko && $targetIdToko !== $wrongTokoId) {
+                // 1. Update purchase header to target toko
+                $this->pembelianModel->update($pembelianId, [
+                    'id_toko' => $targetIdToko,
+                    'status' => 'APPROVED',
+                    'updated_by' => $userId
+                ]);
+
+                // 2. Create Purchase Journal at Target Toko
+                $targetJournalId = $this->createJournal(
+                    'PURCHASE',
+                    $pembelianId,
+                    "PO-{$pembelianId}",
+                    $pembelian['tanggal_belanja'] ?? date('Y-m-d'),
+                    "Pembelian Barang (Toko #{$targetIdToko})",
+                    $targetIdToko
+                );
+
+                // Debit Inventory Target Toko
+                $this->addJournalItem($targetJournalId, '10' . $targetIdToko . '4', $totalBelanja, 0, $targetIdToko);
+                // Credit Bank Target Toko
+                $this->addJournalItem($targetJournalId, '10' . $targetIdToko . '2', 0, $totalBelanja, $targetIdToko);
+
+                // 3. Process Stock & Ledgers at Target Toko
+                $targetItemsSummary = [];
+                foreach ($details as $item) {
+                    $qty = (int)$item['jumlah'];
+                    $costPerUnit = round($item['harga_satuan'] + $item['ongkir'] + $biayaPerUnit);
+                    $product = $this->productModel->where('id_barang', $item['kode_barang'])->first();
+
+                    if (!$product) continue;
+
+                    $targetStockEntry = $this->stockModel
+                        ->where('id_barang', $item['kode_barang'])
+                        ->where('id_toko', $targetIdToko)
+                        ->first();
+
+                    $oldTargetQty = $targetStockEntry ? (int)$targetStockEntry['stock'] : 0;
+                    $oldCost = (float)$product['harga_modal'];
+                    $newTargetQty = $oldTargetQty + $qty;
+
+                    // Moving Average Cost calculation
+                    $newAvgCost = round((($oldTargetQty * $oldCost) + ($qty * $costPerUnit)) / ($newTargetQty > 0 ? $newTargetQty : 1));
+
+                    // Update product master cost
+                    $productUpdateData = ['harga_modal' => $newAvgCost];
+                    if (!empty($item['harga_jual']) && $item['harga_jual'] > 0) {
+                        $productUpdateData['harga_jual'] = round($item['harga_jual']);
+                    }
+                    $this->productModel->update($product['id'], $productUpdateData);
+
+                    // Update Stock at target store
+                    if ($targetStockEntry) {
+                        $this->stockModel->update($targetStockEntry['id'], ['stock' => $newTargetQty]);
+                    } else {
+                        $this->stockModel->insert([
+                            'id_barang' => $item['kode_barang'],
+                            'id_toko' => $targetIdToko,
+                            'stock' => $newTargetQty,
+                            'barang_cacat' => 0
+                        ]);
+                    }
+
+                    // Stock ledger at target store
+                    $this->stockLedgerModel->insert([
+                        'tenant_id' => $pembelian['tenant_id'] ?? 1,
+                        'id_barang' => $item['kode_barang'],
+                        'id_toko' => $targetIdToko,
+                        'qty' => $qty,
+                        'balance' => $newTargetQty,
+                        'reference_type' => 'PURCHASE',
+                        'reference_id' => $pembelianId,
+                        'description' => "Pembelian Barang di Toko #{$targetIdToko} (Dialihkan dari Toko #{$wrongTokoId})"
+                    ]);
+
+                    // Activity Log at target store
+                    log_aktivitas([
+                        'user_id' => $userId,
+                        'action_type' => 'STOCK_IN',
+                        'target_table' => 'product',
+                        'target_id' => $product['id'],
+                        'description' => "Belanja: Produk {$item['kode_barang']} dialihkan ke Toko #{$targetIdToko}. Stock: {$oldTargetQty} -> {$newTargetQty}, Modal: " . round($oldCost) . " -> {$newAvgCost}"
+                    ]);
+
+                    $targetItemsSummary[] = [
+                        'kode_barang' => $item['kode_barang'],
+                        'qty_bertambah' => $qty,
+                        'stok_lama' => $oldTargetQty,
+                        'stok_baru' => $newTargetQty
+                    ];
+                }
+
+                // Finalize purchase header to SUCCESS at target store
+                $this->pembelianModel->update($pembelianId, [
+                    'status' => 'SUCCESS',
+                    'updated_by' => $userId,
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'EXECUTE_PURCHASE',
+                    'target_table' => 'pembelian',
+                    'target_id' => $pembelianId,
+                    'description' => "Mengeksekusi pembelian ID: #{$pembelianId} di Toko #{$targetIdToko} (pengalihan dari Toko #{$wrongTokoId})."
+                ]);
+
+                $targetExecutionSummary = [
+                    'target_id_toko' => $targetIdToko,
+                    'target_journal_id' => $targetJournalId,
+                    'items' => $targetItemsSummary
+                ];
+            } else {
+                // If not transferred immediately, reset status to NEED_REVIEW so it can be edited/re-approved
+                $this->pembelianModel->update($pembelianId, [
+                    'status' => 'NEED_REVIEW',
+                    'updated_by' => $userId,
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+
+            $this->db->transComplete();
+
+            if ($this->db->transStatus() === false) {
+                return $this->jsonResponse->error('Gagal melakukan rollback karena kegagalan transaksi database.', 500);
+            }
+
+            // Sync TikTok Stock for wrong store and target store if TikTok service exists
+            try {
+                if (class_exists('\App\Libraries\TiktokService')) {
+                    $tiktokService = new \App\Libraries\TiktokService();
+                    foreach ($details as $dItem) {
+                        $pRow = $this->productModel->where('id_barang', $dItem['kode_barang'])->first();
+                        if ($pRow) {
+                            $tiktokService->syncProductStock((int)$pRow['id'], $wrongTokoId);
+                            if ($targetIdToko) {
+                                $tiktokService->syncProductStock((int)$pRow['id'], $targetIdToko);
+                            }
+                        }
+                    }
+                }
+            } catch (\Throwable $ttEx) {
+                log_message('warning', "[RollbackPembelian] TikTok sync warning: " . $ttEx->getMessage());
+            }
+
+            return $this->jsonResponse->oneResp(
+                $targetIdToko
+                    ? "Pembelian #{$pembelianId} berhasil di-rollback dari Toko #{$wrongTokoId} dan dialihkan ke Toko #{$targetIdToko}"
+                    : "Pembelian #{$pembelianId} berhasil di-rollback dari Toko #{$wrongTokoId}. Status kembali ke NEED_REVIEW.",
+                [
+                    'pembelian_id' => $pembelianId,
+                    'wrong_toko_id' => $wrongTokoId,
+                    'reversal_journal_id' => $revJournalId,
+                    'rollback_summary' => $rollbackSummary,
+                    'transferred_to_target' => $targetExecutionSummary
+                ],
+                200
+            );
+
+        } catch (\Throwable $e) {
+            $this->db->transRollback();
+            log_message('error', '[ERROR ROLLBACK PEMBELIAN] ' . $e->getMessage() . ' - Trace: ' . $e->getTraceAsString());
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
