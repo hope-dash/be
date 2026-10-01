@@ -3154,7 +3154,7 @@ class ProductController extends ResourceController
         $size = $dimensions[$labelSize] ?? $dimensions['33x15'];
 
         $generator = new \Picqer\Barcode\BarcodeGeneratorPNG();
-        $barcodePng = $generator->getBarcode($product['id_barang'], $generator::TYPE_CODE_128, 2, 40);
+        $barcodePng = $generator->getBarcode($product['id_barang'], $generator::TYPE_CODE_128, 1, 40);
         $barcodeBase64 = base64_encode($barcodePng);
 
         $html = view('product/barcode_label', [

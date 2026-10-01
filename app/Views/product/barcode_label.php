@@ -27,8 +27,9 @@ $safeKode = htmlspecialchars($kode_barang ?? '');
         page-break-after: always;
     }
     .barcode-img {
-        width: 100%;
-        max-height: <?= max($height_mm - 4, 6) ?>mm;
+        width: auto;
+        height: <?= max($height_mm - 4, 6) ?>mm;
+        max-width: 100%;
     }
     .kode-barang {
         font-size: 7px;
