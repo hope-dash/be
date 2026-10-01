@@ -2464,6 +2464,19 @@ class TransactionControllerV2 extends ResourceController
                 'detail' => ['invoice' => $trx['invoice'], 'kode_barang' => $kodeBarang, 'packed_qty' => $newPackedQty]
             ]);
 
+            // Also log against the product itself so it shows up in product's "View Log"
+            $product = $this->productModel->where('id_barang', $kodeBarang)->first();
+            if ($product) {
+                log_aktivitas([
+                    'user_id' => $userId,
+                    'action_type' => 'SCAN_PACKING',
+                    'target_table' => 'product',
+                    'target_id' => $product['id'],
+                    'description' => "Barang {$kodeBarang} discan untuk packing transaksi {$trx['invoice']} ({$newPackedQty}/{$item['jumlah']})",
+                    'detail' => ['invoice' => $trx['invoice'], 'kode_barang' => $kodeBarang, 'packed_qty' => $newPackedQty]
+                ]);
+            }
+
             return $this->jsonResponse->oneResp("Barang berhasil ditandai diambil", [
                 'id' => $item['id'],
                 'kode_barang' => $kodeBarang,
