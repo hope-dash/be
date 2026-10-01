@@ -6,33 +6,33 @@ $safeKode = htmlspecialchars($kode_barang ?? '');
 <head>
 <meta charset="UTF-8">
 <style>
-    @page {
-        margin: 0;
-        size: <?= $width_mm ?>mm <?= $height_mm ?>mm;
-    }
-    body {
+    * {
         margin: 0;
         padding: 0;
+        box-sizing: border-box;
+    }
+    body {
         font-family: DejaVu Sans, sans-serif;
     }
     .label {
-        box-sizing: border-box;
         width: <?= $width_mm ?>mm;
         height: <?= $height_mm ?>mm;
-        padding: 1mm;
         text-align: center;
-        overflow: hidden;
     }
     .label-break {
         page-break-after: always;
     }
     .barcode-img {
+        display: block;
+        margin: 0.5mm auto 0;
         width: auto;
-        height: <?= max($height_mm - 4, 6) ?>mm;
-        max-width: 100%;
+        height: <?= max(round($height_mm * 0.5), 5) ?>mm;
+        max-width: 92%;
     }
     .kode-barang {
+        margin-top: 0.3mm;
         font-size: 7px;
+        line-height: 1;
         letter-spacing: 0.5px;
     }
 </style>
