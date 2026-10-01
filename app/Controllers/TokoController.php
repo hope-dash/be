@@ -545,6 +545,59 @@ class TokoController extends BaseController
     }
 
     /**
+     * GET /api/v2/toko/(:num)/barcode-settings
+     */
+    public function getBarcodeSettings($id = null)
+    {
+        try {
+            $toko = $this->modelToko->find($id);
+            if (!$toko) {
+                return $this->jsonResponse->error("Toko tidak ditemukan", 404);
+            }
+
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            $labelSize = $tokoMetaModel->getMeta((int) $id, 'barcode_label_size', '33x15');
+
+            return $this->jsonResponse->oneResp("Success fetching barcode settings", [
+                'barcode_label_size' => $labelSize
+            ], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * POST /api/v2/toko/(:num)/barcode-settings
+     */
+    public function updateBarcodeSettings($id = null)
+    {
+        try {
+            $toko = $this->modelToko->find($id);
+            if (!$toko) {
+                return $this->jsonResponse->error("Toko tidak ditemukan", 404);
+            }
+
+            $data = $this->request->getJSON();
+            $labelSize = $data->barcode_label_size ?? null;
+            $allowedSizes = ['33x15', '50x20'];
+
+            if (!in_array($labelSize, $allowedSizes, true)) {
+                return $this->jsonResponse->error("Ukuran label tidak valid", 400);
+            }
+
+            $tokoMetaModel = new \App\Models\TokoMetaModel();
+            $tokoMetaModel->setMeta((int) $id, 'barcode_label_size', $labelSize);
+
+            return $this->jsonResponse->oneResp("Pengaturan barcode berhasil diperbarui", [
+                'id_toko' => (int) $id,
+                'barcode_label_size' => $labelSize
+            ], 200);
+        } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 400);
+        }
+    }
+
+    /**
      * Helper to sync all eligible products (stock > 0 and images > 0) to TikTok Shop for a given Toko ID
      */
     public function syncAllProductsToTiktokForToko(int $idToko)

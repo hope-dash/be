@@ -20,6 +20,7 @@
         "laminas/laminas-escaper": "^2.14",
         "mpdf/mpdf": "*",
         "phpoffice/phpspreadsheet": "^4.1",
+        "picqer/php-barcode-generator": "^3.3",
         "psr/log": "^3.0"
     },
     "require-dev": {

@@ -3128,4 +3128,59 @@ class ProductController extends ResourceController
             return $this->jsonResponse->error($e->getMessage(), 400);
         }
     }
+
+    public function printBarcode($id = null)
+    {
+        $qty = (int) ($this->request->getGet('qty') ?? 1);
+        $idToko = $this->request->getGet('id_toko');
+
+        if ($qty < 1) $qty = 1;
+        if ($qty > 200) $qty = 200;
+
+        $product = $this->productModel->find($id);
+        if (!$product) {
+            return $this->jsonResponse->error('Produk tidak ditemukan', 404);
+        }
+
+        $tokoMetaModel = new \App\Models\TokoMetaModel();
+        $labelSize = $idToko
+            ? $tokoMetaModel->getMeta((int) $idToko, 'barcode_label_size', '33x15')
+            : '33x15';
+
+        $dimensions = [
+            '33x15' => ['w' => 33, 'h' => 15],
+            '50x20' => ['w' => 50, 'h' => 20],
+        ];
+        $size = $dimensions[$labelSize] ?? $dimensions['33x15'];
+
+        $generator = new \Picqer\Barcode\BarcodeGeneratorPNG();
+        $barcodePng = $generator->getBarcode($product['id_barang'], $generator::TYPE_CODE_128, 2, 40);
+        $barcodeBase64 = base64_encode($barcodePng);
+
+        $html = view('product/barcode_label', [
+            'kode_barang' => $product['id_barang'],
+            'barcodeBase64' => $barcodeBase64,
+            'qty' => $qty,
+            'width_mm' => $size['w'],
+            'height_mm' => $size['h'],
+        ]);
+
+        $mmToPt = 2.83465;
+        $options = new \Dompdf\Options();
+        $options->set('isHtml5ParserEnabled', true);
+        $options->set('isRemoteEnabled', false);
+        $options->set('defaultFont', 'DejaVu Sans');
+
+        $dompdf = new \Dompdf\Dompdf($options);
+        $dompdf->loadHtml($html);
+        $dompdf->setPaper([0, 0, $size['w'] * $mmToPt, $size['h'] * $mmToPt]);
+        $dompdf->render();
+
+        $filename = 'barcode-' . $product['id_barang'] . '.pdf';
+
+        return $this->response
+            ->setHeader('Content-Type', 'application/pdf')
+            ->setHeader('Content-Disposition', 'inline; filename="' . $filename . '"')
+            ->setBody($dompdf->output());
+    }
 }

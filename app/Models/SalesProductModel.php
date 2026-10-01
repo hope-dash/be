@@ -26,6 +26,9 @@ class SalesProductModel extends TenantScopedModel
         'is_service',
         'id_jasa',
         'komisi_persen',
-        'komisi_nominal'
+        'komisi_nominal',
+        'packed_qty',
+        'packed_at',
+        'packed_by'
     ];
 }

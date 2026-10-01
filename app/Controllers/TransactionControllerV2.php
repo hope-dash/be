@@ -2300,6 +2300,19 @@ class TransactionControllerV2 extends ResourceController
                 $this->db->transRollback();
                 return $this->jsonResponse->error("Tidak bisa update pengiriman untuk transaksi yang sudah dibatalkan", 400);
             }
+
+            if ($status && strtoupper($status) === 'READY') {
+                $unpackedCount = $this->salesProductModel
+                    ->where('id_transaction', $id)
+                    ->where('is_service', 0)
+                    ->where('packed_qty < jumlah', null, false)
+                    ->countAllResults();
+
+                if ($unpackedCount > 0) {
+                    $this->db->transRollback();
+                    return $this->jsonResponse->error("Masih ada barang yang belum selesai di-packing", 400);
+                }
+            }
             // Update Delivery Status locally in transaction table (if using that column)
             // or just in Meta. Documentation says Meta.
             // But we also added `delivery_status` column in migration calling it "Shipping Status"
@@ -2386,6 +2399,81 @@ class TransactionControllerV2 extends ResourceController
             return $this->jsonResponse->oneResp("Status pengiriman berhasil diperbarui", [], 200);
 
         } catch (\Exception $e) {
+            return $this->jsonResponse->error($e->getMessage(), 500);
+        }
+    }
+
+    // 6b. Scan Barcode for Packing Checklist
+    public function scanPackingItem($id = null)
+    {
+        $data = $this->request->getJSON();
+        $userId = $this->request->user['user_id'] ?? 0;
+        $kodeBarang = trim($data->kode_barang ?? '');
+
+        if (!$kodeBarang) {
+            return $this->jsonResponse->error("Kode barang wajib diisi", 400);
+        }
+
+        $this->db->transStart();
+        try {
+            $trx = $this->db->query("SELECT * FROM `transaction` WHERE id = ? FOR UPDATE", [$id])->getRowArray();
+            if (!$trx) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi tidak ditemukan", 404);
+            }
+
+            if ($trx['status'] === 'CANCEL') {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Transaksi sudah dibatalkan", 400);
+            }
+
+            $item = $this->salesProductModel
+                ->where('id_transaction', $id)
+                ->where('kode_barang', $kodeBarang)
+                ->where('is_service', 0)
+                ->where('packed_qty < jumlah', null, false)
+                ->first();
+
+            if (!$item) {
+                $this->db->transRollback();
+                return $this->jsonResponse->error("Barang tidak ditemukan di transaksi ini atau sudah selesai di-packing", 404);
+            }
+
+            $newPackedQty = (int)$item['packed_qty'] + 1;
+            $updateData = ['packed_qty' => $newPackedQty];
+            if ($newPackedQty >= (int)$item['jumlah']) {
+                $updateData['packed_at'] = date('Y-m-d H:i:s');
+                $updateData['packed_by'] = $userId;
+            }
+            $this->salesProductModel->update($item['id'], $updateData);
+
+            $remaining = $this->salesProductModel
+                ->where('id_transaction', $id)
+                ->where('is_service', 0)
+                ->where('packed_qty < jumlah', null, false)
+                ->countAllResults();
+
+            $this->db->transComplete();
+
+            log_aktivitas([
+                'user_id' => $userId,
+                'action_type' => 'SCAN_PACKING',
+                'target_table' => 'sales_product',
+                'target_id' => $item['id'],
+                'description' => "Scan packing untuk {$trx['invoice']}, kode barang {$kodeBarang} ({$newPackedQty}/{$item['jumlah']})",
+                'detail' => ['invoice' => $trx['invoice'], 'kode_barang' => $kodeBarang, 'packed_qty' => $newPackedQty]
+            ]);
+
+            return $this->jsonResponse->oneResp("Barang berhasil ditandai diambil", [
+                'id' => $item['id'],
+                'kode_barang' => $kodeBarang,
+                'packed_qty' => $newPackedQty,
+                'jumlah' => (int)$item['jumlah'],
+                'all_packed' => $remaining === 0,
+            ], 200);
+
+        } catch (\Exception $e) {
+            $this->db->transRollback();
             return $this->jsonResponse->error($e->getMessage(), 500);
         }
     }
@@ -2665,12 +2753,14 @@ class TransactionControllerV2 extends ResourceController
                     p.berat,
                     mb.nama_model,
                     s.seri,
+                    u_packed.name as packed_by_name,
                     CASE WHEN sp.is_service = 1 THEN js.nama_jasa ELSE CONCAT(COALESCE(p.nama_barang,''), ' ', COALESCE(mb.nama_model,''), ' ', COALESCE(s.seri,'')) END as nama_lengkap_barang
                 ")
                 ->join('product p', 'sp.kode_barang = p.id_barang AND p.tenant_id = sp.tenant_id', 'left')
                 ->join('jasa_service js', 'sp.is_service = 1 AND sp.id_jasa = js.id', 'left')
                 ->join('model_barang mb', 'p.id_model_barang = mb.id AND mb.tenant_id = sp.tenant_id', 'left')
                 ->join('seri s', 'p.id_seri_barang = s.id AND s.tenant_id = sp.tenant_id', 'left')
+                ->join('users u_packed', 'sp.packed_by = u_packed.user_id', 'left')
                 ->where('sp.id_transaction', $id)
                 ->where('sp.tenant_id', TenantContext::id())
                 ->get()

@@ -73,6 +73,7 @@ $routes->group('api', ['filter' => 'tenant'], function ($routes) {
     $routes->get('dropdown/seri-by-product', 'ProductController::getListSeribySearchProduct');
     $routes->get('detail/toko/(:num)', 'TokoController::getDetailById/$1');
     $routes->get('product/(:num)', 'ProductController::getDetailById/$1');
+    $routes->get('product/(:num)/print-barcode', 'ProductController::printBarcode/$1');
 
     // Public Documents
     $routes->get('invoice/download/(:num)', 'InvoiceController::downloadPdf/$1');
@@ -249,6 +250,7 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->post('transaction/(:num)/return', 'TransactionControllerV2::returnProduct/$1');
         $routes->post('transaction/(:num)/refund', 'TransactionControllerV2::refund/$1');
         $routes->post('transaction/(:num)/delivery-status', 'TransactionControllerV2::updateDeliveryStatus/$1');
+        $routes->post('transaction/(:num)/packing/scan', 'TransactionControllerV2::scanPackingItem/$1');
         $routes->get('transaction/list', 'TransactionControllerV2::getTransactionsByStatus');
         $routes->post('transaction/(:num)/meta', 'TransactionControllerV2::addTransactionMeta/$1');
         $routes->post('transaction/(:num)/teknisi', 'TransactionControllerV2::updateTeknisi/$1');
@@ -265,6 +267,8 @@ $routes->group('api', ['filter' => ['tenant', 'jwtAuth']], function ($routes) {
         $routes->delete('toko/(:num)/bank', 'TokoController::deleteBankConfig/$1');
         $routes->post('toko/(:num)/tiktok-upcharge', 'TokoController::updateTiktokUpcharge/$1');
         $routes->put('toko/(:num)/tiktok-upcharge', 'TokoController::updateTiktokUpcharge/$1');
+        $routes->get('toko/(:num)/barcode-settings', 'TokoController::getBarcodeSettings/$1');
+        $routes->post('toko/(:num)/barcode-settings', 'TokoController::updateBarcodeSettings/$1');
 
         // Accounting & Journal
         $routes->get('journal', 'JournalController::index');
