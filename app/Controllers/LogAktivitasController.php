@@ -63,10 +63,12 @@ class LogAktivitasController extends ResourceController
             $builder->where('DATE(log_aktivitas.created_at) <=', $endDate);
         }
         if ($search) {
-            $builder->like('log_aktivitas.target_table', $search);
-            $builder->orLike('log_aktivitas.target_id', $search);
-            $builder->orLike('log_aktivitas.description', $search);
-            $builder->orLike('users.name', $search);
+            $builder->groupStart()
+                ->like('log_aktivitas.target_table', $search)
+                ->orLike('log_aktivitas.target_id', $search)
+                ->orLike('log_aktivitas.description', $search)
+                ->orLike('users.name', $search)
+                ->groupEnd();
         }
 
         // Pagination
