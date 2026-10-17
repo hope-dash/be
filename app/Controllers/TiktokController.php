@@ -2280,6 +2280,8 @@ class TiktokController extends ResourceController
                         'kode_barang' => $itemKodeBarang,
                         'product' => $product,
                         'modal_system' => $modalSystem,
+                        // Snapshot harga master internal saat nota dibuat.
+                        'harga_system' => (float) ($product['harga_jual'] ?? 0),
                         'qty' => 0,
                         'sale_price' => $effectivePrice,
                         'original_price' => $effectivePrice
@@ -2370,7 +2372,7 @@ class TiktokController extends ResourceController
                             'actual_total' => $salePrice * $qty,
                             'kode_barang' => $kodeBarang,
                             'jumlah' => $qty,
-                            'harga_system' => $originalPrice,
+                            'harga_system' => $item['harga_system'],
                             'harga_jual' => $salePrice,
                             'total' => $salePrice * $qty,
                             'modal_system' => $modalSystem,
@@ -2492,7 +2494,7 @@ class TiktokController extends ResourceController
                             'actual_total' => $salePrice * $qty,
                             'kode_barang' => $kodeBarang,
                             'jumlah' => $qty,
-                            'harga_system' => $originalPrice,
+                            'harga_system' => $item['harga_system'],
                             'harga_jual' => $salePrice,
                             'total' => $salePrice * $qty,
                             'modal_system' => $modalSystem,
@@ -3116,7 +3118,6 @@ class TiktokController extends ResourceController
                     $unitPrice = $qty > 0 ? ($gSp['total'] / $qty) : (float)$gSp['harga_jual'];
                     unset($gSp['id']);
                     $gSp['harga_jual'] = $unitPrice;
-                    $gSp['harga_system'] = $unitPrice;
                     $gSp['actual_per_piece'] = $unitPrice;
                     $db->table('sales_product')->insert($gSp);
                 }
