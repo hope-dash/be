@@ -2635,6 +2635,21 @@ class TransactionControllerV2 extends ResourceController
                 'reference_id' => $trxId,
                 'description' => $reason . " (Barang Cacat)"
             ]);
+            log_barang_cacat_transaksi([
+                'user_id' => $this->request->user['user_id'] ?? 0,
+                'target_table' => 'stock',
+                'target_id' => $stockEntry['id'],
+                'description' => "Barang masuk stok cacat: Produk {$productCode} di Toko #{$tokoId}. Qty: {$qty}. Notes: {$reason}.",
+                'detail' => [
+                    'source' => 'retur',
+                    'kode_barang' => $productCode,
+                    'id_toko' => $tokoId,
+                    'qty' => $qty,
+                    'notes' => $reason,
+                    'barang_cacat_sebelum' => (int) $stockEntry['barang_cacat'],
+                    'barang_cacat_setelah' => (int) $newCacat,
+                ],
+            ], $trxId);
             return;
         }
 

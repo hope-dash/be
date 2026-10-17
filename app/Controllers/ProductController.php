@@ -2918,7 +2918,18 @@ class ProductController extends ResourceController
                 'action_type' => 'MOVE_TO_CACAT',
                 'target_table' => 'stock',
                 'target_id' => $stock['id'],
-                'description' => "Pindah stock normal ke cacat Produk {$product['id_barang']} di {$tokoName}. Qty: {$qty}. Notes: {$notes}"
+                'description' => "Pindah stock normal ke cacat Produk {$product['id_barang']} di {$tokoName}. Qty: {$qty}. Notes: {$notes}",
+                'detail' => [
+                    'source' => 'manual',
+                    'kode_barang' => $product['id_barang'],
+                    'id_toko' => $idToko,
+                    'qty' => $qty,
+                    'notes' => $notes,
+                    'stok_sebelum' => (int) $stock['stock'],
+                    'stok_setelah' => (int) $stock['stock'] - $qty,
+                    'barang_cacat_sebelum' => (int) $stock['barang_cacat'],
+                    'barang_cacat_setelah' => (int) $stock['barang_cacat'] + $qty,
+                ],
             ]);
 
             $this->db->transComplete();

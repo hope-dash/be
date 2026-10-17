@@ -2122,7 +2122,7 @@ class TransactionController extends BaseController
             }
 
             $cancelReason = $data->cancel_reason;
-            $barangCacat = $data->barang_cacat === "true";
+            $barangCacat = filter_var($data->barang_cacat, FILTER_VALIDATE_BOOLEAN);
 
             // Tentukan status baru
             $newStatus = ($transaction['status'] === 'WAITING_PAYMENT') ? 'CANCEL' : 'NEED_REFUNDED';
@@ -2172,14 +2172,25 @@ class TransactionController extends BaseController
 
                 $idProduct = $productMap[$product['kode_barang']] ?? null;
                 if ($idProduct) {
-                    log_aktivitas([
+                    $stockLog = [
                         'user_id' => $token['user_id'],
                         'action_type' => 'UPDATE',
                         'target_table' => 'product',
                         'target_id' => $idProduct,
                         'description' => "Mengembalikan stok produk {$product['kode_barang']} pada toko {$transaction['id_toko']} sebanyak {$product['jumlah']} $updateField dari transaksi $transactionId.",
-                        'detail' => []
-                    ]);
+                        'detail' => [
+                            'source' => 'cancel',
+                            'kode_barang' => $product['kode_barang'],
+                            'id_toko' => $transaction['id_toko'],
+                            'qty' => (int) $product['jumlah'],
+                            'notes' => $cancelReason,
+                        ]
+                    ];
+                    if ($barangCacat) {
+                        log_barang_cacat_transaksi($stockLog, $transactionId);
+                    } else {
+                        log_aktivitas($stockLog);
+                    }
                 }
             }
 
@@ -2599,7 +2610,7 @@ class TransactionController extends BaseController
                 $id_toko = $transaction['id_toko'];
                 $kode_barang = $product->kode_barang;
                 $jumlah = (int) $product->jumlah;
-                $barang_cacat = (bool) $product->barang_cacat;
+                $barang_cacat = filter_var($product->barang_cacat, FILTER_VALIDATE_BOOLEAN);
                 $solution = $product->solution;
 
                 // Get product stock
@@ -2632,20 +2643,24 @@ class TransactionController extends BaseController
                                 'stock' => $stock['stock'] - $jumlah,
                             ]);
 
-                        log_aktivitas([
+                        log_barang_cacat_transaksi([
                             'user_id' => $token['user_id'],
                             'action_type' => 'UPDATE',
                             'target_table' => 'stock',
-                            'target_id' => $stock['product_id'],
+                            'target_id' => $stock['id'],
                             'description' => "Transaksi $transactionId Retur. Stok produk {$kode_barang} dikurangi sebanyak {$jumlah} karena barang cacat pada stock toko {$id_toko}.",
                             'detail' => [
+                                'source' => 'retur_exchange',
+                                'kode_barang' => $kode_barang,
+                                'id_toko' => $id_toko,
+                                'qty' => $jumlah,
                                 'stok_sebelum' => (int) $stock['stock'],
                                 'barang_cacat_sebelum' => (int) $stock['barang_cacat'],
                                 'jumlah_dikurangi' => (int) $jumlah,
                                 'stok_setelah' => (int) $stock['stock'] - $jumlah,
                                 'barang_cacat_setelah' => (int) $stock['barang_cacat'] + $jumlah,
                             ]
-                        ]);
+                        ], $transactionId);
                     }
                 }
 
@@ -2718,13 +2733,17 @@ class TransactionController extends BaseController
                     ) {
                         throw new \RuntimeException('Failed to update stock for product: ' . $kode_barang);
                     }
-                    log_aktivitas([
+                    $stockLog = [
                         'user_id' => $token['user_id'],
                         'action_type' => 'UPDATE',
                         'target_table' => 'stock',
-                        'target_id' => $stock['product_id'],
+                        'target_id' => $stock['id'],
                         'description' => "Transaksi $transactionId Retur. Produk {$kode_barang} sebanyak {$jumlah} dikembalikan ke `{$updateField}` pada stok toko {$id_toko}.",
                         'detail' => [
+                            'source' => 'retur_refund',
+                            'kode_barang' => $kode_barang,
+                            'id_toko' => $id_toko,
+                            'qty' => $jumlah,
                             'tipe_refund' => $barang_cacat ? 'Barang Cacat' : 'Barang Normal',
                             'stok_sebelum' => (int) $stock['stock'],
                             'barang_cacat_sebelum' => (int) $stock['barang_cacat'],
@@ -2732,7 +2751,12 @@ class TransactionController extends BaseController
                             'stok_setelah' => $barang_cacat ? (int) $stock['stock'] : (int) $stock['stock'] + $jumlah,
                             'barang_cacat_setelah' => $barang_cacat ? (int) $stock['barang_cacat'] + $jumlah : (int) $stock['barang_cacat'],
                         ]
-                    ]);
+                    ];
+                    if ($barang_cacat) {
+                        log_barang_cacat_transaksi($stockLog, $transactionId);
+                    } else {
+                        log_aktivitas($stockLog);
+                    }
                 }
             }
 
@@ -2800,7 +2824,7 @@ class TransactionController extends BaseController
                 'action_type' => 'UPDATE',
                 'target_table' => 'transactions',
                 'target_id' => $transactionId,
-                'description' => `Transaksi $transactionId terdapat complain`,
+                'description' => "Transaksi $transactionId terdapat complain",
                 'detail' => $data
             ]);
             return $this->jsonResponse->oneResp('Complaint processed successfully', null, 200);

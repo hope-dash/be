@@ -28,3 +28,26 @@ if (!function_exists('log_aktivitas')) {
         return $builder->insert($logData);
     }
 }
+
+if (!function_exists('log_barang_cacat_transaksi')) {
+    /** Record damaged stock from a transaction with its invoice reference. */
+    function log_barang_cacat_transaksi(array $data, $transactionId)
+    {
+        $transaction = Database::connect()->table('transaction')
+            ->select('id, invoice')
+            ->where('id', $transactionId)
+            ->where('tenant_id', TenantContext::id())
+            ->get()->getRowArray();
+
+        $invoice = $transaction['invoice'] ?? null;
+        $data['action_type'] = 'MOVE_TO_CACAT';
+        $data['description'] = ($data['description'] ?? '')
+            . ($invoice ? " Invoice: {$invoice}." : " Transaksi: #{$transactionId}.");
+        $data['detail'] = array_merge($data['detail'] ?? [], [
+            'transaction_id' => $transactionId,
+            'invoice' => $invoice,
+        ]);
+
+        return log_aktivitas($data);
+    }
+}
