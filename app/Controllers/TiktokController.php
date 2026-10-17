@@ -1912,11 +1912,21 @@ class TiktokController extends ResourceController
             if ($isCancel) {
                 $db = \Config\Database::connect();
                 $existingReturn = $db->table('stock_ledgers')
+                    ->where('tenant_id', $tenantId)
+                    ->where('id_toko', $idToko)
                     ->where('reference_id', $existingTrx['id'])
                     ->where('reference_type', 'RETURN')
                     ->get()->getRowArray();
 
-                if (!$existingReturn) {
+                $stockDeducted = $db->table('stock_ledgers')
+                    ->where('tenant_id', $tenantId)
+                    ->where('id_toko', $idToko)
+                    ->where('reference_id', $existingTrx['id'])
+                    ->where('reference_type', 'TRANSACTION')
+                    ->where('qty <', 0)
+                    ->countAllResults() > 0;
+
+                if (!$existingReturn && $stockDeducted) {
                     $items = $salesProductModel->where('id_transaction', $existingTrx['id'])->findAll();
 
                     // Fallback to order line_items if sales_product is empty
@@ -2125,74 +2135,14 @@ class TiktokController extends ResourceController
                 ]);
             }
             // 3. Handle COMPLETED (Dana diteruskan ke seller -> baru di-set PAID & catat komisi di jurnal)
-            elseif ($isCompleted && $currentStatus !== 'COMPLETED') {
-                // Fetch finance breakdown for commission and net settlement if available
-                $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
-
-                $actualTotal = (float)$existingTrx['actual_total'];
-
+            elseif ($isCompleted && $currentStatus !== 'CANCEL') {
                 $transactionModel->update($existingTrx['id'], [
                     'status' => 'COMPLETED',
-                    'total_payment' => $actualTotal
+                    'total_payment' => (float) $existingTrx['actual_total'],
                 ]);
-
                 $this->setTransactionMeta($existingTrx['id'], 'shipping_status', 'COMPLETED');
-
-                // Only create settlement journal if finance API returned real data
-                // If net_settlement is null, the API didn't have data yet — skip and fix later via fixTiktokInvoice
-                $hasFinanceData = ($financeData['net_settlement'] !== null && (float)$financeData['net_settlement'] > 0);
-
-                if ($hasFinanceData) {
-                    $netSettlement = (float)$financeData['net_settlement'];
-                    $totalFee = max(0, $actualTotal - $netSettlement);
-
-                    $this->setTransactionMeta($existingTrx['id'], 'platform_commission_fee', (string) $totalFee);
-                    $this->setTransactionMeta($existingTrx['id'], 'net_settlement_amount', (string) $netSettlement);
-
-                    // Re-create / Update Settlement Journal for Commission & Payment Settlement
-                    $db = \Config\Database::connect();
-                    $existingSettle = $db->table('journals')
-                        ->where('reference_no', $orderId)
-                        ->where('reference_type', 'SETTLEMENT')
-                        ->get()->getRowArray();
-
-                    $settleJournalId = $existingSettle ? $existingSettle['id'] : $this->createJournal('SETTLEMENT', $existingTrx['id'], $orderId, date('Y-m-d'), "Settlement & Commission Invoice #{$orderId}", $idToko);
-
-                    // Clear old items if any
-                    $db->table('journal_items')->where('journal_id', $settleJournalId)->delete();
-
-                    // Dr Bank (Net settlement amount — marketplace payouts go to bank)
-                    $this->addJournalItem($settleJournalId, '10' . $idToko . '2', $netSettlement, 0, $idToko);
-
-                    // Dr Platform Commission Expense (If totalFee > 0)
-                    if ($totalFee > 0) {
-                        $this->addJournalItem($settleJournalId, '50' . $idToko . '5', $totalFee, 0, $idToko);
-                    }
-
-                    // Cr Accounts Receivable (AR)
-                    $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
-
-                    $this->finalizeJournalTotals($settleJournalId);
-
-                    log_aktivitas([
-                        'user_id' => 0,
-                        'action_type' => 'UPDATE_TRANSACTION_STATUS',
-                        'target_table' => 'transaction',
-                        'target_id' => $existingTrx['id'],
-                        'description' => "Order {$orderId} COMPLETED. Net settlement: {$netSettlement}, Platform Fee: {$totalFee}"
-                    ]);
-                } else {
-                    // Finance data not ready yet — log warning, settlement journal will be created later via fixTiktokInvoice
-                    log_message('warning', "[syncTiktokOrder] COMPLETED order {$orderId} but finance API returned no settlement data. Settlement journal SKIPPED — run fixTiktokInvoice later.");
-
-                    log_aktivitas([
-                        'user_id' => 0,
-                        'action_type' => 'UPDATE_TRANSACTION_STATUS',
-                        'target_table' => 'transaction',
-                        'target_id' => $existingTrx['id'],
-                        'description' => "Order {$orderId} COMPLETED. Settlement journal PENDING — finance data not available yet."
-                    ]);
-                }
+                // Retry pending settlement even when an earlier event already marked it completed.
+                $this->syncOrderSettlement($idToko, $existingTrx);
             }
             // 2. Handle intermediate shipping status (AWAITING_SHIPMENT, IN_TRANSIT, DELIVERED, ON_HOLD, PAID)
             elseif ($isShippingStatus || $rawTiktokStatus === 'PAID') {
@@ -2283,11 +2233,11 @@ class TiktokController extends ResourceController
                         // Snapshot harga master internal saat nota dibuat.
                         'harga_system' => (float) ($product['harga_jual'] ?? 0),
                         'qty' => 0,
-                        'sale_price' => $effectivePrice,
-                        'original_price' => $effectivePrice
+                        'sale_total' => 0,
                     ];
                 }
                 $itemsGrouped[$itemKodeBarang]['qty'] += $qty;
+                $itemsGrouped[$itemKodeBarang]['sale_total'] += $effectivePrice * $qty;
 
                 $cogsTotal += $modalSystem * $qty;
             }
@@ -2307,7 +2257,7 @@ class TiktokController extends ResourceController
                 'invoice' => $orderId,
                 'amount' => $subTotal,
                 'actual_total' => $grandTotal,
-                'total_payment' => 0, // Starts at 0 until COMPLETED
+                'total_payment' => $initialStatus === 'COMPLETED' ? $grandTotal : 0,
                 'status' => $initialStatus,
                 'id_toko' => $idToko,
                 'date_time' => date('Y-m-d H:i:s', $order['create_time'] ?? time()),
@@ -2362,19 +2312,19 @@ class TiktokController extends ResourceController
                         $kodeBarang = $item['kode_barang'];
                         $modalSystem = $item['modal_system'];
                         $qty = $item['qty'];
-                        $salePrice = $item['sale_price'];
-                        $originalPrice = $item['original_price'];
+                        $saleTotal = $item['sale_total'];
+                        $salePrice = $qty > 0 ? $saleTotal / $qty : 0;
 
                         $salesProductModel->insert([
                             'tenant_id' => $tenantId,
                             'id_transaction' => $trxId,
                             'actual_per_piece' => $salePrice,
-                            'actual_total' => $salePrice * $qty,
+                            'actual_total' => $saleTotal,
                             'kode_barang' => $kodeBarang,
                             'jumlah' => $qty,
                             'harga_system' => $item['harga_system'],
                             'harga_jual' => $salePrice,
-                            'total' => $salePrice * $qty,
+                            'total' => $saleTotal,
                             'modal_system' => $modalSystem,
                             'total_modal' => $modalSystem * $qty,
                             'is_service' => 0
@@ -2484,19 +2434,19 @@ class TiktokController extends ResourceController
                         $kodeBarang = $item['kode_barang'];
                         $modalSystem = $item['modal_system'];
                         $qty = $item['qty'];
-                        $salePrice = $item['sale_price'];
-                        $originalPrice = $item['original_price'];
+                        $saleTotal = $item['sale_total'];
+                        $salePrice = $qty > 0 ? $saleTotal / $qty : 0;
 
                         $salesProductModel->insert([
                             'tenant_id' => $tenantId,
                             'id_transaction' => $trxId,
                             'actual_per_piece' => $salePrice,
-                            'actual_total' => $salePrice * $qty,
+                            'actual_total' => $saleTotal,
                             'kode_barang' => $kodeBarang,
                             'jumlah' => $qty,
                             'harga_system' => $item['harga_system'],
                             'harga_jual' => $salePrice,
-                            'total' => $salePrice * $qty,
+                            'total' => $saleTotal,
                             'modal_system' => $modalSystem,
                             'total_modal' => $modalSystem * $qty,
                             'is_service' => 0
@@ -2516,8 +2466,53 @@ class TiktokController extends ResourceController
                         ]
                     ]);
                 }
+                if ($initialStatus === 'COMPLETED') {
+                    $this->syncOrderSettlement($idToko, array_merge($trxData, ['id' => $trxId]));
+                }
             }
         }
+    }
+
+    /** Build settlement only from a confirmed finance response. */
+    private function syncOrderSettlement($idToko, array $transaction): void
+    {
+        $orderId = $transaction['invoice'];
+        $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
+        if ($financeData['net_settlement'] === null || (float) $financeData['net_settlement'] <= 0) {
+            log_message('warning', "[syncOrderSettlement] Order {$orderId}: finance data unavailable; settlement remains pending.");
+            return;
+        }
+
+        $actualTotal = (float) $transaction['actual_total'];
+        $netSettlement = (float) $financeData['net_settlement'];
+        $totalFee = max(0, $actualTotal - $netSettlement);
+        $this->setTransactionMeta($transaction['id'], 'platform_commission_fee', (string) $totalFee);
+        $this->setTransactionMeta($transaction['id'], 'net_settlement_amount', (string) $netSettlement);
+
+        $db = \Config\Database::connect();
+        $existingSettle = $db->table('journals')
+            ->where('tenant_id', $transaction['tenant_id'])
+            ->where('reference_id', $transaction['id'])
+            ->where('reference_type', 'SETTLEMENT')
+            ->get()->getRowArray();
+        $settleDate = !empty($transaction['updated_at']) ? date('Y-m-d', strtotime($transaction['updated_at'])) : date('Y-m-d');
+        $journalId = $existingSettle ? $existingSettle['id'] : $this->createJournal(
+            'SETTLEMENT', $transaction['id'], $orderId, $settleDate, "Settlement & Commission Invoice #{$orderId}", $idToko
+        );
+        $db->table('journal_items')->where('journal_id', $journalId)->delete();
+        $this->addJournalItem($journalId, '10' . $idToko . '2', $netSettlement, 0, $idToko);
+        if ($totalFee > 0) {
+            $this->addJournalItem($journalId, '50' . $idToko . '5', $totalFee, 0, $idToko);
+        }
+        $this->addJournalItem($journalId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
+        $this->finalizeJournalTotals($journalId);
+        log_aktivitas([
+            'user_id' => 0,
+            'action_type' => 'UPDATE_TRANSACTION_STATUS',
+            'target_table' => 'transaction',
+            'target_id' => $transaction['id'],
+            'description' => "Order {$orderId} COMPLETED. Net settlement: {$netSettlement}, Platform Fee: {$totalFee}",
+        ]);
     }
 
     /**
@@ -2897,11 +2892,21 @@ class TiktokController extends ResourceController
 
                 // Restore stock if not already restored
                 $existingReturn = $db->table('stock_ledgers')
+                    ->where('tenant_id', $tenantId)
+                    ->where('id_toko', $idToko)
                     ->where('reference_id', $transactionId)
                     ->where('reference_type', 'RETURN')
                     ->get()->getRowArray();
 
-                if (!$existingReturn) {
+                $stockDeducted = $db->table('stock_ledgers')
+                    ->where('tenant_id', $tenantId)
+                    ->where('id_toko', $idToko)
+                    ->where('reference_id', $transactionId)
+                    ->where('reference_type', 'TRANSACTION')
+                    ->where('qty <', 0)
+                    ->countAllResults() > 0;
+
+                if (!$existingReturn && $stockDeducted) {
                     $stockModel = new \App\Models\StockModel();
                     $stockLedgerModel = new \App\Models\StockLedgerModel();
                     $salesProductModel = new \App\Models\SalesProductModel();
@@ -3055,40 +3060,7 @@ class TiktokController extends ResourceController
 
                 // Rebuild SETTLEMENT Journal for COMPLETED orders
                 if ($updatedTrxCheck['status'] === 'COMPLETED') {
-                    $actualTotal = (float)$transaction['actual_total'];
-                    $financeData = $this->fetchOrderFinanceBreakdown($idToko, $orderId);
-
-                    $commissionFee = (float)($financeData['commission_fee'] ?? 0);
-                    $transactionFee = (float)($financeData['transaction_fee'] ?? 0);
-                    $netSettlement = ($financeData['net_settlement'] !== null) ? (float)$financeData['net_settlement'] : max(0, $actualTotal - $commissionFee - $transactionFee);
-                    $totalFee = max(0, $actualTotal - $netSettlement);
-
-                    $this->setTransactionMeta($transactionId, 'platform_commission_fee', (string) $totalFee);
-                    $this->setTransactionMeta($transactionId, 'net_settlement_amount', (string) $netSettlement);
-
-                    $existingSettle = $db->table('journals')
-                        ->where('reference_no', $orderId)
-                        ->where('reference_type', 'SETTLEMENT')
-                        ->get()->getRowArray();
-
-                    $settleDate = !empty($transaction['updated_at']) ? date('Y-m-d', strtotime($transaction['updated_at'])) : date('Y-m-d');
-                    $settleJournalId = $existingSettle ? $existingSettle['id'] : $this->createJournal('SETTLEMENT', $transactionId, $orderId, $settleDate, "Settlement & Commission Invoice #{$orderId}", $idToko);
-                    $db->table('journal_items')->where('journal_id', $settleJournalId)->delete();
-
-                    // Dr Bank (Net settlement — marketplace payouts go to bank)
-                    $this->addJournalItem($settleJournalId, '10' . $idToko . '2', $netSettlement, 0, $idToko);
-
-                    // Dr Platform Commission Expense
-                    if ($totalFee > 0) {
-                        $this->addJournalItem($settleJournalId, '50' . $idToko . '5', $totalFee, 0, $idToko);
-                    }
-
-                    // Cr Accounts Receivable (AR)
-                    $this->addJournalItem($settleJournalId, '10' . $idToko . '3', 0, $actualTotal, $idToko);
-
-                    $this->finalizeJournalTotals($settleJournalId);
-
-                    log_message('info', "[fixTiktokInvoice] Rebuilt SETTLEMENT journal for {$orderId}. Net: {$netSettlement}, Fee: {$totalFee}");
+                    $this->syncOrderSettlement($idToko, $updatedTrxCheck);
                 }
             }
 
