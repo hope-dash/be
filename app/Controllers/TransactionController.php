@@ -1358,12 +1358,12 @@ class TransactionController extends BaseController
     }
     public function listSalesProductWithTransactionBaru()
     {
-        $limit = (int) $this->request->getGet('limit') ?: 10;
-        $page = (int) $this->request->getGet('page') ?: 1;
+        $limit = max((int) ($this->request->getGet('limit') ?: 10), 1);
+        $page = max((int) ($this->request->getGet('page') ?: 1), 1);
         $offset = ($page - 1) * $limit;
 
         $sortBy = $this->request->getGet('sortBy') ?: 'transaction.created_at';
-        $sortMethod = $this->request->getGet('sortMethod') === 'desc' ? 'DESC' : 'ASC';
+        $sortMethod = strtolower($this->request->getGet('sortMethod') ?? '') === 'desc' ? 'DESC' : 'ASC';
         $idToko = $this->request->getGet('id_toko');
         $search = $this->request->getGet('search');
         $dateStart = $this->request->getGet('date_start');
@@ -1381,7 +1381,7 @@ class TransactionController extends BaseController
               COALESCE(s.seri, '')
           ) AS nama_lengkap_barang")
             ->join('transaction', 'sp.id_transaction = transaction.id')
-            ->join('product p', 'sp.kode_barang = p.id_barang', 'left')
+            ->join('product p', 'sp.kode_barang = p.id_barang AND p.tenant_id = transaction.tenant_id', 'left')
             ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
             ->join('seri s', 'p.id_seri_barang = s.id', 'left')
             ->where('transaction.tenant_id', \App\Libraries\TenantContext::id());
@@ -1415,17 +1415,110 @@ class TransactionController extends BaseController
                 ->groupEnd();
         }
 
-        if ($status === 'paid') {
-            $baseBuilder->whereIn('transaction.status', [
-                'SUCCESS',
-                'PAID',
-                'PACKING',
-                'IN_DELIVERY',
-                'PARTIALLY_PAID',
-                'RETUR'
-            ]);
-        } elseif ($status === 'unpaid') {
-            $baseBuilder->where('transaction.status', 'WAITING_PAYMENT');
+        if (!empty($status)) {
+            if (is_array($status)) {
+                $statuses = array_map('strtoupper', array_map('trim', $status));
+                $baseBuilder->whereIn('transaction.status', $statuses);
+            } else {
+                $statusStr = trim((string) $status);
+                $statusLower = strtolower($statusStr);
+
+                if ($statusLower === 'paid') {
+                    $baseBuilder->whereIn('transaction.status', [
+                        'SUCCESS',
+                        'PAID',
+                        'PACKING',
+                        'IN_DELIVERY',
+                        'PARTIALLY_PAID',
+                        'RETUR'
+                    ]);
+                } elseif ($statusLower === 'unpaid') {
+                    $baseBuilder->where('transaction.status', 'WAITING_PAYMENT');
+                } elseif (strpos($statusStr, ',') !== false) {
+                    $statuses = array_filter(array_map('trim', explode(',', $statusStr)));
+                    $baseBuilder->whereIn('transaction.status', array_map('strtoupper', $statuses));
+                } else {
+                    $baseBuilder->where('transaction.status', strtoupper($statusStr));
+                }
+            }
+        }
+
+        $requestedStatuses = is_array($status) ? $status : explode(',', (string) $status);
+        $requestedStatuses = array_map(static fn($value) => strtoupper(trim((string) $value)), $requestedStatuses);
+        $includeTransferHolds = in_array('WAITING_PAYMENT', $requestedStatuses, true)
+            || in_array('UNPAID', $requestedStatuses, true);
+
+        if ($includeTransferHolds) {
+            $baseBuilder->select('NULL AS transfer_id', false)
+                ->select('transaction.created_at AS report_created_at');
+
+            // Match sp.* so transfer items can share sorting and pagination with sales.
+            $salesFields = $this->db->getFieldNames('sales_product');
+            $transferValues = [
+                'id' => 'sti.id',
+                'tenant_id' => 'st.tenant_id',
+                'kode_barang' => 'sti.kode_barang',
+                'jumlah' => 'sti.qty',
+                'modal_system' => 'sti.harga_modal',
+                'created_at' => 'st.created_at',
+                'updated_at' => 'st.updated_at',
+                'harga_system' => '0',
+                'harga_jual' => '0',
+                'total' => '0',
+                'total_modal' => '0',
+                'actual_per_piece' => '0',
+                'actual_total' => '0',
+            ];
+            $transferSelect = [];
+            foreach ($salesFields as $field) {
+                $transferSelect[] = ($transferValues[$field] ?? 'NULL') . ' AS ' . $this->db->protectIdentifiers($field);
+            }
+
+            $transferBuilder = $this->db->table('stock_transfer_item sti')
+                ->select($transferSelect, false)
+                ->select("st.ref_id AS invoice, st.date AS date_time, 'Hold Transfer Stock' AS status,
+                    st.source_toko_id AS id_toko, p.nama_barang, p.id_barang, mb.nama_model, s.seri,
+                    CONCAT(COALESCE(p.nama_barang, ''), ' ', COALESCE(mb.nama_model, ''), ' ', COALESCE(s.seri, '')) AS nama_lengkap_barang,
+                    st.id AS transfer_id, st.created_at AS report_created_at", false)
+                ->join('stock_transfer st', 'st.id = sti.transfer_id')
+                ->join('product p', 'p.id_barang = sti.kode_barang AND p.tenant_id = st.tenant_id', 'left')
+                ->join('model_barang mb', 'p.id_model_barang = mb.id', 'left')
+                ->join('seri s', 'p.id_seri_barang = s.id', 'left')
+                ->where('st.tenant_id', \App\Libraries\TenantContext::id())
+                ->whereIn('st.status', ['PENDING', 'WAITING'])
+                ->where('st.deleted_at', null);
+
+            if ($idToko) {
+                $transferBuilder->where('st.source_toko_id', $idToko);
+            } elseif (!empty($role)) {
+                $transferBuilder->whereIn('st.source_toko_id', $role);
+            }
+            if ($dateStart) {
+                $transferBuilder->where('st.date >=', $dateStart);
+            }
+            if ($dateEnd) {
+                $transferBuilder->where('st.date <=', $dateEnd);
+            }
+            if ($search) {
+                $transferBuilder->groupStart()
+                    ->like('sti.kode_barang', $search)
+                    ->orLike('st.ref_id', $search)
+                    ->orLike('p.nama_barang', $search)
+                    ->orLike('mb.nama_model', $search)
+                    ->orLike('s.seri', $search)
+                    ->groupEnd();
+            }
+
+            $baseBuilder->unionAll($transferBuilder);
+            $baseBuilder = $this->db->newQuery()->fromSubquery($baseBuilder, 'report');
+            $sortParts = explode('.', $sortBy);
+            $sortField = end($sortParts);
+            if ($sortBy === 'transaction.created_at' || $sortBy === 'report_created_at') {
+                $sortField = 'report_created_at';
+            }
+            $allowedSortFields = array_merge($salesFields, ['invoice', 'date_time', 'status', 'id_toko',
+                'nama_barang', 'id_barang', 'nama_model', 'seri', 'nama_lengkap_barang', 'transfer_id', 'report_created_at']);
+            $sortBy = 'report.' . (in_array($sortField, $allowedSortFields, true) ? $sortField : 'report_created_at');
         }
 
         // Clone builder for count
@@ -1434,8 +1527,8 @@ class TransactionController extends BaseController
         $total_page = ceil($total_data / $limit);
 
         // Clone builder for sum
-        $sumBuilder = clone $baseBuilder;
-        $sumBuilder->select('SUM(sp.actual_total) as total_actual, SUM(sp.total_modal) as total_modal');
+        $sumBuilder = $this->db->newQuery()->fromSubquery(clone $baseBuilder, 'totals');
+        $sumBuilder->select('SUM(totals.actual_total) as total_actual, SUM(totals.total_modal) as total_modal');
         $sumResult = $sumBuilder->get()->getRow();
 
         $total_actual = floatval($sumResult->total_actual ?? 0);
@@ -1447,6 +1540,10 @@ class TransactionController extends BaseController
             ->limit($limit, $offset)
             ->get()
             ->getResult();
+
+        foreach ($result as $row) {
+            unset($row->report_created_at);
+        }
 
         // Return response
         return $this->jsonResponse->multiResp(

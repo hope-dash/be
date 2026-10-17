@@ -1161,13 +1161,27 @@ class ProductController extends ResourceController
                         'model_barang.nama_model',
                         'seri.seri',
                     ])
-                    ->join('stock', 'stock.id_barang = product.id_barang', 'inner')
+                    ->join('stock', 'stock.id_barang = product.id_barang AND stock.tenant_id = product.tenant_id', 'inner')
                     ->join('toko', 'toko.id = stock.id_toko', 'left')
                     ->join('model_barang', 'model_barang.id = product.id_model_barang', 'left')
                     ->join('seri', 'seri.id = product.id_seri_barang', 'left');
 
-                $builder->where('stock.id_toko', (int) $id_toko)
-                    ->where('stock.stock >', 0);
+                $builder->where('stock.id_toko', (int) $id_toko);
+                if ($stockFilter !== 'cacat') {
+                    // Gunakan stok ready yang sama dengan response, termasuk hold transfer keluar.
+                    $transferHoldQuery = $this->db->table('stock_transfer_item sti')
+                        ->selectSum('sti.qty')
+                        ->join('stock_transfer st', 'st.id = sti.transfer_id')
+                        ->where('sti.kode_barang = stock.id_barang', null, false)
+                        ->where('st.source_toko_id = stock.id_toko', null, false)
+                        ->where('st.tenant_id = stock.tenant_id', null, false)
+                        ->whereIn('st.status', ['PENDING', 'WAITING'])
+                        ->where('st.deleted_at IS NULL')
+                        ->getCompiledSelect();
+
+                    $builder->where('stock.stock >', 0)
+                        ->where("stock.stock > COALESCE(($transferHoldQuery), 0)", null, false);
+                }
             } else {
                 $builder = $this->productModel
                     ->select([
@@ -1192,7 +1206,7 @@ class ProductController extends ResourceController
 
                 // Filter by toko: only show products that have stock in this toko
                 if (!empty($id_toko)) {
-                    $builder->join('stock', 'stock.id_barang = product.id_barang AND stock.id_toko = ' . (int) $id_toko, 'inner');
+                    $builder->join('stock', 'stock.id_barang = product.id_barang AND stock.tenant_id = product.tenant_id AND stock.id_toko = ' . (int) $id_toko, 'inner');
                 }
             }
 
@@ -1219,6 +1233,21 @@ class ProductController extends ResourceController
 
             if (!empty($suplier) && is_numeric($suplier)) {
                 $builder->where('product.suplier', $suplier);
+            }
+
+            // Filter stok cacat sebelum pagination agar total dan halaman tetap akurat.
+            if ($stockFilter === 'cacat') {
+                $cacatQuery = $this->db->table('stock')
+                    ->select('id_barang')
+                    ->distinct()
+                    ->where('tenant_id', \App\Libraries\TenantContext::id())
+                    ->where('barang_cacat >', 0);
+
+                if (!empty($id_toko)) {
+                    $cacatQuery->where('id_toko', (int) $id_toko);
+                }
+
+                $builder->whereIn('product.id_barang', $cacatQuery);
             }
 
             // Hitung total
@@ -1431,7 +1460,7 @@ class ProductController extends ResourceController
                     $tokoName = $tokoMap[$tokoId] ?? 'Tidak diketahui';
                     $dropship = in_array($s['dropship'], ['1', 1, true], true);
                     $rawStock = (int) ($s['stock'] ?? 0);
-                    $cacatVal = (int) ($s['barang_cacat'] ?? 0);
+                    $cacatVal = max(0, (int) ($s['barang_cacat'] ?? 0));
                     $tTransferHold = (int) ($transferHoldMap[$kodeBarang][$tokoId] ?? 0);
                     $holdVal = (int) ($holdMap[$kodeBarang][$tokoId] ?? 0);
                     $terjualVal = (int) ($terjualMap[$kodeBarang][$tokoId] ?? 0);
@@ -1501,7 +1530,7 @@ class ProductController extends ResourceController
             }
 
             // === Filter berdasarkan stok ===
-            if (!empty($stockFilter)) {
+            if (!empty($stockFilter) && $stockFilter !== 'cacat') {
                 $formattedProducts = array_filter($formattedProducts, function ($prod) use ($stockFilter) {
                     $total = (int) $prod['total_stock_ready'];
                     switch ($stockFilter) {
