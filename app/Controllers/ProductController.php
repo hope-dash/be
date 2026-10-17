@@ -1305,6 +1305,7 @@ class ProductController extends ResourceController
             $terjualMap = [];
             $holdMap = [];
             $holdTotalMap = [];
+            $transferHoldMap = [];
             if (!empty($productCodes)) {
                 $builderSales = $this->db->table('sales_product sp')
                     ->select('
@@ -1334,6 +1335,34 @@ class ProductController extends ResourceController
                     if ($row['hold'] > 0) {
                         $holdMap[$kode][$tId] = (int) $row['hold'];
                         $holdTotalMap[$kode] = ($holdTotalMap[$kode] ?? 0) + (int) $row['hold'];
+                    }
+                }
+
+                // --- Stock Transfer Hold (Transfer status masih waiting / pending / belum di-approve atau di-reject) ---
+                $builderTransfer = $this->db->table('stock_transfer_item sti')
+                    ->select('sti.kode_barang, st.source_toko_id as id_toko, SUM(sti.qty) as transfer_hold')
+                    ->join('stock_transfer st', 'st.id = sti.transfer_id')
+                    ->whereIn('sti.kode_barang', $productCodes)
+                    ->whereIn('st.status', ['PENDING', 'WAITING'])
+                    ->where('st.deleted_at IS NULL')
+                    ->where('st.tenant_id', \App\Libraries\TenantContext::id());
+
+                if ($only_toko) {
+                    $builderTransfer->where('st.source_toko_id', $id_toko);
+                }
+
+                $transferRows = $builderTransfer->groupBy('sti.kode_barang, st.source_toko_id')
+                    ->get()->getResultArray();
+
+                foreach ($transferRows as $trRow) {
+                    $kode = $trRow['kode_barang'];
+                    $tId = $trRow['id_toko'];
+                    $tHold = (int) $trRow['transfer_hold'];
+
+                    if ($tHold > 0) {
+                        $transferHoldMap[$kode][$tId] = $tHold;
+                        $holdMap[$kode][$tId] = ($holdMap[$kode][$tId] ?? 0) + $tHold;
+                        $holdTotalMap[$kode] = ($holdTotalMap[$kode] ?? 0) + $tHold;
                     }
                 }
             }
@@ -1401,11 +1430,15 @@ class ProductController extends ResourceController
 
                     $tokoName = $tokoMap[$tokoId] ?? 'Tidak diketahui';
                     $dropship = in_array($s['dropship'], ['1', 1, true], true);
-                    $stockReady = (int) ($s['stock'] ?? 0);
+                    $rawStock = (int) ($s['stock'] ?? 0);
                     $cacatVal = (int) ($s['barang_cacat'] ?? 0);
+                    $tTransferHold = (int) ($transferHoldMap[$kodeBarang][$tokoId] ?? 0);
                     $holdVal = (int) ($holdMap[$kodeBarang][$tokoId] ?? 0);
                     $terjualVal = (int) ($terjualMap[$kodeBarang][$tokoId] ?? 0);
                     $comingSoonVal = (int) ($comingSoonTotalMap[strtoupper($kodeBarang)][$tokoId] ?? 0);
+
+                    // Stok ready berkurang jika ada transfer barang keluar yang sedang di-hold (pending/waiting)
+                    $stockReady = max(0, $rawStock - $tTransferHold);
 
                     $stockList[] = [
                         'stock_ready' => $stockReady,
@@ -1529,14 +1562,23 @@ class ProductController extends ResourceController
                 'toko.toko_name',
                 'product.harga_jual',
                 '(SELECT url FROM image WHERE image.kode = product.id AND image.type = "product" ORDER BY image.index ASC LIMIT 1) as image',
-                '(SELECT COALESCE(SUM(sp.jumlah), 0) 
+                '((SELECT COALESCE(SUM(sp.jumlah), 0) 
                   FROM sales_product sp 
                   JOIN transaction t ON t.id = sp.id_transaction 
                   WHERE sp.kode_barang = product.id_barang 
                     AND t.id_toko = stock.id_toko 
                     AND t.status = "WAITING_PAYMENT" 
                     AND t.tenant_id = product.tenant_id
-                 ) as hold_stock'
+                 ) + 
+                 (SELECT COALESCE(SUM(sti.qty), 0)
+                  FROM stock_transfer_item sti
+                  JOIN stock_transfer st ON st.id = sti.transfer_id
+                  WHERE sti.kode_barang = product.id_barang
+                    AND st.source_toko_id = stock.id_toko
+                    AND st.status IN ("PENDING", "WAITING")
+                    AND st.deleted_at IS NULL
+                    AND st.tenant_id = product.tenant_id
+                 )) as hold_stock'
             ];
 
             $builder = $this->productModel
